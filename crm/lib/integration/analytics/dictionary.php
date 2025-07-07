@@ -15,6 +15,9 @@ final class Dictionary
 	public const CATEGORY_AUTOMATION_OPERATIONS = 'automation_operations';
 	public const CATEGORY_KANBAN_OPERATIONS = 'kanban_operations';
 	public const CATEGORY_SETTINGS_OPERATIONS = 'settings_operations';
+	public const CATEGORY_ACTIVITY_OPERATIONS = 'activity_operations';
+	public const CATEGORY_COMMUNICATION = 'communication';
+	public const CATEGORY_BANNERS = 'banners';
 
 	// region Event const
 	public const EVENT_ENTITY_ADD_OPEN = 'entity_add_open';
@@ -39,6 +42,7 @@ final class Dictionary
 	public const EVENT_CALL_ACTIVITY_WITH_AUDIO_RECORDING = 'activity_call_with_audio_recording';
 	public const EVENT_CALL_SCORING = 'call_scoring';
 	public const EVENT_EXTRACT_SCORING_CRITERIA = 'extract_scoring_criteria';
+	public const EVENT_FILL_REPEAT_SALE_TIPS = 'fill_repeat_sale_tips';
 
 	public const EVENT_AUTOMATION_CREATE = 'automation_create';
 	public const EVENT_AUTOMATION_EDIT = 'automation_edit';
@@ -55,6 +59,7 @@ final class Dictionary
 	public const TYPE_MANUAL = 'manual';
 	public const TYPE_AUTO = 'auto';
 	public const TYPE_AUTOMATED_SOLUTION = 'automated_solution';
+	public const TYPE_DEAL = 'deal';
 	public const TYPE_DYNAMIC = 'dynamic';
 
 	public const TYPE_CONTACT_CENTER = 'contact_center';
@@ -81,15 +86,18 @@ final class Dictionary
 	public const SECTION_SMART_DOCUMENT_CONTACT = 'smart_document_contact_section';
 	/**
 	 * @see \Bitrix\Crm\Integration\Catalog\Contractor\CategoryRepository::CONTACT_CODE
+	 * @see \Bitrix\Crm\Integration\Catalog\Contractor\CategoryRepository::CATALOG_CONTRACTOR_CONTACT
 	 */
 	public const SECTION_CATALOG_CONTRACTOR_CONTACT = 'catalog_contractor_contact_section';
 	/**
 	 * @see \Bitrix\Crm\Integration\Catalog\Contractor\CategoryRepository::COMPANY_CODE
+	 * @see \Bitrix\Crm\Integration\Catalog\Contractor\CategoryRepository::CATALOG_CONTRACTOR_COMPANY
 	 */
 	public const SECTION_CATALOG_CONTRACTOR_COMPANY = 'catalog_contractor_company_section';
 	public const SECTION_CRM_SETTINGS = 'crm_settings';
 	public const SECTION_WEBFORM = 'webform';
 	public const SECTION_SITE_WIDGET = 'site_widget_section';
+	public const SECTION_REPEAT_SALE = 'rs';
 	// endregion
 
 	// region Sub Section const
@@ -107,6 +115,7 @@ final class Dictionary
 	public const SUB_SECTION_LEAD = 'lead';
 
 	public const SUB_SECTION_GRID_ROW_MENU = 'grid_row_menu';
+	public const SUB_SECTION_REPEAT_SALE_SYSTEM = 'repeat_sale_sys';
 	// endregion
 
 	// region Element const

@@ -9,6 +9,7 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\ParentFieldManager;
 use Bitrix\Crm\UI\EntitySelector;
 use Bitrix\Main;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 
@@ -412,6 +413,25 @@ class LeadDataProvider extends EntityDataProvider implements FactoryOptionable
 					'partial' => true
 				]
 			),
+			'MOVED_BY_ID' => $this->createField(
+				'MOVED_BY_ID',
+				[
+					'type' => 'entity_selector',
+					'partial' => true,
+				]
+			),
+			'MOVED_TIME' => $this->createField(
+				'MOVED_TIME',
+				[
+					'type' => 'date',
+					'data' => [
+						'additionalFilter' => [
+							'isEmpty',
+							'hasAnyValue',
+						],
+					],
+				]
+			),
 		];
 
 		if ($this->isActivityResponsibleEnabled())
@@ -504,6 +524,8 @@ class LeadDataProvider extends EntityDataProvider implements FactoryOptionable
 			);
 		}
 
+		(new Crm\Filter\Field\LastCommunicationField())->addLastCommunicationField($this, $result);
+
 		return $result;
 	}
 
@@ -543,7 +565,7 @@ class LeadDataProvider extends EntityDataProvider implements FactoryOptionable
 				'items' => \CCrmCurrencyHelper::PrepareListItems()
 			);
 		}
-		elseif(in_array($fieldID, ['ASSIGNED_BY_ID', 'CREATED_BY_ID', 'MODIFY_BY_ID', 'ACTIVITY_RESPONSIBLE_IDS', 'OBSERVER_IDS'], true))
+		elseif(in_array($fieldID, ['ASSIGNED_BY_ID', 'CREATED_BY_ID', 'MODIFY_BY_ID', 'ACTIVITY_RESPONSIBLE_IDS', 'OBSERVER_IDS',  'MOVED_BY_ID'], true))
 		{
 			$factory = \Bitrix\Crm\Service\Container::getInstance()->getFactory(\CCrmOwnerType::Lead);
 			$referenceClass = ($factory ? $factory->getDataClass() : null);

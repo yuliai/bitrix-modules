@@ -1,9 +1,13 @@
 <?php
 
-use Bitrix\Main\Analytics\AnalyticsEvent;
+use Bitrix\Intranet\Enum\InvitationMessageType;
+use Bitrix\Intranet\Integration\Socialnetwork\Collab\CollabProviderData;
+use Bitrix\Intranet\Internal\Factory\Message\CollabJoinMessageFactory;
+use Bitrix\Intranet\Repository\UserRepository;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Event;
 use Bitrix\Intranet\Internals\InvitationTable;
+use Bitrix\Main\UserTable;
 
 IncludeModuleLangFile(__FILE__);
 
@@ -21,7 +25,7 @@ class CIntranetEventHandlers
 			return;
 		}
 
-		if (!self::$fieldsCache[$arFields['IBLOCK_ID']])
+		if (!isset(self::$fieldsCache[$arFields['IBLOCK_ID']]))
 		{
 			$dbRes = CIntranetSharepoint::GetByID($arFields['IBLOCK_ID']);
 			if ($arRes = $dbRes->Fetch())
@@ -30,7 +34,7 @@ class CIntranetEventHandlers
 			}
 		}
 
-		if (self::$fieldsCache[$arFields['IBLOCK_ID']])
+		if (isset(self::$fieldsCache[$arFields['IBLOCK_ID']]))
 		{
 			CIntranetSharepoint::AddToUpdateLog(self::$fieldsCache[$arFields['IBLOCK_ID']]);
 		}
@@ -1026,12 +1030,32 @@ class CIntranetEventHandlers
 			InvitationTable::update($invitationFields['ID'], [
 				'INITIALIZED' => 'Y'
 			]);
+
+			$user = (new UserRepository())->getUserById($userId);
+			if ($user->isCollaber())
+			{
+				static::sendCollabMail($user);
+			}
 		}
 
 		(new \Bitrix\Main\Event('intranet', 'onUserFirstInitialization', [
 			'invitationFields' => $invitationFields,
 			'userId' => $userId
 		]))->send();
+	}
+
+	private static function sendCollabMail(Bitrix\Intranet\Entity\User $user): void
+	{
+		$userCollab = (new CollabProviderData())->getUserCollabCollection($user);
+		foreach ($userCollab as $collab)
+		{
+			(new CollabJoinMessageFactory(
+				$user,
+				$collab
+			))
+				->createEmailEvent()
+				->sendImmediately();
+		}
 	}
 
 	public static function OnAfterUserAdd($arUser)
@@ -1889,6 +1913,10 @@ RegisterModuleDependences('main', 'OnBeforeProlog', 'intranet', 'CIntranetEventH
 			\Bitrix\Intranet\Service\ServiceContainer::getInstance()
 				->getUserService()
 				->logAuthTimeForNonMobile($userId)
+			;
+			\Bitrix\Intranet\Service\ServiceContainer::getInstance()
+				->getUserService()
+				->logFirstTimeAuthForMobile($userId)
 			;
 		}
 	}

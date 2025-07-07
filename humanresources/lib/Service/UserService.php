@@ -2,24 +2,27 @@
 
 namespace Bitrix\HumanResources\Service;
 
+use Bitrix\HumanResources\Config\Storage;
+use Bitrix\HumanResources\Contract;
 use Bitrix\HumanResources\Exception\WrongStructureItemException;
-use Bitrix\HumanResources\Item\Collection\UserCollection;
 use Bitrix\HumanResources\Item\Collection\NodeMemberCollection;
+use Bitrix\HumanResources\Item\Collection\UserCollection;
 use Bitrix\HumanResources\Item\Node;
 use Bitrix\HumanResources\Item\User;
-use Bitrix\HumanResources\Contract;
+use Bitrix\HumanResources\Repository;
 use Bitrix\HumanResources\Type\MemberEntityType;
 use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\Loader;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use CSite;
 use CUser;
 
-final class UserService implements Contract\Service\UserService
+final class UserService
 {
-	private Contract\Repository\UserRepository $userRepository;
+	private Repository\UserRepository $userRepository;
 	private Contract\Repository\NodeMemberRepository $nodeMemberRepository;
 	private Contract\Util\CacheManager $cacheManager;
 
@@ -63,7 +66,7 @@ final class UserService implements Contract\Service\UserService
 		);
 	}
 
-	public function getUserAvatar(User $user, int $size = 25): ?string
+	public function getUserAvatar(User $user, int $size = 25): string
 	{
 		$fileTmp = \CFile::ResizeImageGet(
 			$user->personalPhotoId,
@@ -91,7 +94,7 @@ final class UserService implements Contract\Service\UserService
 				$suffix = "unknown";
 		}
 
-		return Option::get('socialnetwork', 'default_user_picture_' . $suffix, false, SITE_ID);
+		return Option::get('socialnetwork', 'default_user_picture_' . $suffix, '', SITE_ID);
 	}
 
 	public function getUserUrl(User $user): string
@@ -114,6 +117,12 @@ final class UserService implements Contract\Service\UserService
 	 */
 	public function isEmployee(int $userId): bool
 	{
+		if (!Storage::instance()->isCompanyStructureConverted()
+			&& Loader::includeModule('intranet'))
+		{
+			return \Bitrix\Intranet\Util::isIntranetUser($userId);
+		}
+
 		$cacheKey = sprintf(self::USER_DEPARTMENT_EXISTS_KEY, $userId);
 
 		$cacheValue = $this->cacheManager->getData($cacheKey);
@@ -161,12 +170,14 @@ final class UserService implements Contract\Service\UserService
 	 * Returns an array of basic user information
 	 * @param User $user
 	 *
-	 * @return array {
+	 * @return array{
 	 *     id: int,
 	 *     name: string,
-	 *     avatar: ?string,
+	 *     avatar: string,
 	 *     url: string,
 	 *     workPosition: ?string,
+	 *     gender: ?string,
+	 *     isInvited: bool,
 	 * }
 	 */
 	public function getBaseInformation(User $user): array

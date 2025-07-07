@@ -68,6 +68,7 @@ final class ScopeService
 					['data_type' => 'integer']
 				),
 			],
+			'cache' => ['ttl' => 3600],
 		])->fetchCollection();
 
 		foreach ($scopeCollection as $scope)
@@ -235,7 +236,7 @@ final class ScopeService
 					$smartProcess = $container->getType($typeId);
 					if ($smartProcess)
 					{
-						if (!$checkPermissions || $userPermissions->canReadType($smartProcess->getEntityTypeId()))
+						if (!$checkPermissions || $userPermissions->entityType()->canReadItems($smartProcess->getEntityTypeId()))
 						{
 							$code = self::BIC_SCOPE_AUTOMATED_SOLUTION_PREFIX . $automatedSolution['ID'];
 							$result[] = $code;
@@ -330,5 +331,16 @@ final class ScopeService
 				$scope->delete();
 			}
 		}
+	}
+
+	public static function getSystemGroupCode(): array
+	{
+		return [
+			self::BIC_SCOPE_CRM,
+			self::BIC_SCOPE_SHOP,
+			self::BIC_SCOPE_BIZPROC,
+			self::BIC_SCOPE_TASKS,
+			self::BIC_SCOPE_PROFILE,
+		];
 	}
 }

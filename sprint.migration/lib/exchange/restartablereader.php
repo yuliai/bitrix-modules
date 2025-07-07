@@ -11,18 +11,17 @@ use Sprint\Migration\Out;
 
 class RestartableReader
 {
-    private int $limit = 10;
-    private string $file = '';
-    private array $attributes = [];
-    private int $totalCount = 0;
+    private int     $limit      = 10;
+    private string  $file       = '';
+    private array   $attributes = [];
+    private int     $totalCount = 0;
     private ?Reader $reader;
 
     public function __construct(
-        private readonly RestartableInterface  $restartable,
+        private readonly RestartableInterface $restartable,
         private readonly ReaderHelperInterface $helper,
-        private readonly string                $directory,
-    )
-    {
+        private readonly string $directory,
+    ) {
     }
 
     public function setExchangeResource(string $exchangeResource): RestartableReader
@@ -50,14 +49,25 @@ class RestartableReader
     {
         $this->reader = new Reader($this->file);
 
+        $progressFn = fn($value, $totalCount) => Out::outProgress('Progress: ', $value, $totalCount);
+
         $this->attributes = $this->restartable->restartOnce('step1', fn() => $this->reader->getAttributes());
 
-        $this->totalCount = $this->restartable->restartOnce('step2', fn() => $this->reader->getRecordsCount());
+        $this->totalCount = $this->restartable->restartOnce('step2', fn() => $this->start($progressFn));
 
-        $this->restartable->restartWhile('step3', fn(int $offset) => $this->read($offset, $userFn));
+        $this->restartable->restartWhile('step3', fn(int $offset) => $this->read($offset, $userFn, $progressFn));
     }
 
-    private function read(int $offset, Closure $userfunc): int
+    private function start(Closure $progressFn): int
+    {
+        $totalCount = $this->reader->getRecordsCount();
+
+        $progressFn(0, $totalCount);
+
+        return $totalCount;
+    }
+
+    private function read(int $offset, Closure $userfunc, Closure $progressFn): int
     {
         $records = $this->helper->convertReaderRecords(
             $this->attributes,
@@ -70,10 +80,8 @@ class RestartableReader
 
         $offset += $readCount;
 
-        Out::outProgress('Progress: ', $offset, $this->totalCount);
+        $progressFn($offset, $this->totalCount);
 
         return ($readCount >= $this->limit) ? $offset : 0;
     }
-
-
 }

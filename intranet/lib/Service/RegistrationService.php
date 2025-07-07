@@ -34,7 +34,7 @@ class RegistrationService
 			'LAST_NAME' => $user->getLastName() ?? null,
 			'GROUP_ID' => $user->getGroupIds(),
 			'LID' => $siteIdByDepartmentId,
-			'UF_DEPARTMENT' => empty($user->getDepartmetnsIds()) ? [] : $user->getDepartmetnsIds(),
+			'UF_DEPARTMENT' => $user->getDepartmetnsIds(),
 			'LANGUAGE_ID' => ($site = \CSite::GetArrayByID($siteIdByDepartmentId)) ? $site['LANGUAGE_ID'] : LANGUAGE_ID,
 		];
 

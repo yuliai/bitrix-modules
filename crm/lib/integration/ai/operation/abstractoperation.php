@@ -4,8 +4,10 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 
 use Bitrix\AI\Context;
 use Bitrix\AI\Engine;
+use Bitrix\AI\Payload\IPayload;
 use Bitrix\AI\Tuning\Manager;
 use Bitrix\Crm\Badge;
+use Bitrix\Crm\Copilot\Restriction\ExecutionDataManager;
 use Bitrix\Crm\Dto\Dto;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Config;
@@ -13,6 +15,7 @@ use Bitrix\Crm\Integration\AI\ErrorCode;
 use Bitrix\Crm\Integration\AI\EventHandler;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
+use Bitrix\Crm\Integration\AI\Operation\Payload\StubFactory;
 use Bitrix\Crm\Integration\AI\Result;
 use Bitrix\Crm\Integration\Analytics\Builder\AI\AIBaseEvent;
 use Bitrix\Crm\Integration\Analytics\Builder\AI\CallParsingEvent;
@@ -112,6 +115,11 @@ abstract class AbstractOperation
 			->setLimit(1)
 			->fetchObject()
 		;
+	}
+
+	protected static function isSponsoredOperation(): bool
+	{
+		return false;
 	}
 
 	public function setIsManualLaunch(bool $isManualLaunch): self
@@ -259,6 +267,7 @@ abstract class AbstractOperation
 
 		$previousJob = $checkJobsResult->getData()['previousJob'] ?? null;
 
+		$isSponsored = false;
 		$aiPayloadResult = $this->getAIPayload();
 		if (!$aiPayloadResult->isSuccess())
 		{
@@ -299,8 +308,30 @@ abstract class AbstractOperation
 		}
 		else
 		{
+			/** @var IPayload $payload */
+			$aiPayload = $aiPayloadResult->getData()['payload'];
+			$isSponsored = $aiPayload instanceof IPayload
+				&& method_exists($aiPayload, 'setCost')
+				&& Loader::includeModule('bitrix24')
+				&& static::isSponsoredOperation()
+			;
+
+			if ($isSponsored)
+			{
+				AIManager::logger()->debug(
+					'{date}: {class}: Set the cost of the operation to zero for target {target} in operation {operationType}' . PHP_EOL,
+					[
+						'class' => static::class,
+						'target' => $this->target,
+						'operationType' => static::TYPE_ID,
+					],
+				);
+
+				$aiPayload->setCost(0);
+			}
+
 			$engine
-				->setPayload($aiPayloadResult->getData()['payload'])
+				->setPayload($aiPayload)
 				->setHistoryState(false)
 				->onSuccess(static function (\Bitrix\AI\Result $result, ?string $queueHash = null) use (&$hash) {
 					$hash = $queueHash;
@@ -309,6 +340,8 @@ abstract class AbstractOperation
 					$error = $processingError;
 				})
 			;
+
+			static::setQuality($engine);
 
 			if (static::ENGINE_CATEGORY === 'audio')
 			{
@@ -457,6 +490,11 @@ abstract class AbstractOperation
 			);
 
 			static::notifyTimelineAfterSuccessfulLaunch($result);
+
+			if ($isSponsored)
+			{
+				ExecutionDataManager::getInstance()->incrementExecutionCount();
+			}
 		}
 
 		AIManager::logger()->debug(
@@ -478,8 +516,6 @@ abstract class AbstractOperation
 	}
 
 	abstract protected function getAIPayload(): \Bitrix\Main\Result;
-
-	abstract protected function getStubPayload(): mixed;
 
 	abstract protected static function notifyTimelineAfterSuccessfulLaunch(Result $result): void;
 
@@ -561,7 +597,12 @@ abstract class AbstractOperation
 
 		return $engine;
 	}
-
+	
+	protected function getStubPayload(): mixed
+	{
+		return StubFactory::build(static::TYPE_ID, $this->target)->makeStub();
+	}
+	
 	private function isAiMarketplaceAppsExist(): bool
 	{
 		if (!Loader::includeModule('rest'))
@@ -860,6 +901,24 @@ abstract class AbstractOperation
 		}
 	}
 
+	final protected static function cleanBadgeByType(int $activityId, string $badgeType): void
+	{
+		$itemIdentifier = (new Orchestrator())->findPossibleFillFieldsTarget($activityId);
+		if (!$itemIdentifier)
+		{
+			return;
+		}
+
+		$supportedTypes = [
+			Badge\Badge::AI_CALL_FIELDS_FILLING_RESULT,
+		];
+		if (in_array($badgeType, $supportedTypes, true))
+		{
+			Badge\Badge::deleteByEntity($itemIdentifier, $badgeType);
+			Monitor::getInstance()->onBadgesSync($itemIdentifier);
+		}
+	}
+
 	public static function onQueueJobFail(Event $event, EO_Queue $job): Result
 	{
 		AIManager::logger()->debug(
@@ -1145,6 +1204,10 @@ abstract class AbstractOperation
 			->setActivityOwnerTypeId($owner->getEntityTypeId())
 			->setActivityId($activityId)
 		;
+	}
+
+	protected static function setQuality(Engine $engine): void
+	{
 	}
 
 	abstract protected static function getJobFinishEventBuilder(): AIBaseEvent;

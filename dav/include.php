@@ -1,7 +1,7 @@
 <?php
 
-define("GW_DEBUG", false); // Debug
-define("DAV_EXCH_DEBUG", false); // Log
+define("GW_DEBUG", true); // Debug
+define("DAV_EXCH_DEBUG", true); // Log
 
 $arClasses = array(
 	"CDavRequest" => "classes/general/request.php",
