@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Intranet\User\Access\Rule;
 
-use Bitrix\Intranet\Enum\InvitationStatus;
 use Bitrix\Intranet\Integration\HumanResources\Permissions as HRPermissions;
 use Bitrix\Intranet\User\Access\Model\TargetUserModel;
 use Bitrix\Intranet\User\Access\Model\UserModel;
@@ -36,11 +35,6 @@ class FireRule extends AbstractRule
 			}
 
 			if (!$this->checkSelfAction($item))
-			{
-				return false;
-			}
-
-			if ($item->getInviteStatus() !== InvitationStatus::ACTIVE)
 			{
 				return false;
 			}

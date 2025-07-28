@@ -126,7 +126,12 @@ class UStat
 		if (empty($userId))
 		{
 			// try to get current user id
-			if (isset($GLOBALS['USER']) && is_object($GLOBALS['USER']) && $GLOBALS['USER'] instanceof \CUser)
+			if (
+				isset($GLOBALS['USER'])
+				&& is_object($GLOBALS['USER'])
+				&& $GLOBALS['USER'] instanceof \CUser
+				&& $GLOBALS['USER']->getId() > 0
+			)
 			{
 				/** @var \CUser[] $GLOBALS */
 				$userId = (int) $GLOBALS['USER']->getId();

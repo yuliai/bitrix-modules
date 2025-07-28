@@ -19,14 +19,14 @@ enum UserActionDictionary: string
 	case CONFIRM = 'confirm';
 	case DECLINE = 'decline';
 
-	public static function values(): array
+	public static function values(?array $actions = null): array
 	{
-		return array_map(fn ($v): string => $v->value, self::cases());
+		return array_map(fn ($v): string => $v->value, $actions ?? self::cases());
 	}
 
-	public static function valuesForBatchCheck(): array
+	public static function valuesForBatchCheck(?array $actions = null): array
 	{
-		return array_fill_keys(self::values(), null);
+		return array_fill_keys(self::values($actions), null);
 	}
 
 	public static function has(string $value): bool
