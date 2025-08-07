@@ -20,11 +20,6 @@ class DeleteRule extends AbstractRule
 	/* @var UserModel $user */
 	protected $user;
 
-	/**
-	 * @param TargetUserModel|null $item
-	 * @param $params
-	 * @return bool
-	 */
 	public function execute(AccessibleItem $item = null, $params = null): bool
 	{
 		if (isset($item))
@@ -34,7 +29,7 @@ class DeleteRule extends AbstractRule
 				return false;
 			}
 
-			if (!$this->checkSelfAction($item))
+			if ($this->isSelfAction($item))
 			{
 				return false;
 			}

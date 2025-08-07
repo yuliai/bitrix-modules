@@ -16,6 +16,7 @@ class ActionRuleFactory
 			UserActionDictionary::FIRE => new FireActionRule(),
 			UserActionDictionary::RESTORE => new RestoreActionRule(),
 			UserActionDictionary::CONFIRM, UserActionDictionary::DECLINE => new ConfirmActionRule(),
+			default => new DefaultRule(),
 		};
 	}
 }

@@ -122,10 +122,11 @@ class Call extends JwtController
 	 */
 	public function startCallAction(DTO\CallRequest $callRequest): array|null
 	{
+		Loader::includeModule('im');
+
 		try
 		{
 			$tokenVersion = JwtCall::getTokenVersion($callRequest->chatId);
-
 			if ($tokenVersion > $callRequest->tokenVersion)
 			{
 				$this->addError(new Error('Call token version deprecated',  'call_token_version_deprecated'));
@@ -137,17 +138,36 @@ class Call extends JwtController
 				];
 			}
 
-			Loader::includeModule('im');
-
 			$userId = $callRequest->initiatorUserId;
+			$roomId = $callRequest->roomId ?: $callRequest->callUuid;
+			$entityId = \Bitrix\Im\Dialog::getDialogId($callRequest->chatId, $userId);
+
+			$prevCall = CallFactory::searchActiveCall(
+				type: $callRequest->callType,
+				provider: $callRequest->provider,
+				entityType: EntityType::CHAT,
+				entityId: $entityId,
+			);
+			if ($prevCall instanceof \Bitrix\Im\Call\Call)
+			{
+				if ($prevCall->isAiAnalyzeEnabled())
+				{
+					$prevCall
+						->disableAudioRecord()
+						->disableAiAnalyze()
+						->save()
+					;
+				}
+				$prevCall->finish();
+			}
 
 			$call = CallFactory::createWithEntity(
 				type: $callRequest->callType,
 				provider: $callRequest->provider,
 				entityType: EntityType::CHAT,
-				entityId: \Bitrix\Im\Dialog::getDialogId($callRequest->chatId, $userId),
+				entityId: $entityId,
 				initiatorId: $userId,
-				callUuid: $callRequest->roomId ?: $callRequest->callUuid,
+				callUuid: $roomId,
 				scheme: \Bitrix\Im\Call\Call::SCHEME_JWT,
 			);
 
@@ -276,7 +296,7 @@ class Call extends JwtController
 		}
 
 		$call->save();
-		$call->finishCall();
+		$call->finish();
 
 		if ($callRequest->requestId)
 		{

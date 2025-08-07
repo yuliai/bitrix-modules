@@ -36,7 +36,7 @@ class UserMapper
 			personalMobile: $userData['PERSONAL_MOBILE'] ?? null,
 			password: $userData['PASSWORD'] ?? null,
 			ufCrmEntity: $userData['UF_USER_CRM_ENTITY'] ?? null,
-			lastLogin: $this->parseDateValue($userData['LAST_LOGIN']),
+			lastLogin: $this->parseDateValue($userData['LAST_LOGIN'] ?? null),
 		);
 	}
 

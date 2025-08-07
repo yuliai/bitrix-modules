@@ -33,7 +33,7 @@ class ConfirmRule extends AbstractRule
 				return false;
 			}
 
-			if (!$this->checkSelfAction($item))
+			if ($this->isSelfAction($item))
 			{
 				return false;
 			}

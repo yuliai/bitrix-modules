@@ -84,6 +84,8 @@ class Signaling extends \Bitrix\Im\Call\Signaling
 
 	protected function getCallInvitePush(int $senderId, int $toUserId, $isLegacyMobile, $video): array
 	{
+		Loc::loadMessages($_SERVER["DOCUMENT_ROOT"].'/bitrix/modules/im/classes/general/im_call.php');
+
 		$associatedEntity = $this->call->getAssociatedEntity();
 		$name = $associatedEntity ? $associatedEntity->getName($toUserId) : Loc::getMessage('IM_CALL_INVITE_NA');
 

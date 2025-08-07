@@ -18,6 +18,8 @@ enum UserActionDictionary: string
 	case RESTORE = 'restore';
 	case CONFIRM = 'confirm';
 	case DECLINE = 'decline';
+	case VIEW = 'view';
+	case UPDATE = 'update';
 
 	public static function values(?array $actions = null): array
 	{
