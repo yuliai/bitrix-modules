@@ -57,6 +57,19 @@ class ControllerClient extends BaseSender
 		return $endpoint;
 	}
 
+	/**
+	 * @return string
+	 */
+	protected function getClientServerName(): string
+	{
+		$publicUrl = Library::getPortalPublicUrl();
+		if (!empty($publicUrl))
+		{
+			return $publicUrl;
+		}
+
+		return parent::getClientServerName();
+	}
 
 	/**
 	 * Returns API endpoint for the service.
@@ -169,7 +182,6 @@ class ControllerClient extends BaseSender
 			'streamTimeout' => 10,
 		];
 
-		$action = 'callcontroller.InternalApi.startTrack';
 		if ($call instanceof ConferenceCall)
 		{
 			$data['callType'] = 'conference';
@@ -179,7 +191,7 @@ class ControllerClient extends BaseSender
 			$data['callType'] = 'plain';
 		}
 
-		return $this->performRequest($action, $data);
+		return $this->performRequest('callcontroller.InternalApi.startTrack', $data);
 	}
 
 	/**
@@ -199,7 +211,6 @@ class ControllerClient extends BaseSender
 			'streamTimeout' => 10,
 		];
 
-		$action = 'callcontroller.InternalApi.stopTrack';
 		if ($call instanceof ConferenceCall)
 		{
 			$data['callType'] = 'conference';
@@ -209,7 +220,7 @@ class ControllerClient extends BaseSender
 			$data['callType'] = 'plain';
 		}
 
-		return $this->performRequest($action, $data);
+		return $this->performRequest('callcontroller.InternalApi.stopTrack', $data);
 	}
 
 	/**
@@ -229,7 +240,6 @@ class ControllerClient extends BaseSender
 			'streamTimeout' => 10,
 		];
 
-		$action = 'callcontroller.InternalApi.destroyTrack';
 		if ($call instanceof ConferenceCall)
 		{
 			$data['callType'] = 'conference';
@@ -239,7 +249,7 @@ class ControllerClient extends BaseSender
 			$data['callType'] = 'plain';
 		}
 
-		return $this->performRequest($action, $data);
+		return $this->performRequest('callcontroller.InternalApi.destroyTrack', $data);
 	}
 
 	/**
@@ -279,9 +289,52 @@ class ControllerClient extends BaseSender
 			'streamTimeout' => 5,
 		];
 
-		$action = 'callcontroller.Settings.registerKey';
+		return $this->performRequest('callcontroller.Settings.registerKey', $data);
+	}
 
-		return $this->performRequest($action, $data);
+	/**
+	 * @see \Bitrix\CallController\Controller\Settings::getRegistrationDataAction
+	 * @return Result
+	 */
+	public function getRegistrationData(): Result
+	{
+		$this->httpClientParameters = [
+			'waitResponse' => true,
+			'socketTimeout' => 5,
+			'streamTimeout' => 5,
+		];
+
+		return $this->performRequest('callcontroller.Settings.getRegistrationData', []);
+	}
+
+	/**
+	 * @see \Bitrix\CallController\Controller\Settings::unregisterKeyAction
+	 * @return Result
+	 */
+	public function unregisterCallKey(): Result
+	{
+		$this->httpClientParameters = [
+			'waitResponse' => false,
+			'socketTimeout' => 5,
+			'streamTimeout' => 5,
+		];
+
+		return $this->performRequest('callcontroller.Settings.unregisterKey');
+	}
+
+	/**
+	 * @see \Bitrix\CallController\Controller\Settings::checkPublicUrlAction
+	 * @return Result
+	 */
+	public function checkPublicUrl(string $publicUrl): Result
+	{
+		$this->httpClientParameters = [
+			'waitResponse' => true,
+			'socketTimeout' => 10,
+			'streamTimeout' => 10,
+		];
+
+		return $this->performRequest('callcontroller.Settings.checkPublicUrl', ['publicUrl' => $publicUrl]);
 	}
 
 	public function getHttpClientParameters(): array

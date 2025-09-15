@@ -3,12 +3,8 @@
 namespace Bitrix\Call;
 
 use Bitrix\Main\Loader;
-use Bitrix\Main\Config\Configuration;
 use Bitrix\Main\Config\Option;
 use Bitrix\Im;
-use Bitrix\Main\Security\Cipher;
-use Bitrix\Main\Security\Random;
-use Bitrix\Main\Security\SecurityException;
 
 class Settings
 {
@@ -90,60 +86,34 @@ class Settings
 	}
 
 	/**
-	 * Generates a secret key for call JWT
+	 * @deprecated
 	 */
 	public static function registerPortalKey(): bool
 	{
-		$privateKey = base64_encode(Random::getBytes(32));
-		$cryptoOptions = Configuration::getValue('crypto');
-
-		if (!empty($cryptoOptions['crypto_key']))
-		{
-			try
-			{
-				$cipher = new Cipher();
-				$encryptedKey = base64_encode($cipher->encrypt($privateKey, $cryptoOptions['crypto_key']));
-
-				Option::set('call', 'call_portal_key', $encryptedKey);
-
-				$result = (new ControllerClient())->registerCallKey($privateKey)->getData();
-				Option::set('call', 'call_portal_id', $result['PORTAL_ID']);
-
-				Signaling::sendClearCallTokens();
-
-				return true;
-			}
-			catch (SecurityException $exception)
-			{
-				return false;
-			}
-		}
-
-		return false;
+		return JwtCall::registerPortal()->isSuccess();
 	}
 
+	/**
+	 * @deprecated
+	 */
 	public static function registerPortalKeyAgent(int $retryCount = 1): string
 	{
-		$portalId = (int)Option::get('call', 'call_portal_id', 0);
-		if (!empty($portalId))
-		{
-			return '';
-		}
-
-		$result = self::registerPortalKey();
-		if ($result)
-		{
-			return '';
-		}
-
-		$retryCount ++;
-
-		return __METHOD__ . "({$retryCount});";
+		return JwtCall::registerPortalAgent();
 	}
 
 	public static function isNewCallsEnabled(): bool
 	{
-		return (bool)Option::get('call', 'call_v2_enabled', false);
+		$defaultValue = \Bitrix\Main\ModuleManager::isModuleInstalled('bitrix24');
+
+		return
+			(bool)Option::get('call', 'call_v2_enabled', $defaultValue)
+			&& (self::getPortalId() > 0)
+		;
+	}
+
+	public static function getPortalId(): int
+	{
+		return (int)Option::get('call', 'call_portal_id', 0);
 	}
 
 	public static function isPlainCallsUseNewScheme(): bool
@@ -151,52 +121,17 @@ class Settings
 		return (bool)Option::get('call', 'plain_calls_use_new_scheme', false);
 	}
 
-	public static function updateCallV2Availability(
-		bool $isJwtEnabled,
-		bool $isPlainUseJwt,
-		string $callBalancerUrl = '',
-		string $callServerUrl = ''
-	): void
-	{
-		if (!Loader::includeModule('im'))
-		{
-			return;
-		}
-
-		Option::set('call', 'call_v2_enabled', $isJwtEnabled);
-		Option::set('call', 'plain_calls_use_new_scheme', $isPlainUseJwt);
-
-		if ($callBalancerUrl)
-		{
-			Option::set('call', 'call_balancer_url', $callBalancerUrl);
-		}
-
-		if ($callServerUrl)
-		{
-			Option::set('im', 'call_server_url', $callServerUrl);
-		}
-
-		Signaling::sendChangedCallV2Enable($isJwtEnabled, $isPlainUseJwt, $callBalancerUrl);
-	}
-
 	/**
-	 * User control feature is enabled.
-	 * @return bool
+	 * @deprecated
 	 */
-	public static function isUserControlFeatureEnabled(): bool
+	public static function updateCallV2Availability(bool $isJwtEnabled, bool $isPlainUseJwt, string $callBalancerUrl = '', string $callServerUrl = ''): void
 	{
-		if (Option::get('call', 'call_user_control_enabled', false))
-		{
-			return true;
-		}
-
-		return (bool)\CUserOptions::GetOption('call', 'call_user_control_enabled', false);
+		JwtCall::updateCallV2Availability($isJwtEnabled, $isPlainUseJwt, $callBalancerUrl, $callServerUrl);
 	}
-	
+
 	/**
 	 * Disable camera of new joined users feature is enabled.
 	 * @return bool
-	 * task-596223
 	 */
 	public static function isDisableCameraNewJoinedUsersFeatureEnabled(): bool
 	{
@@ -210,7 +145,6 @@ class Settings
 	/**
 	 * Enable/disable logs to Kibana.
 	 * @return bool
-	 * task-605234
 	 */
 	public static function isKibanaLogsEnabled(): bool
 	{
@@ -224,26 +158,11 @@ class Settings
 	
 	/**
 	 * Disable camera of new joined users feature is enabled.
-	 * @return bool
-	 * task-596223
+	 * @return int
 	 */
 	public static function countDisableCameraNewJoinedUsersFeature(): int
 	{
 		return Option::get('call', 'call_disable_camera_new_joined_users_count', 4);
-	}
-
-	/**
-	 * Picture in picture feature is enabled.
-	 * @return bool
-	 */
-	public static function isPictureInPictureFeatureEnabled(): bool
-	{
-		if (Option::get('call', 'call_picture_in_picture_enabled', false))
-		{
-			return true;
-		}
-
-		return (bool)\CUserOptions::GetOption('call', 'call_picture_in_picture_enabled', false);
 	}
 
 	/**
@@ -272,19 +191,5 @@ class Settings
 		}
 
 		return (bool)\CUserOptions::GetOption('call', 'call_new_mobile_grid', false);
-	}
-
-	/**
-	 * New copilot follow up is enabled.
-	 * @return bool
-	 */
-	public static function isNewFollowUpSliderEnabled(): bool
-	{
-		if (Option::get('call', 'call_new_followup_slider', false))
-		{
-			return true;
-		}
-
-		return (bool)\CUserOptions::GetOption('call', 'call_new_followup_slider', false);
 	}
 }

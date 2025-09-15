@@ -158,10 +158,19 @@ class Signaling extends \Bitrix\Im\Call\Signaling
 		}
 	}
 
-	public static function sendChangedCallV2Enable(bool $isJwtEnabled, bool $isPlainUseJwt, string $callBalancerUrl): void
+	public static function sendChangedCallV2Enable(bool $isJwtEnabled, ?bool $isPlainUseJwt = null, ?string $callBalancerUrl = null): void
 	{
 		if (Loader::includeModule('pull'))
 		{
+			if ($isPlainUseJwt === null)
+			{
+				$isPlainUseJwt = Settings::isPlainCallsUseNewScheme();
+			}
+			if ($callBalancerUrl === null)
+			{
+				$callBalancerUrl = Settings::getBalancerUrl();
+			}
+
 			\CPullStack::AddShared([
 				'module_id' => 'call',
 				'command' => 'Call::callV2AvailabilityChanged',

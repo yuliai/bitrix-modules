@@ -14,6 +14,9 @@ final class Dictionary
 	public const MODULE_NOT_INSTALLED = 153;
 	public const RIGHT_CHECK_FAILED = 154;
 	public const LIMIT_EXCEEDED = 155;
+	public const BACK_URL_HOST_MISMATCH = 156;
+	public const DOMAIN_IS_PRIVATE = 157;
+	public const URL_INVALID = 158;
 	public const WRONG_STATUS_AFTER_DOWNLOAD = 200;
 	public const CANT_DOWNLOAD_FILE = 201;
 	public const FILE_IS_TOO_BIG_AFTER_DOWNLOAD = 202;

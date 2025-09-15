@@ -86,7 +86,7 @@ class BalancerClient
 		$uri = new Uri($this->getServiceUrl() . '/v2/update-token-version');
 
 		$data = [
-			'portalId' => (int)Option::get("call", "call_portal_id", 0),
+			'portalId' => Settings::getPortalId(),
 			'minTokenVersion' => $tokenVersion,
 			'chatId' => $chatId
 		];

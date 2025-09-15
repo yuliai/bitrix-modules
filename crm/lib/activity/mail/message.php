@@ -221,7 +221,6 @@ class Message
 			global $USER;
 			$userId = $USER->getId();
 
-
 			$signatureList = UserSignatureTable::getList([
 				'select' => ["SIGNATURE"],
 				'order' => ['ID' => 'desc'],

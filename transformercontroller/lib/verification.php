@@ -38,11 +38,17 @@ class Verification
 		return !$this->isCheckByLicenseCode();
 	}
 
+	/**
+	 * Enable or disable license check
+	 */
 	public function setIsEnabled(bool $isEnabled): void
 	{
 		$this->isEnabled = $isEnabled;
 	}
 
+	/**
+	 * Returns true if license check is enabled
+	 */
 	public function isEnabled(): bool
 	{
 		return $this->isEnabled;
@@ -62,16 +68,19 @@ class Verification
 	{
 		$result = new Result();
 
-		if(!$this->isEnabled())
-		{
-			return $result;
-		}
-
-		if(!$this->isDomainInBackUrlTheSame($request))
+		if (!$this->isBackUrlValid($request))
 		{
 			return $result->addError(new Error(
-				'Wrong host in back_url',
-				TimeStatistic::ERROR_CODE_BACK_URL_HOST_MISMATCH,
+				'Invalid back url. Check your public address setting',
+				TimeStatistic::ERROR_CODE_URL_INVALID,
+			));
+		}
+
+		if (!$this->isFileUrlValid($request))
+		{
+			return $result->addError(new Error(
+				'Invalid file url. Check your public address setting',
+				TimeStatistic::ERROR_CODE_URL_INVALID,
 			));
 		}
 
@@ -79,13 +88,34 @@ class Verification
 
 		if (!$this->isPrivateDomainsAllowed())
 		{
-			if ($this->isDomainInBackUrlPrivate($backUri) || $this->isDomainInFileUrlPrivate($request))
+			if ($this->isDomainInBackUrlPrivate($backUri))
 			{
 				return $result->addError(new Error(
-					'Host in back url or file url is private. Server cant access your portal',
+					'Host in back url is private. Server cant access your portal',
 					TimeStatistic::ERROR_CODE_DOMAIN_IS_PRIVATE,
 				));
 			}
+
+			if ($this->isDomainInFileUrlPrivate($request))
+			{
+				return $result->addError(new Error(
+					'Host in file url is private. Server cant access your portal',
+					TimeStatistic::ERROR_CODE_DOMAIN_IS_PRIVATE,
+				));
+			}
+		}
+
+		if (!$this->isEnabled())
+		{
+			return $result;
+		}
+
+		if (!$this->isDomainInBackUrlTheSame($request))
+		{
+			return $result->addError(new Error(
+				'Wrong host in back_url',
+				TimeStatistic::ERROR_CODE_BACK_URL_HOST_MISMATCH,
+			));
 		}
 
 		if ($this->isCheckByLicenseCode)
@@ -176,6 +206,38 @@ class Verification
 		return in_array($domain, $domains, true);
 	}
 
+	private function isBackUrlValid(array $request): bool
+	{
+		$backUrl = (string)($request['params']['back_url'] ?? null);
+		if (empty($backUrl))
+		{
+			return false;
+		}
+
+		return $this->isUrlValid($backUrl);
+	}
+
+	private function isFileUrlValid(array $request): bool
+	{
+		if (empty($request['params']['file']))
+		{
+			// file url theoretically not required
+			return true;
+		}
+
+		$fileUrl = (string)($request['params']['file'] ?? null);
+
+		return $this->isUrlValid($fileUrl);
+	}
+
+	private function isUrlValid(string $url): bool
+	{
+		$uri = new Uri($url);
+
+		// just a basic check for url sanity
+		return !empty($uri->getHost()) && in_array($uri->getScheme(), ['http', 'https']);
+	}
+
 	public function isDomainInBackUrlTheSame(array $request): bool
 	{
 		$backUri = new Uri($request['params']['back_url'] ?? null);
@@ -183,7 +245,7 @@ class Verification
 		$postUri = new Uri($request['BX_DOMAIN'] ?? null);
 		$postDomain = $postUri->getHost();
 
-		return ($domain === $postDomain);
+		return !empty($domain) && !empty($postDomain) && ($domain === $postDomain);
 	}
 
 	private function isDomainInBackUrlPrivate(Uri $backUri): bool

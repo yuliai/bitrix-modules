@@ -132,7 +132,6 @@ class Settings
 		$skipWarning = false;
 		$errorReporting =
 			\COption::GetOptionInt("main", "error_reporting", E_COMPILE_ERROR|E_ERROR|E_CORE_ERROR|E_PARSE)
-			& ~E_STRICT
 			& ~E_DEPRECATED
 		;
 		if($errorReporting & E_WARNING)
