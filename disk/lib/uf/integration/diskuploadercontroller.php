@@ -454,6 +454,25 @@ class DiskUploaderController extends UploaderController implements CustomLoad, C
 			;
 		}
 
+		if ($viewerAttrs->getViewerType() === Board::JS_TYPE_BOARD && Disk\Document\Flipchart\Configuration::isBoardsEnabled())
+		{
+			$urlManager = Driver::getInstance()->getUrlManager();
+			/** @var Disk\File $file */
+			$file = $fileModel instanceof Disk\AttachedObject ? $fileModel->getFile() : $fileModel;
+
+			$uri = $urlManager->getUrlForViewBoard($file);
+
+			$viewerAttrs->addAction([
+				'type' => 'open',
+				'buttonIconClass' => ' ',
+				'action' => 'BX.Disk.Viewer.Actions.openInNewTab',
+				'params' => [
+					'objectId' => $file->getId(),
+					'url' => $uri,
+				],
+			]);
+		}
+
 		return $viewerAttrs->toDataSet();
 	}
 
