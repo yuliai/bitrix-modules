@@ -12,7 +12,7 @@ class MyDocuments extends BaseTool
 {
 	public static function isAvailable(User $user): bool
 	{
-		return true;
+		return self::isSignDocumentAvailable();
 	}
 
 	public function getConfiguration(): array

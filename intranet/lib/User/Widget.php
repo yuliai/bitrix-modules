@@ -92,7 +92,7 @@ class Widget
 
 		return [
 			'header' => false,
-			'avatarWidgetHeader' => ['hasTimeman' => $hasTimeman, 'hasTools' => $this->user->isIntranet()],
+			'avatarWidgetHeader' => ['hasTimeman' => $hasTimeman, 'hasTools' => $this->user->isIntranet(), 'isAdmin' => $this->user->isAdmin()],
 			'footer' => ['height' => 10],
 			'items' => $items,
 		];
