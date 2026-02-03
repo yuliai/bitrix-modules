@@ -41,6 +41,8 @@ use Bitrix\Tasks\V2\Internal\Integration\Rest\Repository\InMemoryPlacementReposi
 use Bitrix\Tasks\V2\Internal\Integration\Rest\Repository\PlacementRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Mail\Repository\EmailRepository;
 use Bitrix\Tasks\V2\Internal\Integration\Mail\Repository\EmailRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Logger;
+use Bitrix\Tasks\V2\Internal\LoggerInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ChatRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListRepositoryInterface;
@@ -383,6 +385,9 @@ return [
 		],
 		SystemHistoryRepositoryInterface::class => [
 			'className' => SystemHistoryRepository::class,
+		],
+		LoggerInterface::class => [
+			'className' => Logger::class,
 		],
 		// endregion
 
