@@ -38,7 +38,6 @@ $arJSCoreConfig = array(
 	'autosave' => array(
 		'js' => $pathJS.'/core_autosave.js',
 		'lang' => $pathLang.'/js_core_autosave.php',
-		'rel' => array('ajax', 'main.pageobject'),
 	),
 	'dd' => array(
 		'js' => $pathJS.'/core_dd.js',
@@ -89,7 +88,7 @@ $arJSCoreConfig = array(
 		'js' => $pathJS.'/core_window.js',
 		//'css' => $pathCSS.'/core_window.css',
 		'css' => $pathCSSPanel.'/popup.css',
-		'rel' => array('ui.design-tokens', 'ajax', 'main.pageobject'),
+		'rel' => array('ui.design-tokens'),
 		'lang' => $pathLang.'/js_core.php',
 	),
 	'access' => array(
