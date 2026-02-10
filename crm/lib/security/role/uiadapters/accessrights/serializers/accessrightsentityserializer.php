@@ -1,24 +1,28 @@
 <?php
 
-namespace Bitrix\Crm\Security\Role\UIAdapters\AccessRights;
+namespace Bitrix\Crm\Security\Role\UIAdapters\AccessRights\Serializers;
 
 use Bitrix\Crm\Security\EntityPermission\ApproveCustomPermsToExistRole;
 use Bitrix\Crm\Security\Role\Manage\DTO\EntityDTO;
 use Bitrix\Crm\Security\Role\Manage\Permissions\Permission;
+use Bitrix\Crm\Security\Role\UIAdapters\AccessRights\PermIdentifier;
 use Bitrix\Crm\Security\Role\UIAdapters\AccessRights\Utils\PermCodeTransformer;
+use Bitrix\Main\Loader;
+use Bitrix\UI\AccessRights\V2\Options\RightSection;
+
+Loader::requireModule('ui');
 
 class AccessRightsEntitySerializer
 {
 	/**
 	 * @param EntityDTO[] $entities
-	 * @return array[]
+	 * @return RightSection[]
 	 */
 	public function serialize(array $entities): array
 	{
 		$accessRights = [];
 		foreach ($entities as $entity)
 		{
-
 			$rights = [];
 
 			foreach ($entity->permissions() as $perm)
@@ -38,7 +42,7 @@ class AccessRightsEntitySerializer
 					$perm->variants()?->getValuesForSection()
 				);
 
-				$permRight['groupHead'] = $perm->canAssignPermissionToStages() && !empty($entity->fields());
+				$permRight->setIsGroupHead($perm->canAssignPermissionToStages() && !empty($entity->fields()));
 				$rights[] = $permRight;
 
 				if (!$perm->canAssignPermissionToStages())
@@ -63,9 +67,7 @@ class AccessRightsEntitySerializer
 						);
 
 						// prefer 'inherit' on group actions
-						$right['setEmptyOnSetMinMaxValueInColumn'] = true;
-						// todo compatibility, remove when fresh ui update is out
-						$right['setEmptyOnGroupActions'] = true;
+						$right->setIsEmptyOnSetMinMaxValueInColumn(true);
 
 						$rights[] = $right;
 					}
@@ -75,24 +77,18 @@ class AccessRightsEntitySerializer
 			{
 				continue;
 			}
-			$accessRightSection = [
-				'sectionTitle' => $entity->name(),
-				'sectionCode' => $entity->code(),
-				'rights' => $rights,
-			];
-			if ($entity->description())
-			{
-				$accessRightSection['sectionSubTitle'] = $entity->description();
-			}
-			if ($entity->iconCode() && $entity->iconColor())
-			{
-				$accessRightSection['sectionIcon'] = [
-					'type' => $entity->iconCode(),
-					'bgColor' => $entity->iconColor(),
-				];
-			}
 
-			$accessRights[] = $accessRightSection;
+			$section = new RightSection($entity->name());
+
+			$section
+				->setCode($entity->code())
+				->setRightItems($rights)
+				->setSubTitle($entity->description())
+				->setIconCode($entity->iconCode())
+				->setIconBgColor($entity->iconColor())
+			;
+
+			$accessRights[] = $section;
 		}
 
 		return $accessRights;
@@ -104,44 +100,45 @@ class AccessRightsEntitySerializer
 		Permission $permission,
 		?array $variables = null,
 		?string $parentCode = null,
-	): array
+	): RightSection\RightItem
 	{
-		$result = [
+		$controlType = $permission->getControlMapper();
+
+		$options = [
 			'id' => $rightCode,
 			'title' => $rightName ?: $permission->name(),
 			'hint' => $permission->explanation(),
 			'group' => $parentCode,
+			'type' => $controlType->getType(),
+			'minValue' => $controlType->getMinValue(),
+			'maxValue' => $controlType->getMaxValue(),
 		];
-		$controlType = $permission->getControlMapper();
-		$result['type'] = $controlType->getType();
-		$result['minValue'] = $controlType->getMinValue();
-		$result['maxValue'] = $controlType->getMaxValue();
-		$result = array_merge($result,  $controlType->getExtraOptions());
+		$options = array_merge($options, $controlType->getExtraOptions());
 
 		if (!is_null($variables))
 		{
-			$result['variables'] = $variables;
+			$options['variables'] = $variables;
 
 			$emptyValue = $this->getEmptyValue($variables);
 			if ($emptyValue !== null)
 			{
-				$result['emptyValue'] = $emptyValue;
+				$options['emptyValue'] = $emptyValue;
 			}
 
 			$nothingSelectedValue = $this->getNothingSelectedValue($variables);
 			if ($nothingSelectedValue !== null)
 			{
-				$result['nothingSelectedValue'] = $nothingSelectedValue;
+				$options['nothingSelectedValue'] = $nothingSelectedValue;
 			}
 
 			$defaultValue = $this->getDefaultValue($variables);
 			if ($defaultValue !== null)
 			{
-				$result['defaultValue'] = $defaultValue;
+				$options['defaultValue'] = $defaultValue;
 			}
 		}
 
-		return $result;
+		return RightSection\RightItem::tryFromArray($options);
 	}
 
 	private function getEmptyValue(array $variables): ?string
