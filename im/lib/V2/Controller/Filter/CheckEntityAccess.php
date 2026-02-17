@@ -2,15 +2,18 @@
 
 namespace Bitrix\Im\V2\Controller\Filter;
 
+use Bitrix\Im\V2\AccessCheckable;
 use Bitrix\Im\V2\Chat;
-use Bitrix\Im\V2\Message;
-use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Result;
 use Bitrix\Main\Engine\ActionFilter\Base;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventResult;
 
-class CheckChatAccess extends Base
+/**
+ * @see AccessCheckable
+ * Prefilter for AccessCheckable entities
+ */
+class CheckEntityAccess extends Base
 {
 	public function onBeforeAction(Event $event)
 	{
@@ -29,29 +32,12 @@ class CheckChatAccess extends Base
 	{
 		foreach ($this->getAction()->getArguments() as $argument)
 		{
-			if ($argument instanceof Message)
+			if (!$argument instanceof AccessCheckable)
 			{
-				return $argument->checkAccess();
+				continue;
 			}
-			if ($argument instanceof MessageCollection)
-			{
-				return $this->checkAccessToMessages($argument);
-			}
-			if ($argument instanceof Chat)
-			{
-				return $argument->checkAccess();
-			}
-		}
 
-		return new Result();
-	}
-
-	private function checkAccessToMessages(MessageCollection $messages): Result
-	{
-		foreach ($messages as $message)
-		{
-			$checkResult = $message->checkAccess();
-
+			$checkResult = $argument->checkAccess();
 			if (!$checkResult->isSuccess())
 			{
 				return $checkResult;
