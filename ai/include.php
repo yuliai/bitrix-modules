@@ -6,6 +6,7 @@ use Bitrix\Main\Loader;
 Engine::triggerEngineAddedEvent();
 
 include(__DIR__ . '/prompt_updater.php');
+include(__DIR__ . '/bitrixgpt_agreement.php');
 
 //\Bitrix\Main\Config\Option::set('ai', 'MARTA_BOT_ENABLE', 'Y');
 

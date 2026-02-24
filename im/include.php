@@ -184,13 +184,7 @@ CJSCore::RegisterExt('im_web', array(
 
 CJSCore::RegisterExt('im_page', array(
 	'js' => $jsIm,
-	'css' => array(
-		'/bitrix/js/im/css/im.css',
-		'/bitrix/js/im/css/call/keypad.css',
-		'/bitrix/js/im/css/call/view.css',
-		'/bitrix/js/im/css/call/sidebar.css',
-		'/bitrix/js/im/css/call/promo-popup.css',
-	),
+	'css' => ['/bitrix/js/im/css/im.css'],
 	'lang' => '/bitrix/modules/im/js_im.php',
 	'rel' => $jsCoreRelPage
 ));
@@ -233,7 +227,7 @@ if ($isLegacyChatActivated)
 {
 	$asset = Asset::getInstance();
 	$asset->addJsKernelInfo('im', array_merge(['/bitrix/js/im/common.js', '/bitrix/js/im/window.js'], $jsIm));
-	$asset->addCssKernelInfo('im', array('/bitrix/js/im/css/common.css', '/bitrix/js/im/css/dark_im.css', '/bitrix/js/im/css/window.css', '/bitrix/js/im/css/im.css', '/bitrix/js/im/css/call/view.css', '/bitrix/js/im/css/call/sidebar.css', '/bitrix/js/im/css/call/promo-popup.css'));
+	$asset->addCssKernelInfo('im', ['/bitrix/js/im/css/common.css', '/bitrix/js/im/css/dark_im.css', '/bitrix/js/im/css/window.css', '/bitrix/js/im/css/im.css']);
 }
 
 /* Copyrights */
