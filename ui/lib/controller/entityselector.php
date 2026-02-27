@@ -26,6 +26,16 @@ class EntitySelector extends JsonController
 		$request = $payload->getData();
 		$request = is_array($request) ? $request : [];
 
+		$context = $request['dialog']['context'] ?? '';
+		if ($context == 'MAIN_MAIL_FROM') {
+			foreach ($request['dialog']['entities'] as $k => $arEntity) {
+				// remove: mail_recipient(1,3min!), user(не работает отправка), company, lead, address_book(1,3min!)
+				// keep: contact only
+				if (!in_array($arEntity['id'], ['contact'])) {
+					unset($request['dialog']['entities'][$k]);
+				}
+			}
+		}
 		$dialog = new Dialog(isset($request['dialog']) && is_array($request['dialog']) ? $request['dialog'] : []);
 		$dialog->load();
 

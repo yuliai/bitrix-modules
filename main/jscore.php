@@ -448,7 +448,6 @@ $arJSCoreConfig = array(
 		'/bitrix/js/main/date/main.date.js',
 		'/bitrix/js/main/core/core_date.js',
 		'/bitrix/js/main/core/core_timer.js',
-		'/bitrix/js/main/core/core_fx.js',
 		'/bitrix/js/main/core/core_window.js',
 		'/bitrix/js/main/core/core_autosave.js',
 		'/bitrix/js/main/rating_like.js',
