@@ -78,6 +78,8 @@ define("IM_NOTIFY_FEATURE_XMPP", "xmpp");
 define("IM_NOTIFY_FEATURE_MAIL", "mail");
 define("IM_NOTIFY_FEATURE_PUSH", "push");
 
+include __DIR__ . '/compatibility.php';
+
 CModule::AddAutoloadClasses(
 	"im",
 	array(
@@ -205,7 +207,7 @@ CJSCore::RegisterExt('im_window', array(
 	'js' => '/bitrix/js/im/window.js',
 	'css' => '/bitrix/js/im/css/window.css',
 	'lang' => '/bitrix/modules/im/js_window.php',
-	'rel' => Array('ui.design-tokens', 'popup', 'fx', 'translit', 'im.component.conference.conference-create', 'ui.alerts'),
+	'rel' => Array('ui.design-tokens', 'popup', 'fx', 'translit', 'call.component.conference.conference-create', 'ui.alerts'),
 ));
 
 CJSCore::RegisterExt('im_desktop', array(

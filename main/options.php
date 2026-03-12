@@ -141,7 +141,9 @@ if(isset($smsSenders[$currentSmsSender]))
 
 //countries for phone formatting
 $countriesReference = GetCountryArray();
-$countriesArray = array();
+$countriesArray = [
+	"" => GetMessage('main_options_select_country'),
+];
 foreach ($countriesReference['reference_id'] as $k => $v)
 {
 	$countriesArray[$v] = $countriesReference['reference'][$k];
