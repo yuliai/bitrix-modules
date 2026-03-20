@@ -52,7 +52,7 @@ final class FormattedPermissionsButtonFieldAssembler extends FieldAssembler
 			->setSubSection(Dictionary::SUB_SECTION_CONTROL_PANEL)
 		;
 
-		$url = (string)$crmPermsViewEventBuilder->buildUri($this->router->getCustomSectionPermissionsUrl($automatedSolutionCode));
+        $url = (string)$crmPermsViewEventBuilder->buildUri($this->router->getCustomSectionPermissionsUrl($automatedSolutionCode));
 
 		$button = new Button([
 			'text' => Loc::getMessage('CRM_GRID_ROW_ASSEMBLER_AUTOMATED_SOLUTION_PERMISSIONS_BUTTON_TITLE'),
