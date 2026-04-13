@@ -3,9 +3,12 @@
 namespace Bitrix\Sign\Controllers\V1\B2e\Document;
 
 use Bitrix\Main;
+use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
+use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\SystemException;
 use Bitrix\Sign\Access\ActionDictionary;
 use Bitrix\Sign\Attribute\Access\LogicAnd;
 use Bitrix\Sign\Attribute\ActionAccess;
@@ -371,6 +374,11 @@ class Template extends Controller
 		];
 	}
 
+	/**
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 * @throws ArgumentException
+	 */
 	public function getFieldsAction(
 		string $uid,
 	): array
@@ -528,7 +536,7 @@ class Template extends Controller
 		$result = $templateService->moveToFolder($entities, $folderId);
 		if (!$result->isSuccess())
 		{
-			$this->addErrorByMessage('Failed to move templates to folder');
+			$this->addErrorsFromResult($result);
 
 			return [];
 		}

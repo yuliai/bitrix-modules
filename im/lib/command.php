@@ -8,6 +8,7 @@
 
 namespace Bitrix\Im;
 
+use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Main,
 	Bitrix\Main\Localization\Loc,
 	Bitrix\Main\DB\Exception;
@@ -629,13 +630,15 @@ class Command
 		$isExtranet = \Bitrix\Im\User::getInstance($messageFields['FROM_USER_ID'])->isExtranet();
 
 		$commands = self::getListCache();
-		$bots = Bot::getListCache();
 		foreach ($commands as $value)
 		{
 			$chatEntityType = $messageFields['CHAT_ENTITY_TYPE'] ?? null;
 			if (
 				$chatEntityType === 'LIVECHAT'
-				|| ($chatEntityType === 'LINES' && $bots[$value['BOT_ID']]['OPENLINE'] != 'Y')
+				|| (
+					$chatEntityType === 'LINES'
+					&& BotData::getInstance((int)$value['BOT_ID'])->getOpenline() !== 'Y'
+				)
 			)
 			{
 				continue;

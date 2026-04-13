@@ -137,6 +137,8 @@ namespace PHPSTORM_META
 				'sign.repository.blank.resource' => \Bitrix\Sign\Repository\Blank\ResourceRepository::class,
 				'sign.repository.block' => \Bitrix\Sign\Repository\BlockRepository::class,
 				'sign.service.api.document.page' => \Bitrix\Sign\Service\Api\Document\PageService::class,
+				'sign.service.api.document.placeholder' => \Bitrix\Sign\Service\Api\Document\ApiDocumentPlaceholderService::class,
+				'sign.service.placeholder.fieldAlias' => \Bitrix\Sign\Service\Placeholder\FieldAlias\FieldAliasService::class,
 				'sign.service.api.document.signed.file.load' => \Bitrix\Sign\Service\Api\Document\SignedFileLoadService::class,
 				'sign.service.api.document.signing' => \Bitrix\Sign\Service\Api\Document\SigningService::class,
 				'sign.service.api.document.field' => \Bitrix\Sign\Service\Api\Document\FieldService::class,
@@ -212,6 +214,7 @@ namespace PHPSTORM_META
 				'sign.service.document.template.templateFolderRelation' => \Bitrix\Sign\Service\Sign\Document\Template\TemplateFolderRelationService::class,
 				'sign.service.sign.document.signUntil' => \Bitrix\Sign\Service\Sign\Document\SignUntilService::class,
 				'sign.service.localizedError' => \Bitrix\Sign\Service\LocalizedErrorService::class,
+				'sign.service.document.field' => \Bitrix\Sign\Service\Document\FieldService::class,
 		]),
 	);
 

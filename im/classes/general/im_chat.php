@@ -281,6 +281,8 @@ class CIMChat
 					ORDER BY M.DATE_CREATE DESC
 				";
 			}
+
+			\Bitrix\Im\Disk\NoRelationPermission::add($toChatId, $fromUserId);
 		}
 
 		if (!$bTimeZone)

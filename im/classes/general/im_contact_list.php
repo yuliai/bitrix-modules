@@ -1,8 +1,10 @@
-<?
+<?php
+
 IncludeModuleLangFile(__FILE__);
 
 use Bitrix\Im as IM;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Im\V2\Pull\Event\ChatHide;
 use Bitrix\Im\V2\Sync;
 use Bitrix\Main\Engine\Response\Converter;
@@ -244,8 +246,6 @@ class CAllIMContactList
 					'order' => Array('LAST_NAME' => 'ASC')
 				));
 
-				$bots = \Bitrix\Im\Bot::getListCache();
-
 				while ($arUser = $orm->fetch())
 				{
 					$arUser = CIMStatus::prepareLastDate($arUser);
@@ -305,28 +305,6 @@ class CAllIMContactList
 						$arUser['PERSONAL_BIRTHDAY'] = $arUser['PERSONAL_BIRTHDAY'] instanceof \Bitrix\Main\Type\Date? $arUser['PERSONAL_BIRTHDAY']->format('d-m'): false;
 						$arUser['LAST_ACTIVITY_DATE'] = $arUser['LAST_ACTIVITY_DATE'] instanceof \Bitrix\Main\Type\DateTime? $arUser['LAST_ACTIVITY_DATE']: false;
 
-						$userExternalAuthId = $arUser['EXTERNAL_AUTH_ID'] ?? 'default';
-						$userItemId = $arUser["ITEM_ID"] ?? null;
-						$userById = $arUser["ID"] ?? null;
-
-						$botByUserItemId = $bots[$userItemId] ?? null;
-						$botByUserId = $bots[$userById] ?? null;
-
-						$botClassName = $botByUserItemId['CLASS'] ?? null;
-						$botType = $botByUserId['TYPE'] ?? null;
-						if (
-							$userExternalAuthId == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID
-							&& $botType == \Bitrix\Im\Bot::TYPE_NETWORK
-							&& (
-								$botClassName === \Bitrix\ImBot\Bot\Support24::class
-								|| $botClassName === \Bitrix\ImBot\Bot\Partner24::class
-								|| $botClassName === \Bitrix\ImBot\Bot\SaleSupport24::class
-							)
-						)
-						{
-							$userExternalAuthId = 'support24';
-						}
-
 						$arUsers[$arUser["ID"]] = Array(
 							'id' => $arUser["ID"],
 							'name' => \Bitrix\Im\User::formatFullNameFromDatabase($arUser),
@@ -340,10 +318,10 @@ class CAllIMContactList
 							'gender' => $arUser['PERSONAL_GENDER'] == 'F'? 'F': 'M',
 							'phone_device' => $bVoximplantEnable && $arUser['UF_VI_PHONE'] == 'Y',
 							'extranet' => self::IsExtranet($arUser),
-							'network' => ($userExternalAuthId === self::NETWORK_AUTH_ID) || ($userExternalAuthId === \Bitrix\Im\Bot::EXTERNAL_AUTH_ID) && ($botType === \Bitrix\Im\Bot::TYPE_NETWORK),
-							'bot' => $userExternalAuthId === \Bitrix\Im\Bot::EXTERNAL_AUTH_ID,
+							'network' => self::isNetwork($arUser, (int)$arUser['ID']),
+							'bot' => self::isBot($arUser),
 							'profile' => CIMContactList::GetUserPath($arUser["ID"]),
-							'external_auth_id' => $userExternalAuthId,
+							'external_auth_id' => self::getUserExternalAuthId($arUser, (int)$arUser['ID']),
 							/*'status' => $arUser['STATUS'],
 							'idle' => $arUser['IDLE'],*/
 							'status' => 'online',
@@ -566,8 +544,6 @@ class CAllIMContactList
 		if ($bVoximplantEnable)
 			$select[] = 'UF_VI_PHONE';
 
-		$bots = \Bitrix\Im\Bot::getListCache();
-
 		$orm = \Bitrix\Main\UserTable::getList(Array(
 			'select' => $select,
 			'filter' => $filter,
@@ -591,20 +567,6 @@ class CAllIMContactList
 
 			$arUser = CIMStatus::prepareLastDate($arUser);
 
-			$userExternalAuthId = $arUser['EXTERNAL_AUTH_ID']? $arUser['EXTERNAL_AUTH_ID']: 'default';
-			if (
-				$userExternalAuthId == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID
-				&& $bots[$arUser["ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK
-				&& (
-					$bots[$arUser["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Support24::class
-					|| $bots[$arUser["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Partner24::class
-					|| $bots[$arUser["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\SaleSupport24::class
-				)
-			)
-			{
-				$userExternalAuthId = 'support24';
-			}
-
 			$arUsers[$arUser["ID"]] = Array(
 				'id' => $arUser["ID"],
 				'name' => \Bitrix\Im\User::formatFullNameFromDatabase($arUser),
@@ -618,11 +580,11 @@ class CAllIMContactList
 				'gender' => $arUser['PERSONAL_GENDER'] == 'F'? 'F': 'M',
 				'phone_device' => $bVoximplantEnable && $arUser['UF_VI_PHONE'] == 'Y',
 				'extranet' => self::IsExtranet($arUser),
-				'network' => $arUser['EXTERNAL_AUTH_ID'] == self::NETWORK_AUTH_ID || $arUser['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID && $bots[$arUser["ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK,
-				'bot' => $arUser['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID,
+				'network' => self::isNetwork($arUser, (int)$arUser['ID']),
+				'bot' => self::isBot($arUser),
 				'profile' => CIMContactList::GetUserPath($arUser["ID"]),
 				'search_mark' => $searchText,
-				'external_auth_id' => $userExternalAuthId,
+				'external_auth_id' => self::getUserExternalAuthId($arUser, (int)$arUser['ID']),
 				/*'status' => $arUser['STATUS'],
 				'idle' => $arUser['IDLE'],*/
 				'status' => 'online',
@@ -934,7 +896,7 @@ class CAllIMContactList
 				{
 					$converter = new Converter(Converter::TO_SNAKE | Converter::TO_LOWER | Converter::KEYS);
 
-					$botData = \Bitrix\Im\V2\Entity\User\Data\BotData::getInstance((int)$userId)->toRestFormat();
+					$botData = BotData::getInstance((int)$userId)->toRestFormat();
 					$arCacheResult['users'][$userId]['bot_data'] = !empty($botData)
 						? $converter->process($botData)
 						: null
@@ -994,8 +956,6 @@ class CAllIMContactList
 		}
 		$resultQuery = $query->exec();
 
-		$bots = \Bitrix\Im\Bot::getListCache();
-
 		while ($arUser = $resultQuery->fetch())
 		{
 			$arUser = CIMStatus::prepareLastDate($arUser);
@@ -1020,21 +980,7 @@ class CAllIMContactList
 			$arUser['PERSONAL_BIRTHDAY'] = $arUser['PERSONAL_BIRTHDAY'] instanceof \Bitrix\Main\Type\Date? $arUser['PERSONAL_BIRTHDAY']->format('d-m'): false;
 			$arUser['LAST_ACTIVITY_DATE'] = $arUser['LAST_ACTIVITY_DATE'] instanceof \Bitrix\Main\Type\DateTime? $arUser['LAST_ACTIVITY_DATE']: false;
 
-			$userExternalAuthId = $arUser['EXTERNAL_AUTH_ID']? $arUser['EXTERNAL_AUTH_ID']: 'default';
-			if (
-				$userExternalAuthId == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID
-				&& $bots[$arUser["ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK
-				&& (
-					$bots[$arUser["ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Support24::class
-					|| $bots[$arUser["ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Partner24::class
-					|| $bots[$arUser["ID"]]['CLASS'] == \Bitrix\ImBot\Bot\SaleSupport24::class
-				)
-			)
-			{
-				$userExternalAuthId = 'support24';
-			}
-
-			$userV2 = IM\V2\Entity\User\User::getInstance((int)$arUser["ID"]);
+			$userV2 = IM\V2\Entity\User\User::getInstance((int)$arUser['ID']);
 
 			$arUsers[$arUser["ID"]] = Array(
 				'id' => $arUser["ID"],
@@ -1051,11 +997,11 @@ class CAllIMContactList
 				'phone_device' => $bVoximplantEnable && $arUser['UF_VI_PHONE'] == 'Y',
 				'phones' => $bVoximplantEnable && $arUser['UF_VI_PHONE'] == 'Y',
 				'extranet' => self::IsExtranet($arUser),
-				'network' => $arUser['EXTERNAL_AUTH_ID'] == self::NETWORK_AUTH_ID || $arUser['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID && $bots[$arUser["ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK,
-				'bot' => $arUser['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID,
+				'network' => $userV2->isNetwork(),
+				'bot' => self::isBot($arUser),
 				'connector' => $arUser['EXTERNAL_AUTH_ID'] == "imconnector",
 				'profile' => CIMContactList::GetUserPath($arUser["ID"]),
-				'external_auth_id' => $userExternalAuthId,
+				'external_auth_id' => self::getUserExternalAuthId($arUser, (int)$arUser['ID']),
 				/*'status' => $arUser['STATUS'],
 				'idle' => $arUser['IDLE']?: false,*/
 				'status' => 'online',
@@ -1190,7 +1136,7 @@ class CAllIMContactList
 			{
 				$converter = new Converter(Converter::TO_SNAKE | Converter::TO_LOWER | Converter::KEYS);
 
-				$botData = \Bitrix\Im\V2\Entity\User\Data\BotData::getInstance((int)$userId)->toRestFormat();
+				$botData = BotData::getInstance((int)$userId)->toRestFormat();
 				$result['users'][$userId]['bot_data'] = (!empty($botData)) ? $converter->process($botData) : null;
 			}
 			else
@@ -1645,7 +1591,6 @@ class CAllIMContactList
 			CTimeZone::Enable();
 
 		$enableOpenChat = CIMMessenger::CheckEnableOpenChat();
-		$bots = \Bitrix\Im\Bot::getListCache();
 
 		$arMessageId = Array();
 
@@ -1706,20 +1651,6 @@ class CAllIMContactList
 				$arRes['LAST_ACTIVITY_DATE'] = $arRes['LAST_ACTIVITY_DATE']? \Bitrix\Main\Type\DateTime::createFromTimestamp($arRes['LAST_ACTIVITY_DATE']): false;
 				$arRes = CIMStatus::prepareLastDate($arRes);
 
-				$userExternalAuthId = $arRes['EXTERNAL_AUTH_ID']? $arRes['EXTERNAL_AUTH_ID']: 'default';
-				if (
-					$userExternalAuthId == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID
-					&& $bots[$arRes["ITEM_ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK
-					&& (
-						$bots[$arRes["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Support24::class
-						|| $bots[$arRes["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\Partner24::class
-						|| $bots[$arRes["ITEM_ID"]]['CLASS'] == \Bitrix\ImBot\Bot\SaleSupport24::class
-					)
-				)
-				{
-					$userExternalAuthId = 'support24';
-				}
-
 				$item['USER'] = Array(
 					'id' => $arRes['ITEM_ID'],
 					'name' => \Bitrix\Im\User::formatFullNameFromDatabase($arRes),
@@ -1732,11 +1663,11 @@ class CAllIMContactList
 					'birthday' => $arRes['PERSONAL_BIRTHDAY'],
 					'gender' => $arRes['PERSONAL_GENDER'] == 'F'? 'F': 'M',
 					'extranet' => false,
-					'network' => $arRes['EXTERNAL_AUTH_ID'] == self::NETWORK_AUTH_ID || $arRes['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID && $bots[$arRes["ITEM_ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK,
-					'bot' => $arRes['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID,
+					'network' => self::isNetwork($arRes, (int)$arRes['ITEM_ID']),
+					'bot' => self::isBot($arRes),
 					'phone_device' => false,
 					'profile' => CIMContactList::GetUserPath($arRes["ITEM_ID"]),
-					'external_auth_id' => $userExternalAuthId,
+					'external_auth_id' => self::getUserExternalAuthId($arRes, (int)$arRes['ITEM_ID']),
 					'status' => $arRes['STATUS'],
 					'idle' => $arRes['IDLE'],
 					'last_activity_date' => $arRes['LAST_ACTIVITY_DATE'],
@@ -2131,6 +2062,51 @@ class CAllIMContactList
 		}
 
 		return $portalId;
+	}
+
+	protected static function getUserExternalAuthId(array $user, ?int $userId = null): string
+	{
+		$externalAuthId = $user['EXTERNAL_AUTH_ID'] ?? 'default';
+
+		if ($externalAuthId === Im\Bot::EXTERNAL_AUTH_ID && $userId)
+		{
+			$botData = BotData::getInstance($userId);
+			if ($botData->exists() && $botData->isSupport24Bot())
+			{
+				$externalAuthId = 'support24';
+			}
+		}
+
+		return $externalAuthId;
+	}
+
+	protected static function isBot(array $user): bool
+	{
+		$externalAuthId = $user['EXTERNAL_AUTH_ID'] ?? 'default';
+
+		return $externalAuthId === Im\Bot::EXTERNAL_AUTH_ID;
+	}
+
+	protected static function isNetwork(array $user, ?int $userId = null): bool
+	{
+		$externalAuthId = $user['EXTERNAL_AUTH_ID'] ?? 'default';
+
+		if ($externalAuthId === self::NETWORK_AUTH_ID)
+		{
+			return true;
+		}
+
+		$isNetworkBot = false;
+		if ($externalAuthId === Im\Bot::EXTERNAL_AUTH_ID && $userId)
+		{
+			$botData = BotData::getInstance($userId);
+			if ($botData->exists())
+			{
+				$isNetworkBot = $botData->isNetworkBot();
+			}
+		}
+
+		return $isNetworkBot;
 	}
 }
 ?>

@@ -80,12 +80,7 @@ class Settings
 
 	public static function isCopilotSelectModelEnabled(): bool
 	{
-		if (\Bitrix\Main\Config\Option::get('im', 'copilot_select_model_activated', 'N') === 'Y')
-		{
-			return true;
-		}
-
-		return false;
+		return true;
 	}
 
 	public static function isAiAssistantMcpSelectorAvailable(): bool
@@ -95,7 +90,7 @@ class Settings
 
 	public static function isOpenlinesInMessengerV2Available(): bool
 	{
-		return \Bitrix\Main\Config\Option::get('immobile', 'openlines_in_messenger_v2_available', 'N') === 'Y';
+		return \Bitrix\Main\Config\Option::get('immobile', 'openlines_in_messenger_v2_available', 'Y') === 'Y';
 	}
 
 	public static function isAutoTaskEnabled(): bool
@@ -110,6 +105,6 @@ class Settings
 
 	public static function isAutoTaskUIAvailable(): bool
 	{
-		return \Bitrix\Main\Config\Option::get('immobile', 'is_auto_task_ui_available', 'N') === 'Y';
+		return true;
 	}
 }

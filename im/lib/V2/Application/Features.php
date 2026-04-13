@@ -154,7 +154,7 @@ class Features
 
 	public static function isCopilotSelectModelAvailable(): bool
 	{
-		return Option::get('im', 'copilot_select_model_activated', 'N') === 'Y';
+		return true;
 	}
 
 	public static function isDesktopRedirectAvailable(): bool
@@ -174,19 +174,12 @@ class Features
 			return false;
 		}
 
-		if (\CUserOptions::GetOption('im', 'copilot_mention_user', 'N') === 'Y')
-		{
-			return true;
-		}
-
-		return Option::get('im', 'copilot_mention', 'N') === 'Y';
+		return true;
 	}
 
 	public static function isAiFileTranscriptionAvailable(): bool
 	{
-		return Option::get('im', 'file_transcription_available', 'N') === 'Y'
-			&& ServiceLocator::getInstance()->get(Restriction::class)->isTranscriptionActive()
-		;
+		return ServiceLocator::getInstance()->get(Restriction::class)->isTranscriptionActive();
 	}
 
 	public static function isChatSharingLinkAvailable(): bool
@@ -201,9 +194,7 @@ class Features
 
 	public static function isVideoNoteTranscriptionAvailable(): bool
 	{
-		return Option::get('im', 'video_note_transcription_available', 'N') === 'Y'
-			&& ServiceLocator::getInstance()->get(Restriction::class)->isTranscriptionActive()
-		;
+		return ServiceLocator::getInstance()->get(Restriction::class)->isTranscriptionActive();
 	}
 
 	public static function isUnreadRecentModeAvailable(): bool
@@ -216,14 +207,9 @@ class Features
 		return Loader::includeModule('tasks');
 	}
 
-	public static function isTranscriptionEmotionsAvailable(): bool
-	{
-		return Option::get('im', 'transcription_emotions_available', 'N') === 'Y';
-	}
-
 	public static function isCopilotReasoningAvailable(): bool
 	{
-		return Option::get('im', 'copilot_reasoning_available', 'N') === 'Y';
+		return true;
 	}
 
 	public static function isAiAssistantMcpSelectorAvailable(): bool

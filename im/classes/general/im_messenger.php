@@ -1,11 +1,12 @@
-<?
+<?php
+
 use Bitrix\Im\Integration\Imopenlines;
 use Bitrix\Im\Message;
 use Bitrix\Im\Notify;
 use Bitrix\Im\Text;
 use Bitrix\Im\V2\Analytics\MessageAnalytics;
 use Bitrix\Im\V2\Chat;
-use Bitrix\Im\V2\Chat\TextField\TextFieldEnabled;
+use Bitrix\Im\V2\Entity\User\UserGuest;
 use Bitrix\Im\V2\Message\Params;
 use Bitrix\Im\V2\Message\ReadService;
 use Bitrix\Im\V2\Message\Send\Push\MobilePush;
@@ -474,7 +475,7 @@ class CIMMessenger
 		{
 			$arFields['TO_USER_ID'] = intval($arFields['TO_USER_ID']);
 
-			$blockedExternalAuthId = \Bitrix\Im\Model\UserTable::filterExternalUserTypes(['replica']);
+			$blockedExternalAuthId = \Bitrix\Im\Model\UserTable::filterExternalUserTypes(['replica', UserGuest::AUTH_ID]);
 			$userData = \Bitrix\Im\Model\UserTable::query()
 				->setSelect(['EXTERNAL_AUTH_ID'])
 				->where('ID', $arFields['TO_USER_ID'])

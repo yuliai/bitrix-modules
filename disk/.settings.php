@@ -7,6 +7,8 @@ use Bitrix\Disk\Internal\Repository\BitrixOrmDocumentRestrictionLogRepository;
 use Bitrix\Disk\Internal\Repository\BitrixOrmDocumentSessionRepository;
 use Bitrix\Disk\Internal\Repository\Interface\DocumentRestrictionLogRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\Interface\DocumentSessionRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\Interface\LimitEncounterCounterRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\LimitEncounterCounterPersistentStorageRepository;
 use Bitrix\Disk\Internals\DeletedLogManager;
 use Bitrix\Disk\Internals\DeletionNotifyManager;
 use Bitrix\Disk\Internals\Runtime\StorageRuntimeCache;
@@ -83,6 +85,9 @@ return [
 			],
 			DocumentSessionRepositoryInterface::class => [
 				'className' => BitrixOrmDocumentSessionRepository::class,
+			],
+			LimitEncounterCounterRepositoryInterface::class => [
+				'className' => LimitEncounterCounterPersistentStorageRepository::class,
 			],
 		],
 		'readonly' => true,

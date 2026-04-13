@@ -91,6 +91,8 @@ abstract class BaseEvent implements Event
 	 */
 	abstract protected function getRecipients(): array;
 
+	abstract public function shouldSendToOnlySpecificRecipients(): bool;
+
 	protected function getDiffByUser(int $userId): Diff
 	{
 		return new Diff($userId);
@@ -148,11 +150,6 @@ abstract class BaseEvent implements Event
 	}
 
 	public function isGlobal(): bool
-	{
-		return false;
-	}
-
-	public function shouldSendToOnlySpecificRecipients(): bool
 	{
 		return false;
 	}

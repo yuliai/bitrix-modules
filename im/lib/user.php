@@ -2,6 +2,7 @@
 namespace Bitrix\Im;
 
 use Bitrix\Im\Model\StatusTable;
+use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type\DateTime;
 
@@ -797,7 +798,6 @@ class User
 		}
 
 		$orm = \Bitrix\Main\UserTable::getList($ormParams);
-		$bots = \Bitrix\Im\Bot::getListCache();
 
 		$users = array();
 		while ($user = $orm->fetch())
@@ -817,6 +817,12 @@ class User
 				$color = \CIMContactList::GetUserColor($user["ID"], $user['PERSONAL_GENDER'] == 'M'? 'M': 'F');
 			}
 
+			$isNetworkBot = false;
+			if ($user['EXTERNAL_AUTH_ID'] === Bot::EXTERNAL_AUTH_ID)
+			{
+				$isNetworkBot = BotData::getInstance((int)$user['ID'])->isNetworkBot();
+			}
+
 			$users[$user["ID"]] = Array(
 				'ID' => (int)$user["ID"],
 				'NAME' => \Bitrix\Im\User::formatFullNameFromDatabase($user),
@@ -828,8 +834,8 @@ class User
 				'GENDER' => $user['PERSONAL_GENDER'] == 'F'? 'F': 'M',
 				'BIRTHDAY' => $user['PERSONAL_BIRTHDAY'] instanceof \Bitrix\Main\Type\Date? $user['PERSONAL_BIRTHDAY']->format('d-m'): false,
 				'EXTRANET' => \CIMContactList::IsExtranet($user),
-				'NETWORK' => $user['EXTERNAL_AUTH_ID'] == \CIMContactList::NETWORK_AUTH_ID || $user['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID && $bots[$user["ID"]]['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK,
-				'BOT' => $user['EXTERNAL_AUTH_ID'] == \Bitrix\Im\Bot::EXTERNAL_AUTH_ID,
+				'NETWORK' => $user['EXTERNAL_AUTH_ID'] === \CIMContactList::NETWORK_AUTH_ID || $isNetworkBot,
+				'BOT' => $user['EXTERNAL_AUTH_ID'] === Bot::EXTERNAL_AUTH_ID,
 				'CONNECTOR' => $user['EXTERNAL_AUTH_ID'] == "imconnector",
 				'EXTERNAL_AUTH_ID' => $user['EXTERNAL_AUTH_ID']? $user['EXTERNAL_AUTH_ID']: 'default',
 				'STATUS' => $user['STATUS'],
@@ -919,7 +925,7 @@ class User
 
 		$filter['=ACTIVE'] = 'Y';
 		$filter['=CONFIRM_CODE'] = false;
-		$filter['!=EXTERNAL_AUTH_ID'] = \Bitrix\Im\Model\UserTable::filterExternalUserTypes([\Bitrix\Im\Bot::EXTERNAL_AUTH_ID]);
+		$filter['!=EXTERNAL_AUTH_ID'] = \Bitrix\Im\Model\UserTable::filterExternalUserTypes([Bot::EXTERNAL_AUTH_ID]);
 
 		$filterByUsers = [];
 

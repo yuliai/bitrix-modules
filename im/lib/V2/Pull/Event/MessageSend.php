@@ -48,6 +48,11 @@ class MessageSend extends BaseMessageEvent
 		return $this->chat->getPullRecipients()->getUserIds();
 	}
 
+	public function shouldSendToOnlySpecificRecipients(): bool
+	{
+		return false;
+	}
+
 	protected function getDiffByUser(int $userId): Diff
 	{
 		$diffParams = [];

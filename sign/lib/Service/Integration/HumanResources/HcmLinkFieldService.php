@@ -37,17 +37,15 @@ class HcmLinkFieldService
 			)
 		;
 
-		$response = [
-			self::CATEGORY_REPRESENTATIVE => [
-				'CAPTION' => '',
-				'FIELDS' => $this->mapFieldCollectionForSelector(
-					fieldCollection: $employeeFieldCollection,
-					entityName: self::CATEGORY_REPRESENTATIVE,
-					party: BlockParty::NOT_LAST_PARTY,
-				),
-			],
-		];
+		return $this->buildSelectorResponse($employeeFieldCollection, $withEmployee);
+	}
 
+	private function buildSelectorResponse(
+		Item\Collection\HcmLink\FieldCollection $employeeFieldCollection,
+		bool $withEmployee
+	): array
+	{
+		$response = [];
 		if ($withEmployee)
 		{
 			$response[self::CATEGORY_EMPLOYEE] = [
@@ -59,6 +57,15 @@ class HcmLinkFieldService
 				),
 			];
 		}
+
+		$response[self::CATEGORY_REPRESENTATIVE] = [
+			'CAPTION' => '',
+			'FIELDS' => $this->mapFieldCollectionForSelector(
+				fieldCollection: $employeeFieldCollection,
+				entityName: self::CATEGORY_REPRESENTATIVE,
+				party: BlockParty::NOT_LAST_PARTY,
+			),
+		];
 
 		return $response;
 	}
@@ -95,6 +102,7 @@ class HcmLinkFieldService
 					'multiple' => false,
 					'required' => false,
 					'hidden' => false,
+					'companyId' => $field->companyId,
 				],
 			),
 		);

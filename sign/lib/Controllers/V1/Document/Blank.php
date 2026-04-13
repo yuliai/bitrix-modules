@@ -26,8 +26,9 @@ class Blank extends \Bitrix\Sign\Engine\Controller
 
 	/**
 	 * @param array $files
-	 * @param string $scenario
-	 *
+	 * @param string|null $scenario
+	 * @param bool $forTemplate
+	 * @param bool $hasPlaceholders
 	 * @return array
 	 * @throws ArgumentException
 	 * @throws ObjectPropertyException
@@ -37,6 +38,7 @@ class Blank extends \Bitrix\Sign\Engine\Controller
 		array $files,
 		?string $scenario = null,
 		bool $forTemplate = false,
+		bool $hasPlaceholders = false,
 	): array
 	{
 		/** @var array<int> $fileIds */
@@ -66,7 +68,12 @@ class Blank extends \Bitrix\Sign\Engine\Controller
 			$fileIds[] = $persistentFileId;
 		}
 		$scenario ??= Type\BlankScenario::B2B;
-		$result = Container::instance()->getSignBlankService()->createFromFileIds($fileIds, $scenario, $forTemplate);
+		$result = Container::instance()->getSignBlankService()->createFromFileIds(
+			$fileIds,
+			$scenario,
+			$forTemplate,
+			$hasPlaceholders,
+		);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -78,6 +85,7 @@ class Blank extends \Bitrix\Sign\Engine\Controller
 			'id' => $result->getId(),
 			'userAvatarUrl' => null,
 			'userName' => null,
+			'hasPlaceholders' => $hasPlaceholders,
 		];
 
 		$userId = CurrentUser::get()->getId();

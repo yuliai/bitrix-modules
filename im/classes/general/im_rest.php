@@ -1,7 +1,10 @@
 <?php
 
+use Bitrix\Im\Bot;
 use Bitrix\Im\Chat;
+use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\V2\Chat\NotifyChat;
+use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Im\V2\Link\File\FileCollection;
 use Bitrix\Im\V2\Link\File\FileItem;
 use Bitrix\Im\V2\Link\File\SubtypeGroup;
@@ -212,16 +215,13 @@ class CIMRestService extends IRestService
 		{
 			return;
 		}
-		$result = \Bitrix\Rest\AppTable::getList(array('filter' =>array('=ID' => $arParams['APP_ID'])));
+		$result = \Bitrix\Rest\AppTable::getList(['filter' => ['=ID' => $arParams['APP_ID']]]);
 		if ($result = $result->fetch())
 		{
-			$bots = \Bitrix\Im\Bot::getListCache();
-			foreach ($bots as $bot)
+			$botIds = Bot::getBotIdsByAppId($result['CLIENT_ID']);
+			foreach ($botIds as $botId)
 			{
-				if ($bot['APP_ID'] == $result['CLIENT_ID'])
-				{
-					\Bitrix\Im\Bot::unRegister(Array('BOT_ID' => $bot['BOT_ID']));
-				}
+				Bot::unRegister(['BOT_ID' => $botId]);
 			}
 		}
 	}
@@ -3000,20 +3000,26 @@ class CIMRestService extends IRestService
 
 	public static function botList($arParams, $n, CRestServer $server)
 	{
-		if ($server->getAuthType() == \Bitrix\Rest\SessionAuth\Auth::AUTH_TYPE)
+		if ($server->getAuthType() === \Bitrix\Rest\SessionAuth\Auth::AUTH_TYPE)
 		{
-			throw new \Bitrix\Rest\RestException("Access for this method not allowed by session authorization.", "WRONG_AUTH_TYPE", \CRestServer::STATUS_FORBIDDEN);
+			throw new \Bitrix\Rest\RestException(
+				'Access for this method not allowed by session authorization.',
+				'WRONG_AUTH_TYPE',
+				\CRestServer::STATUS_FORBIDDEN
+			);
 		}
 		$result = Array();
-		$list = \Bitrix\Im\Bot::getListCache();
-		foreach ($list as $botId => $botData)
+		$botQuery = BotTable::getList([
+			'filter' => [
+				'!=TYPE' => Bot::TYPE_NETWORK,
+			],
+			'select' => ['BOT_ID', 'CODE', 'OPENLINE'],
+		]);
+		while ($botData = $botQuery->fetch())
 		{
-			if ($botData['TYPE'] == \Bitrix\Im\Bot::TYPE_NETWORK)
-				continue;
-
-			$result[$botId] = Array(
-				'ID' => $botId,
-				'NAME' => \Bitrix\Im\User::getInstance($botId)->getFullName(),
+			$result[$botData['BOT_ID']] = Array(
+				'ID' => $botData['BOT_ID'],
+				'NAME' => \Bitrix\Im\User::getInstance($botData['BOT_ID'])->getFullName(),
 				'CODE' => $botData['CODE'],
 				'OPENLINE' => $botData['OPENLINE'],
 			);
@@ -3035,7 +3041,7 @@ class CIMRestService extends IRestService
 			 && $server->getAuthType() !== \Bitrix\Rest\SessionAuth\Auth::AUTH_TYPE
 		)
 		{
-			\Bitrix\Im\Bot::setPlatformContext($arParams['PLATFORM_CONTEXT']);
+			Bot::setPlatformContext($arParams['PLATFORM_CONTEXT']);
 		}
 
 		if (isset($arParams['MESSAGE']))
@@ -3313,7 +3319,7 @@ class CIMRestService extends IRestService
 			&& $server->getAuthType() !== \Bitrix\Rest\SessionAuth\Auth::AUTH_TYPE
 		)
 		{
-			\Bitrix\Im\Bot::setPlatformContext($arParams['PLATFORM_CONTEXT']);
+			Bot::setPlatformContext($arParams['PLATFORM_CONTEXT']);
 		}
 
 		if (isset($arParams['MESSAGE_ID']))
@@ -4599,25 +4605,11 @@ class CIMRestService extends IRestService
 			throw new Bitrix\Rest\RestException("Bot code isn't specified", "CODE_ERROR", CRestServer::STATUS_WRONG_REQUEST);
 		}
 
-		if (CModule::IncludeModule('bitrix24'))
-		{
-			$counter = \Bitrix\Im\Model\BotTable::getCount(array('=APP_ID' => $clientId));
-			$restRegisterLimit = \Bitrix\Bitrix24\Feature::getVariable('imbot_rest_register_limit') ?: 100;
-
-			if ($counter >= $restRegisterLimit)
-			{
-				throw new Bitrix\Rest\RestException("Has reached the maximum number of bots for application (max: $restRegisterLimit)", "MAX_COUNT_ERROR", CRestServer::STATUS_WRONG_REQUEST);
-			}
-		}
-
-		$arParams['TYPE'] = in_array($arParams['TYPE'], Array('O', 'B', 'H', 'S'))? $arParams['TYPE']: 'B';
-		$arParams['OPENLINE'] = $arParams['OPENLINE'] == 'Y'? 'Y': 'N';
-
-		if (!(in_array($arParams['TYPE'], Array('S', 'O')) || $arParams['OPENLINE'] == 'Y'))
-		{
-			unset($arParams['EVENT_MESSAGE_UPDATE']);
-			unset($arParams['EVENT_MESSAGE_DELETE']);
-		}
+		$arParams['TYPE'] = in_array($arParams['TYPE'], ['O', 'B', 'H', 'S'], true)
+			? $arParams['TYPE']
+			: 'B'
+		;
+		$arParams['OPENLINE'] = $arParams['OPENLINE'] == 'Y' ? 'Y' : 'N';
 
 		$properties = Array();
 		if (isset($arParams['PROPERTIES']['NAME']))
@@ -4682,14 +4674,14 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$botId = \Bitrix\Im\Bot::register(Array(
-											  'APP_ID' => $clientId,
-											  'CODE' => $arParams['CODE'],
-											  'TYPE' => $arParams['TYPE'],
-											  'OPENLINE' => $arParams['OPENLINE'],
-											  'MODULE_ID' => 'rest',
-											  'PROPERTIES' => $properties
-										  ));
+		$botId = Bot::register([
+			'APP_ID' => $clientId,
+			'CODE' => $arParams['CODE'],
+			'TYPE' => $arParams['TYPE'],
+			'OPENLINE' => $arParams['OPENLINE'],
+			'MODULE_ID' => 'rest',
+			'PROPERTIES' => $properties
+		]);
 		if ($botId)
 		{
 			self::unbindEvent($arApp['ID'], $arApp['CLIENT_ID'], 'im', 'onImBotMessageAdd', 'OnImBotMessageAdd', true);
@@ -4751,20 +4743,32 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
-		if (!isset($bots[$arParams['BOT_ID']]))
+		$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+		if (!$botData->exists())
 		{
-			throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot not found',
+				'BOT_ID_ERROR',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
-		if ($bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+		if ($botData->getAppId() != $clientId)
 		{
-			throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot was installed by another rest application',
+				'APP_ID_ERROR',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
 
-		$result = \Bitrix\Im\Bot::unRegister(Array('BOT_ID' => $arParams['BOT_ID']));
+		$result = Bot::unRegister(['BOT_ID' => $arParams['BOT_ID']]);
 		if (!$result)
 		{
-			throw new Bitrix\Rest\RestException("Bot can't be deleted", "WRONG_REQUEST", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot can\'t be deleted',
+				'WRONG_REQUEST',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
 
 		if ($customClientId)
@@ -4803,14 +4807,22 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
-		if (!isset($bots[$arParams['BOT_ID']]))
+		$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+		if (!$botData->exists())
 		{
-			throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot not found',
+				'BOT_ID_ERROR',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
-		if ($bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+		if ($botData->getAppId() != $clientId)
 		{
-			throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot was installed by another rest application',
+				'APP_ID_ERROR',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
 
 		if ($customClientId)
@@ -4993,9 +5005,12 @@ class CIMRestService extends IRestService
 		}
 		if (isset($arParams['FIELDS']['PROPERTIES']['PERSONAL_PHOTO']))
 		{
-			$avatar = \CRestUtil::saveFile($arParams['FIELDS']['PROPERTIES']['PERSONAL_PHOTO'], $bots[$arParams['BOT_ID']]['CODE'].'.png');
+			$avatar = \CRestUtil::saveFile(
+				$arParams['FIELDS']['PROPERTIES']['PERSONAL_PHOTO'],
+				$botData->getCode() . '.png'
+			);
 			$imageCheck = (new \Bitrix\Main\File\Image($avatar["tmp_name"]))->getInfo();
-			if(
+			if (
 				!$imageCheck
 				|| !$imageCheck->getWidth()
 				|| $imageCheck->getWidth() > 5000
@@ -5027,7 +5042,7 @@ class CIMRestService extends IRestService
 		}
 		else
 		{
-			$result = \Bitrix\Im\Bot::update(Array('BOT_ID' => $arParams['BOT_ID']), $updateFields);
+			$result = Bot::update(['BOT_ID' => $arParams['BOT_ID']], $updateFields);
 			if (!$result)
 			{
 				throw new Bitrix\Rest\RestException("Bot can't be updated", "WRONG_REQUEST", CRestServer::STATUS_WRONG_REQUEST);
@@ -5085,33 +5100,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 
@@ -5233,14 +5251,17 @@ class CIMRestService extends IRestService
 			$arMessageFields['SILENT_CONNECTOR'] = 'Y';
 		}
 
-		$id = \Bitrix\Im\Bot::addMessage(array('BOT_ID' => $arParams['BOT_ID']), $arMessageFields);
+		$id = Bot::addMessage(['BOT_ID' => $arParams['BOT_ID']], $arMessageFields);
 		if (!$id)
 		{
-			throw new Bitrix\Rest\RestException("Message isn't added", "WRONG_REQUEST", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Message isn\'t added',
+				'WRONG_REQUEST',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
 
 		return $id;
-
 	}
 
 	public static function botMessageUpdate($arParams, $n, CRestServer $server)
@@ -5260,33 +5281,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 
@@ -5467,33 +5491,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 
@@ -5529,33 +5556,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 
@@ -5597,33 +5627,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 
@@ -5632,7 +5665,7 @@ class CIMRestService extends IRestService
 			throw new Bitrix\Rest\RestException("Dialog ID can't be empty", "DIALOG_ID_EMPTY", CRestServer::STATUS_WRONG_REQUEST);
 		}
 
-		\Bitrix\Im\Bot::startWriting(Array('BOT_ID' => $arParams['BOT_ID']), $arParams['DIALOG_ID']);
+		Bot::startWriting(['BOT_ID' => $arParams['BOT_ID']], $arParams['DIALOG_ID']);
 
 		return true;
 	}
@@ -5735,17 +5768,16 @@ class CIMRestService extends IRestService
 			throw new Exception('Event is intended for another application');
 		}
 
-		$bot = \Bitrix\Im\Bot::getListCache();
-
 		$commandId = Array();
 		foreach ($arParams[0] as $commandData)
 		{
-			if ($commandData['APP_ID'] == $arHandler['APP_CODE'] && $commandData['BOT_ID'] > 0)
+			$botData = BotData::getInstance((int)$commandData['BOT_ID']);
+			if ($commandData['APP_ID'] == $arHandler['APP_CODE'] && $commandData['BOT_ID'] > 0 && $botData->exists())
 			{
 				$sendBotData = self::getAccessToken($arHandler['APP_ID'], $commandData['BOT_ID']);
 				$sendBotData['AUTH'] = $sendBotData;
 				$sendBotData['BOT_ID'] = $commandData['BOT_ID'];
-				$sendBotData['BOT_CODE'] = $bot[$commandData['BOT_ID']]['CODE'];
+				$sendBotData['BOT_CODE'] = $botData->getCode();
 				$sendBotData['COMMAND'] = $commandData['COMMAND'];
 				$sendBotData['COMMAND_ID'] = $commandData['ID'];
 				$sendBotData['COMMAND_PARAMS'] = $commandData['EXEC_PARAMS'];
@@ -5760,7 +5792,7 @@ class CIMRestService extends IRestService
 						$arParams[2]['TO_USER_ID'] == $commandData['BOT_ID']
 					)
 					{
-						\Bitrix\Im\Bot::startWriting(Array('BOT_ID' => $commandData['BOT_ID']), $arParams[2]['DIALOG_ID']);
+						Bot::startWriting(['BOT_ID' => $commandData['BOT_ID']], $arParams[2]['DIALOG_ID']);
 					}
 				}
 			}
@@ -5771,7 +5803,7 @@ class CIMRestService extends IRestService
 		}
 		$arParams[2]['MESSAGE_ID'] = $arParams[1];
 		$arParams[2]['CHAT_TYPE'] = $arParams[2]['MESSAGE_TYPE'];
-		$arParams[2]['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$arParams[2]['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		if ($arParams[2]['FROM_USER_ID'] > 0)
 		{
@@ -5819,7 +5851,7 @@ class CIMRestService extends IRestService
 			throw new Exception('Event is intended for another application');
 		}
 
-		$bots = Array();
+		$bots = [];
 		foreach ($arParams[0] as $botData)
 		{
 			if ($botData['APP_ID'] == $arHandler['APP_CODE'])
@@ -5830,9 +5862,9 @@ class CIMRestService extends IRestService
 				$sendBotData['BOT_CODE'] = $botData['CODE'];
 				$bots[$botData['BOT_ID']] = $sendBotData;
 
-				if ($arParams[2]['CHAT_ENTITY_TYPE'] != 'LINES' && $botData['TYPE'] != \Bitrix\Im\Bot::TYPE_SUPERVISOR)
+				if ($arParams[2]['CHAT_ENTITY_TYPE'] !== 'LINES' && $botData['TYPE'] !== Bot::TYPE_SUPERVISOR)
 				{
-					\Bitrix\Im\Bot::startWriting(Array('BOT_ID' => $botData['BOT_ID']), $arParams[2]['DIALOG_ID']);
+					Bot::startWriting(['BOT_ID' => $botData['BOT_ID']], $arParams[2]['DIALOG_ID']);
 				}
 			}
 		}
@@ -5843,7 +5875,7 @@ class CIMRestService extends IRestService
 		}
 		$arParams[2]['MESSAGE_ID'] = $arParams[1];
 		$arParams[2]['CHAT_TYPE'] = $arParams[2]['MESSAGE_TYPE'];
-		$arParams[2]['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$arParams[2]['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		if ($arParams[2]['FROM_USER_ID'] > 0)
 		{
@@ -5915,7 +5947,7 @@ class CIMRestService extends IRestService
 
 		$arParams[2]['MESSAGE_ID'] = $arParams[1];
 		$arParams[2]['CHAT_TYPE'] = $arParams[2]['MESSAGE_TYPE'];
-		$arParams[2]['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$arParams[2]['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		if ($arParams[2]['FROM_USER_ID'] > 0)
 		{
@@ -5987,7 +6019,7 @@ class CIMRestService extends IRestService
 
 		$arParams[2]['MESSAGE_ID'] = $arParams[1];
 		$arParams[2]['CHAT_TYPE'] = $arParams[2]['MESSAGE_TYPE'];
-		$arParams[2]['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$arParams[2]['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		if ($arParams[2]['FROM_USER_ID'] > 0)
 		{
@@ -6055,7 +6087,7 @@ class CIMRestService extends IRestService
 
 		$params = $arParams[2];
 		$params['DIALOG_ID'] = $arParams[1];
-		$params['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$params['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		if ($params['USER_ID'] > 0)
 		{
@@ -6075,9 +6107,9 @@ class CIMRestService extends IRestService
 			$user = Array();
 		}
 
-		if ($arParams[2]['CHAT_TYPE'] != 'LINES' && $arParams[0]['TYPE'] != \Bitrix\Im\Bot::TYPE_SUPERVISOR)
+		if ($arParams[2]['CHAT_TYPE'] !== 'LINES' && $arParams[0]['TYPE'] !== Bot::TYPE_SUPERVISOR)
 		{
-			\Bitrix\Im\Bot::startWriting(Array('BOT_ID' => $params['BOT_ID']), $params['DIALOG_ID']);
+			Bot::startWriting(['BOT_ID' => $params['BOT_ID']], $params['DIALOG_ID']);
 		}
 
 		return Array(
@@ -6174,7 +6206,7 @@ class CIMRestService extends IRestService
 
 		$params = $arParams[2];
 		$params['DIALOG_ID'] = $arParams[1];
-		$params['LANGUAGE'] = \Bitrix\Im\Bot::getDefaultLanguage();
+		$params['LANGUAGE'] = Bot::getDefaultLanguage();
 
 		$user = [];
 		if ($params['USER_ID'] > 0)
@@ -6256,22 +6288,34 @@ class CIMRestService extends IRestService
 			throw new Bitrix\Rest\RestException("Command isn't specified", "COMMAND_ERROR", CRestServer::STATUS_WRONG_REQUEST);
 		}
 
-		$arParams['BOT_ID'] = intval($arParams['BOT_ID']);
+		$arParams['BOT_ID'] = (int)$arParams['BOT_ID'];
 		if ($arParams['BOT_ID'] > 0)
 		{
-			$bots = \Bitrix\Im\Bot::getListCache();
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance($arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+			throw new Bitrix\Rest\RestException(
+				'Bot not found',
+				'BOT_ID_ERROR',
+				CRestServer::STATUS_WRONG_REQUEST
+			);
 		}
 		$arParams['COMMON'] = isset($arParams['COMMON']) && $arParams['COMMON'] == 'Y'? 'Y': 'N';
 		$arParams['HIDDEN'] = isset($arParams['HIDDEN']) && $arParams['HIDDEN'] == 'Y'? 'Y': 'N';
@@ -6755,17 +6799,25 @@ class CIMRestService extends IRestService
 		$extranetSupport = isset($arParams['EXTRANET_SUPPORT']) && $arParams['EXTRANET_SUPPORT'] == 'Y'? 'Y': 'N';
 		$livechatSupport = isset($arParams['LIVECHAT_SUPPORT']) && $arParams['LIVECHAT_SUPPORT'] == 'Y'? 'Y': 'N';
 
-		$arParams['BOT_ID'] = intval($arParams['BOT_ID']);
+		$arParams['BOT_ID'] = (int)$arParams['BOT_ID'];
 		if ($arParams['BOT_ID'] > 0)
 		{
-			$bots = \Bitrix\Im\Bot::getListCache();
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance($arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
@@ -7081,12 +7133,12 @@ class CIMRestService extends IRestService
 	{
 		if (!$skipCheck)
 		{
-			$res = \Bitrix\Im\Model\BotTable::getList(array(
-														  'filter' => array(
-															  '=APP_ID' => $appCode,
-														  ),
-														  'select' => array('BOT_ID')
-													  ));
+			$res = BotTable::getList([
+				'filter' => array(
+					'=APP_ID' => $appCode,
+				),
+				'select' => ['BOT_ID']
+			]);
 			if ($handler = $res->fetch())
 			{
 				return false;
@@ -7268,33 +7320,36 @@ class CIMRestService extends IRestService
 			}
 		}
 
-		$bots = \Bitrix\Im\Bot::getListCache();
 		if (isset($arParams['BOT_ID']))
 		{
-			if (!isset($bots[$arParams['BOT_ID']]))
+			$botData = BotData::getInstance((int)$arParams['BOT_ID']);
+			if (!$botData->exists())
 			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
-			if ($clientId && $bots[$arParams['BOT_ID']]['APP_ID'] != $clientId)
+			if ($clientId && $botData->getAppId() != $clientId)
 			{
-				throw new Bitrix\Rest\RestException("Bot was installed by another rest application", "APP_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot was installed by another rest application',
+					'APP_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 		else
 		{
-			$botFound = false;
-			foreach ($bots as $bot)
+			$arParams['BOT_ID'] = Bot::getBotIdByAppId((string)$clientId);
+			if (!$arParams['BOT_ID'])
 			{
-				if ($bot['APP_ID'] == $clientId)
-				{
-					$botFound = true;
-					$arParams['BOT_ID'] = $bot['BOT_ID'];
-					break;
-				}
-			}
-			if (!$botFound)
-			{
-				throw new Bitrix\Rest\RestException("Bot not found", "BOT_ID_ERROR", CRestServer::STATUS_WRONG_REQUEST);
+				throw new Bitrix\Rest\RestException(
+					'Bot not found',
+					'BOT_ID_ERROR',
+					CRestServer::STATUS_WRONG_REQUEST
+				);
 			}
 		}
 

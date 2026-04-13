@@ -1047,7 +1047,7 @@ class CLists
 		$cacheId = 'lists-crm-attached-'.mb_strtolower($entityType);
 		$cacheDir = '/lists/crm/attached/'.mb_strtolower($entityType).'/';
 		$cache = new CPHPCache;
-		if($cache->initCache($cacheTime, $cacheId, $cacheDir))
+		if(false && $cache->initCache($cacheTime, $cacheId, $cacheDir))
 		{
 			$listIblock = $cache->getVars();
 		}
@@ -1080,6 +1080,7 @@ class CLists
 					}
 				}
 			}
+
 			$isListsFeatureEnabled = self::isFeatureEnabled("lists");
 			$isProcessesFeatureEnabled = self::isFeatureEnabled("lists_processes");
 			foreach ($listProperty as $iblockId => $listPropertyId)

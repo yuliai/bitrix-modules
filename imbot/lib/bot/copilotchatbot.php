@@ -6,6 +6,7 @@ use Bitrix\AI\Context;
 use Bitrix\Ai\Services\MarkdownToBBCodeTranslationService;
 use Bitrix\Im\V2\Analytics\CopilotAnalytics;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Im\V2\Integration\AI\SimpleHistoryBuilder;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\MessageCollection;
@@ -283,9 +284,9 @@ class CopilotChatBot extends Base
 			return false;
 		}
 
-		$botCache = Im\Bot::getCache(self::getBotId());
+		$botDataLang = BotData::getInstance(self::getBotId())->getLang();
 
-		$languageId = $botCache['LANG'] ?: Loc::getCurrentLang();
+		$languageId = !empty($botDataLang) ? $botDataLang : Loc::getCurrentLang();
 		Loc::loadLanguageFile(__FILE__, $languageId);
 
 		$newData = array_merge(self::BOT_PROPERTIES, [
@@ -305,7 +306,6 @@ class CopilotChatBot extends Base
 			}
 		}
 
-		Im\Bot::clearCache();
 		Im\Bot::update(['BOT_ID' => self::getBotId()], $newData);
 
 		return true;

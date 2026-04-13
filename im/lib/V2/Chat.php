@@ -3190,10 +3190,9 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 	protected function getValidUsersToAdd(array $userIds): array
 	{
 		$userIds = Group::filterAddedUsersToChatBySonetRestriction($userIds, $this->getContext()->getUserId());
-
-		if ($this->getContext()->getUser()->isExtranet())
+		if ($this->getContext()->getUserId() !== 0)
 		{
-			$userIds = Im\Integration\Socialnetwork\Extranet::filterUserList($userIds) ?: [];
+			$userIds = Im\Integration\Socialnetwork\Extranet::filterUserList($userIds, $this->getContext()->getUserId()) ?: [];
 		}
 
 		$usersToAdd = [];

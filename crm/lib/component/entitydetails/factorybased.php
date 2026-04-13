@@ -481,7 +481,6 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 			),
 			'editorGuid' => $this->getEditorGuid(),
 			'isStageFlowActive' => !$this->isReadOnly(),
-			'analytics' => $this->getExtras()['ANALYTICS'] ?? [],
 		];
 
 		if ($this->factory->isCategoriesEnabled())
@@ -819,8 +818,8 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 			$this->getEntityID(),
 			$this->item->isNew()
 		);
-
-		return array_merge($tabs, $relationTabs, $this->getAttachedListTabs());
+        
+        return array_merge($tabs, $relationTabs, $this->getAttachedListTabs());
 	}
 
 	protected function getTabCodes(): array
