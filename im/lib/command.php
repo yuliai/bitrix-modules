@@ -383,6 +383,15 @@ class Command
 				call_user_func_array(array($params["CLASS"], $params["METHOD_COMMAND_ADD"]), Array($messageId, $messageFields));
 			}
 		}
+
+		try
+		{
+			(new \Bitrix\Im\V2\EventLog\EventLogger())->logCommandAdd($commandList, 'ONIMBOTV2COMMANDADD', $messageId, $messageFields);
+		}
+		catch (\Throwable)
+		{
+		}
+
 		unset(
 			$messageFields['COMMAND'],
 			$messageFields['COMMAND_ID'],
@@ -390,10 +399,7 @@ class Command
 			$messageFields['COMMAND_CONTEXT']
 		);
 
-		foreach(\Bitrix\Main\EventManager::getInstance()->findEventHandlers("im", "onImCommandAdd") as $event)
-		{
-			ExecuteModuleEventEx($event, Array($commandList, $messageId, $messageFields));
-		}
+		Bot::fireRestEventsPerItem('onImCommandAdd', 'onImBotV2CommandAdd', $commandList, [$messageId, $messageFields]);
 
 		return true;
 	}

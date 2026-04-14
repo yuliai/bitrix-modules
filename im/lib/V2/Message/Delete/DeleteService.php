@@ -641,6 +641,18 @@ class DeleteService
 			{
 				ExecuteModuleEventEx($event, [$id, $messageForEvent, $deleteFlags]);
 			}
+
+			try
+			{
+				(new \Bitrix\Im\V2\EventLog\EventLogger())->logUserMessageEvent(
+					'ONIMV2MESSAGEDELETE',
+					fn() => (new \Bitrix\Im\V2\Event\EventPayload())->messageDelete($id, $messageForEvent),
+					$messageForEvent
+				);
+			}
+			catch (\Throwable)
+			{
+			}
 		}
 
 		return $result;

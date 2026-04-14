@@ -21,7 +21,12 @@ class Background
 	{
 		$background = $this->params->get(Params::BACKGROUND_ID)?->getValue();
 
-		return $background ? (string)$background : null;
+		if (!$background)
+		{
+			return null;
+		}
+
+		return BackgroundId::normalize((string)$background);
 	}
 
 	public function set(?string $value): self

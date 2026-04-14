@@ -16,6 +16,16 @@ class CAllIMContactList
 
 	const NETWORK_AUTH_ID = 'replica';
 
+	/**
+	 * Clears in-process GetUserData() static cache.
+	 * Must be called after modifying user-related fields (e.g. EVENT_LOG in b_im_status)
+	 * when the caller needs to see updated values within the same PHP process.
+	 */
+	public static function clearStaticUserDataCache(): void
+	{
+		self::$staticUserDataCache = [];
+	}
+
 	function __construct($user_id = false)
 	{
 		global $USER;
@@ -833,7 +843,7 @@ class CAllIMContactList
 		if ($useCache)
 		{
 			$uid = md5(implode('|', $arFilter['=ID']));
-			$cache_id = 'user_data_v40_'.$uid.'_'.$nameTemplate.'_'.$nameTemplateSite.'_'.$extraFields.'_'.$getPhones.'_'.$getDepartment.'_'.$bIntranetEnable.'_'.$bVoximplantEnable.'_'.LANGUAGE_ID.'_'.$bColorEnabled;
+			$cache_id = 'user_data_v41_'.$uid.'_'.$nameTemplate.'_'.$nameTemplateSite.'_'.$extraFields.'_'.$getPhones.'_'.$getDepartment.'_'.$bIntranetEnable.'_'.$bVoximplantEnable.'_'.LANGUAGE_ID.'_'.$bColorEnabled;
 			$cache_dir = '/bx/imc/userdata/' . mb_substr($uid, 0, 2) . '/' . mb_substr($uid, 2, 2) . '/' . $uid;
 
 			if (empty(self::$staticUserDataCache[$cache_id]))
@@ -944,7 +954,8 @@ class CAllIMContactList
 			->addSelect('ref.STATUS', 'STATUS')
 			->addSelect('ref.IDLE', 'IDLE')
 			->addSelect('ref.MOBILE_LAST_DATE', 'MOBILE_LAST_DATE')
-			->addSelect('ref.DESKTOP_LAST_DATE', 'DESKTOP_LAST_DATE');
+			->addSelect('ref.DESKTOP_LAST_DATE', 'DESKTOP_LAST_DATE')
+			->addSelect('ref.EVENT_LOG', 'EVENT_LOG');
 
 		foreach ($arSelect as $value)
 		{
@@ -1014,6 +1025,7 @@ class CAllIMContactList
 				'departments' => $getDepartment && !empty($arUser["UF_DEPARTMENT"]) && is_array($arUser["UF_DEPARTMENT"])? array_values($arUser["UF_DEPARTMENT"]): Array(),
 				'absent' => self::formatAbsentResult($arUser["ID"]),
 				'type' => $userV2->getType()->value,
+				'event_log' => $arUser['EVENT_LOG'] ?? 'N',
 			);
 
 			$services = [];

@@ -55,11 +55,13 @@ class FeedbackForm
 			? ConvertTimeStamp(Option::get('main', '~controller_group_till', time()))
 			: ''
 		);
-		$presets['b24_partner_id'] = (
-		($this->isCloud && method_exists('CBitrix24', 'getPartnerId'))
-			? \CBitrix24::getPartnerId()
-			: ''
-		);
+		$partnerParams =
+			($this->isCloud && method_exists('CBitrix24', 'getPartnerFormParams'))
+			? \CBitrix24::getPartnerFormParams()
+			: []
+		;
+		$presets['b24_partner_id'] = $partnerParams['partnerId'] ?? '';
+		$presets['b24_partner_name'] = $partnerParams['partnerName'] ?? '';
 
 		$presets['hosturl'] = Main\Engine\UrlManager::getInstance()->getHostUrl();
 		$presets['hostname'] = parse_url($presets['hosturl'], PHP_URL_HOST);

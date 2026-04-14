@@ -178,13 +178,13 @@ class Designer
 	{
 		if (self::$executed)
 			return false;
-		
+
 		list($itemId) = explode(" ", $text);
 
 		$this->execMenuItem($itemId);
 
 		$this->getMenuItems();
-		
+
 		self::$executed = true;
 
 		return true;

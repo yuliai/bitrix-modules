@@ -487,7 +487,8 @@ class PrivateChat extends Chat
 
 		$botJoinFields = [
 			'CHAT_TYPE' => \IM_MESSAGE_PRIVATE,
-			'MESSAGE_TYPE' => \IM_MESSAGE_PRIVATE
+			'MESSAGE_TYPE' => \IM_MESSAGE_PRIVATE,
+			'CHAT_ID' => $chat->getChatId(),
 		];
 		if (
 			User::getInstance($params['FROM_USER_ID'])->isExists()

@@ -3,6 +3,7 @@
 namespace Bitrix\Im\V2\Entity\User\Data;
 
 use Bitrix\Im\Model\BotTable;
+use Bitrix\Im\V2\Chat\Background\BackgroundId;
 use Bitrix\Im\V2\Entity\Command\Command;
 use Bitrix\Im\V2\Rest\RestEntity;
 use Bitrix\Main\Application;
@@ -20,6 +21,7 @@ class BotData implements RestEntity
 		'TYPE_NETWORK' => 'N',
 		'TYPE_OPENLINE' => 'O',
 		'TYPE_SUPERVISOR' => 'S',
+		'TYPE_PERSONAL_ASSISTANT' => 'P',
 	];
 
 	private static array $staticCache = [];
@@ -185,6 +187,10 @@ class BotData implements RestEntity
 		{
 			$type = 'supervisor';
 		}
+		else if ($this->botData['TYPE'] === self::BOT_TYPE['TYPE_PERSONAL_ASSISTANT'])
+		{
+			$type = 'personal';
+		}
 
 		// TODO remove 'openline' and 'id', added for backward compatibility.
 		return [
@@ -195,7 +201,7 @@ class BotData implements RestEntity
 			'isHidden' => $this->botData['HIDDEN'] === 'Y',
 			'isSupportOpenline' => $this->botData['OPENLINE'] === 'Y',
 			'openline' => $this->botData['OPENLINE'] === 'Y',
-			'backgroundId' => $this->botData['BACKGROUND_ID'] ?? null,
+			'backgroundId' => BackgroundId::normalize($this->botData['BACKGROUND_ID'] ?? null),
 			'reactionsEnabled' => ($this->botData['REACTIONS_ENABLED'] ?? 'N') === 'Y',
 		];
 	}

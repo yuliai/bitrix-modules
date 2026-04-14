@@ -1271,7 +1271,7 @@ class CIMHistory
 			WHERE
 				CHAT_ID = ".$chatId." 
 				and DATE_CREATE <= '".$dateCreate->format('Y-m-d H:i:s')."'
-			ORDER BY CHAT_ID, DATE_CREATE desc 
+			ORDER BY b_im_message.DATE_CREATE desc 
 			LIMIT ".$limit;
 
 		if (!$timezone)
@@ -1323,7 +1323,7 @@ class CIMHistory
 			WHERE
 				CHAT_ID = ".$chatId." 
 				and DATE_CREATE >= '".$dateCreate->format('Y-m-d H:i:s')."'
-			ORDER BY CHAT_ID, DATE_CREATE asc 
+			ORDER BY b_im_message.DATE_CREATE asc 
 			LIMIT ".$limit;
 
 		if (!$timezone)

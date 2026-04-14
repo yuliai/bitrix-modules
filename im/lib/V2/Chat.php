@@ -3228,16 +3228,30 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 			return;
 		}
 
+		$dialogId = 'chat' . $this->getId();
+		$chatId = $this->getId();
+		$eventPayload = new \Bitrix\Im\V2\Event\EventPayload();
+		$logger = new EventLog\EventLogger();
+		$allUserIds = $this->getRelations()->getUserIds();
+
+		$eventPayloads = [];
+
 		foreach ($usersToAdd as $userId)
 		{
-			$relation = $this->getRelations()->getByUserId($userId, $this->getId());
+			$relation = $this->getRelations()->getByUserId($userId, $chatId);
 			if ($relation === null)
 			{
 				continue;
 			}
+
+			$eventPayloads[] = fn() => $eventPayload->welcomeMessage($dialogId, [
+				'CHAT_ID' => $chatId,
+				'USER_ID' => $userId,
+			]);
+
 			if ($relation->getUser()->isBot())
 			{
-				IM\Bot::onJoinChat('chat'.$this->getId(), [
+				IM\Bot::onJoinChat($dialogId, [
 					'CHAT_TYPE' => $this->getType(),
 					'MESSAGE_TYPE' => $this->getType(),
 					'BOT_ID' => $userId,
@@ -3249,6 +3263,15 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 					"ACCESS_HISTORY" => (int)$relation->getStartCounter() === 0,
 				]);
 			}
+		}
+
+		try
+		{
+			$logger->logUserChatEvent('ONIMV2JOINCHAT', $eventPayloads, $chatId, $allUserIds);
+		}
+		catch (\Throwable)
+		{
+			// Event logging should not break chat operations.
 		}
 
 		if (!empty($this->getEntityType()))

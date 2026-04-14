@@ -1875,7 +1875,9 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		$messageShortInfo = $option['MESSAGE_SHORT_INFO'] ?? false;
 		$onlyCommonRest = [
 			'id' => $this->getId(),
+			'chatId' => $this->getChatId(),
 			'chat_id' => $this->getChatId(),
+			'authorId' => $authorId,
 			'author_id' => $authorId,
 			'date' => isset($dateCreate) ? $dateCreate->format('c') : null,
 			'text' => $this->getFormattedMessage(),
