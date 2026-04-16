@@ -85,6 +85,23 @@ if ($bizprocPerms >= "R") :
 
 		CBPSchedulerService::setDelayMinLimit($_REQUEST["delay_min_limit"], $_REQUEST['delay_min_limit_type']);
 
+		$delayMaxDays = (int)($_REQUEST["delay_max_days"] ?? 0);
+		CBPSchedulerService::setDelayMaxDays($delayMaxDays);
+		$clearZombieAgentName = \Bitrix\Bizproc\Infrastructure\Agent\ClearZombieInstanceAgent::next();
+		if ($delayMaxDays > 0)
+		{
+			$nextTs = strtotime('tomorrow 01:00');
+			CAgent::AddAgent(
+				$clearZombieAgentName,
+				'bizproc',
+				next_exec: \ConvertTimeStamp($nextTs, 'FULL')
+			);
+		}
+		else
+		{
+			CAgent::RemoveAgent($clearZombieAgentName, "bizproc");
+		}
+
 		foreach ($arSites as $site)
 		{
 			if (isset($_POST["name_template_" . $site["LID"]]))
@@ -209,6 +226,12 @@ if ($bizprocPerms >= "R") :
 					<option value="h"<?= ($delayType == "h") ? " selected" : "" ?>><?= GetMessage("BIZPROC_OPT_TIME_LIMIT_H") ?></option>
 					<option value="d"<?= ($delayType == "d") ? " selected" : "" ?>><?= GetMessage("BIZPROC_OPT_TIME_LIMIT_D") ?></option>
 				</select>
+			</td>
+		</tr>
+		<tr>
+			<td width="50%" valign="top"><?= GetMessage("BIZPROC_OPT_MAX_DAYS_LIMIT") ?>:</td>
+			<td width="50%" valign="top">
+				<input type="text" name="delay_max_days" value="<?= CBPSchedulerService::getDelayMaxDays() ?>" size="5" />
 			</td>
 		</tr>
 		<tr>

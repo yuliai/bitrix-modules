@@ -89,7 +89,18 @@ class DocumentTypeProvider extends BaseProvider
 		{
 			foreach (reset($modules) as $documentType)
 			{
-				$dialog->addItem($this->getDocumentItem($dialog, $documentType));
+				$documentItem = $this->getDocumentItem($dialog, $documentType);
+
+				$sectionItem = $this->getSectionItem($dialog, $documentType);
+				if ($sectionItem)
+				{
+					$sectionItem->addChild($documentItem);
+					$dialog->addItem($sectionItem);
+
+					continue;
+				}
+
+				$dialog->addItem($documentItem);
 			}
 		}
 		else
@@ -100,8 +111,19 @@ class DocumentTypeProvider extends BaseProvider
 				foreach ($moduleDocumentTypes as $documentType)
 				{
 					$documentItem = $this->getDocumentItem($dialog, $documentType);
+
+					$sectionItem = $this->getSectionItem($dialog, $documentType);
+					if ($sectionItem)
+					{
+						$sectionItem->addChild($documentItem);
+						$moduleItem->addChild($sectionItem);
+
+						continue;
+					}
+
 					$moduleItem->addChild($documentItem);
 				}
+
 				$dialog->addItem($moduleItem);
 			}
 		}
@@ -136,6 +158,35 @@ class DocumentTypeProvider extends BaseProvider
 		return $moduleItem;
 	}
 
+	protected function getSectionItem(Dialog $dialog, array $documentType): ?Item
+	{
+		[$moduleId, $entity, $docType] = $documentType;
+
+		$documentService = \CBPRuntime::getRuntime()->getDocumentService();
+		$sectionName = $documentService->getSectionName($documentType);
+
+		if ($sectionName)
+		{
+			$sectionId = 'module:' . $moduleId . '@section:' . md5($sectionName);
+			$sectionItem = $dialog->getItemCollection()->get(static::ENTITY_ID, $sectionId);
+			if ($sectionItem === null)
+			{
+				$sectionItem = new Item([
+					'id' => $sectionId,
+					'entityId' => static::ENTITY_ID,
+					'title' => $sectionName,
+					'tabs' => static::TAB_ID,
+					'searchable' => false,
+				]);
+			}
+
+			return $sectionItem;
+		}
+
+		return null;
+	}
+
+
 	protected function getDocumentItem(Dialog $dialog, array $documentType): Item
 	{
 		[$moduleId, $entity, $docType] = $documentType;
@@ -144,14 +195,12 @@ class DocumentTypeProvider extends BaseProvider
 		if ($documentItem === null)
 		{
 			$documentService = \CBPRuntime::getRuntime()->getDocumentService();
-			$title = $documentService->getDocumentTypeName($documentType);
-			$subtitle = $documentService->getEntityName($moduleId, $entity);
 
 			$documentItem = new Item([
 				'id' => $id,
 				'entityId' => static::ENTITY_ID,
-				'title' => $title,
-				'supertitle' => $subtitle,
+				'title' => $documentService->getDocumentTypeName($documentType),
+				'supertitle' => $documentService->getEntityName($moduleId, $entity),
 				'tabs' => static::TAB_ID,
 				'customData' => [
 					'moduleId' => $moduleId,

@@ -61,22 +61,42 @@ class CBPSchedulerService extends CBPRuntimeService
 		\Bitrix\Main\Config\Option::set('bizproc', 'delay_min_limit', $limit);
 	}
 
+	public static function getDelayMaxDays(): int
+	{
+		return (int)\Bitrix\Main\Config\Option::get('bizproc', 'delay_max_days', 0);
+	}
+
+	public static function setDelayMaxDays(int $days): void
+	{
+		\Bitrix\Main\Config\Option::set('bizproc', 'delay_max_days', $days);
+	}
+
 	public function subscribeOnTime($workflowId, $eventName, $expiresAt, int $sort = self::DEFAULT_SORT)
 	{
 		$workflowId = preg_replace('#[^a-z0-9.]#i', '', $workflowId);
 		$eventName = preg_replace('#[^a-z0-9._-]#i', '', $eventName);
 
+		return self::addAgent($workflowId, $eventName, static::calculateExpirationTime($expiresAt), sort: $sort);
+	}
+
+	public static function calculateExpirationTime(int $timestamp): int
+	{
+		$newTime = $timestamp;
 		$minLimit = static::getDelayMinLimit(false);
+		$now = time();
+
 		if ($minLimit > 0)
 		{
-			$minExpiresAt = time() + $minLimit;
-			if ($minExpiresAt > $expiresAt)
-			{
-				$expiresAt = $minExpiresAt;
-			}
+			$newTime = max($newTime, $now + $minLimit);
 		}
 
-		return self::addAgent($workflowId, $eventName, $expiresAt, sort: $sort);
+		$maxDays = static::getDelayMaxDays();
+		if ($maxDays > 0)
+		{
+			$newTime = min($newTime, $now + $maxDays * 86400);
+		}
+
+		return $newTime;
 	}
 
 	private static function addAgent(
@@ -393,7 +413,7 @@ class CBPSchedulerService extends CBPRuntimeService
 		$event = [
 			'WORKFLOW_ID' => $workflowId,
 			'HANDLER' => $handler,
-			'EVENT_PARAMETERS' => []
+			'EVENT_PARAMETERS' => [],
 		];
 		self::sendEventToWorkflow($event, $counter);
 	}
