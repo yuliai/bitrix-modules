@@ -190,7 +190,7 @@ class Sender extends MicroService\BaseSender
 		return $result;
 	}
 
-	protected function getClientServerName(): string
+	public static function getCurrentPortalUrl(): string
 	{
 		if (defined('BX24_HOST_NAME'))
 		{
@@ -221,6 +221,11 @@ class Sender extends MicroService\BaseSender
 
 
 		return $scheme . $serverName;
+	}
+
+	protected function getClientServerName(): string
+	{
+		return self::getCurrentPortalUrl();
 	}
 
 	public function setSingleUseHttpClientParams(array $params): void

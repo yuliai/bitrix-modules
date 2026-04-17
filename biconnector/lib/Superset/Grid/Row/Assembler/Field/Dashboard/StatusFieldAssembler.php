@@ -6,6 +6,7 @@ use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboard;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Superset\Grid\Settings\DashboardSettings;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Superset\MarketAccessManager;
 use Bitrix\Main\Grid\Row\FieldAssembler;
 use Bitrix\Main\Localization\Loc;
 
@@ -52,6 +53,11 @@ class StatusFieldAssembler extends FieldAssembler
 		}
 
 		if (!$value['IS_ACCESS_ALLOWED'])
+		{
+			return $this->getStatusLabelByStatusType(self::DASHBOARD_STATUS_COMPUTED_PROHIBITED);
+		}
+
+		if (!(MarketAccessManager::getInstance()->isDashboardAvailableByType($value['TYPE'])))
 		{
 			return $this->getStatusLabelByStatusType(self::DASHBOARD_STATUS_COMPUTED_PROHIBITED);
 		}

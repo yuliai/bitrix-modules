@@ -7,6 +7,12 @@ use Bitrix\Main\Diag;
 class MysqliConnection extends \Bitrix\Main\DB\MysqliConnection
 {
 	protected $biMode = false;
+	protected ?string $lastBiError = null;
+
+	protected function createSqlHelper()
+	{
+		return new MysqliSqlHelper($this);
+	}
 
 	/**
 	 * Executes query in special memory saving mode.
@@ -18,19 +24,35 @@ class MysqliConnection extends \Bitrix\Main\DB\MysqliConnection
 	public function biQuery($sql)
 	{
 		$this->biMode = true;
+		$this->lastBiError = null;
 
 		try
 		{
 			$result = parent::query($sql);
 		}
-		catch (\Bitrix\Main\DB\SqlQueryException $_)
+		catch (\Bitrix\Main\DB\ConnectionException $e)
 		{
+			$this->lastBiError = $e->getMessage();
 			$this->biMode = false;
+
+			return false;
+		}
+		catch (\Bitrix\Main\DB\SqlQueryException $e)
+		{
+			$this->lastBiError = $e->getMessage();
+			$this->biMode = false;
+
 			return false;
 		}
 
 		$this->biMode = false;
+
 		return $result;
+	}
+
+	public function getLastBiError(): ?string
+	{
+		return $this->lastBiError;
 	}
 
 	/**
