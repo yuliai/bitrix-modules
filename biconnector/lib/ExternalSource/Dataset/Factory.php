@@ -11,7 +11,7 @@ final class Factory
 	public static function getDataset(
 		BIConnector\ExternalSource\Internal\ExternalDataset $dataset,
 		Main\DB\Connection $dataConnection,
-		string $languageId = null
+		?string $languageId = null
 	): Base
 	{
 		$type = $dataset->getEnumType();

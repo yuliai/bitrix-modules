@@ -67,13 +67,17 @@ abstract class BaseEvent implements Event
 	private function getPullParamsByUsers(): array
 	{
 		$recipients = $this->getRecipients();
-		$basePull = $this->getBasePullParams();
 		$skippedUserIds = $this->getSkippedUserIds();
 		if (!empty($skippedUserIds))
 		{
 			$recipients = array_diff($recipients, $skippedUserIds);
 		}
+		if (empty($recipients))
+		{
+			return [];
+		}
 
+		$basePull = $this->getBasePullParams();
 		$pullParamsByUsers = [];
 		foreach ($recipients as $userId)
 		{
@@ -162,6 +166,11 @@ abstract class BaseEvent implements Event
 	public function shouldSendImmediately(): bool
 	{
 		return false;
+	}
+
+	public function shouldSendSharedPull(): bool
+	{
+		return true;
 	}
 
 	final protected static function applyDiff(array $base, array $diff): array

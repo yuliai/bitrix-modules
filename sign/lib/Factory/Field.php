@@ -44,6 +44,11 @@ final class Field
 		FieldType::POSITION,
 	];
 
+	private const EMPLOYEE_INITIATED_UNSUPPORTED_USER_FIELD_TYPES = [
+		FieldType::ADDRESS,
+		FieldType::URL,
+	];
+
 	private const ADDRESS_SUBFIELD_CODES = [
 		'ADDRESS_1',
 		'ADDRESS_2',
@@ -224,6 +229,7 @@ final class Field
 					$block,
 					$registeredFields,
 					$member,
+					$document,
 				),
 				BlockCode::REQUISITES, BlockCode::MY_REQUISITES => $this->createRequisiteFields(
 					$block,
@@ -304,6 +310,7 @@ final class Field
 		Item\Block $block,
 		Item\FieldCollection $registeredFields,
 		Item\Member $member,
+		?Item\Document $document = null,
 	): Item\FieldCollection
 	{
 		$fieldCode = $block->data['field'] ?? '';
@@ -319,7 +326,16 @@ final class Field
 			return new Item\FieldCollection();
 		}
 
-		$fieldType = match ($fieldDescription['TYPE'] ?? '')
+		$sourceFieldType = (string)($fieldDescription['TYPE'] ?? '');
+		if (
+			$document !== null
+			&& $this->shouldSkipUnsupportedEmployeeInitiatedFieldType($document, $member, $sourceFieldType)
+		)
+		{
+			return new Item\FieldCollection();
+		}
+
+		$fieldType = match ($sourceFieldType)
 		{
 			FieldType::DATE, FieldType::DATETIME => FieldType::DATE,
 			FieldType::LIST => FieldType::LIST,
@@ -511,7 +527,7 @@ final class Field
 		$profileProvider = Container::instance()->getServiceProfileProvider();
 		if (!$profileProvider->isProfileField($fieldCodeForCheck))
 		{
-			return $this->createCrmReferenceFields($block, $registeredFields, $member);
+			return $this->createCrmReferenceFields($block, $registeredFields, $member, $document);
 		}
 
 		if ($block->role === Type\Member\Role::ASSIGNEE && $document->representativeId === null)
@@ -520,7 +536,13 @@ final class Field
 		}
 
 		$fieldDescription = $profileProvider->getDescriptionByFieldName($fieldCodeForCheck);
-		$fieldType = $this->fieldService->convertUserFieldType($fieldDescription['type'] ?? '');
+		$sourceFieldType = (string)($fieldDescription['type'] ?? '');
+		if ($this->shouldSkipUnsupportedEmployeeInitiatedFieldType($document, $member, $sourceFieldType))
+		{
+			return new Item\FieldCollection();
+		}
+
+		$fieldType = $this->fieldService->convertUserFieldType($sourceFieldType);
 
 		if ($fieldCodeForCheck === self::SNILS_FIELD_CODE)
 		{
@@ -708,7 +730,13 @@ final class Field
 			return new Item\FieldCollection();
 		}
 
-		$fieldType = $this->fieldService->convertUserFieldType($fieldDescription['type'] ?? '');
+		$sourceFieldType = (string)($fieldDescription['type'] ?? '');
+		if ($this->shouldSkipUnsupportedEmployeeInitiatedFieldType($document, $member, $sourceFieldType))
+		{
+			return new Item\FieldCollection();
+		}
+
+		$fieldType = $this->fieldService->convertUserFieldType($sourceFieldType);
 		$fieldName = NameHelper::create($block->code, $fieldType, $member->party, $fieldCode);
 
 		return $this->makeFieldsByUserFieldDescription(
@@ -841,6 +869,20 @@ final class Field
 	private function getFieldRequiredByType(string $fieldType): ?bool
 	{
 		return in_array($fieldType, self::NOT_REQUIRED_FIELD_TYPES, true) ? false : null;
+	}
+
+	private function shouldSkipUnsupportedEmployeeInitiatedFieldType(
+		Item\Document $document,
+		Item\Member $member,
+		string $sourceFieldType,
+	): bool
+	{
+		if ($member->role !== Type\Member\Role::SIGNER || !$document->isInitiatedByEmployee())
+		{
+			return false;
+		}
+
+		return in_array(strtolower($sourceFieldType), self::EMPLOYEE_INITIATED_UNSUPPORTED_USER_FIELD_TYPES, true);
 	}
 
 	private function createB2eRegionalFields(

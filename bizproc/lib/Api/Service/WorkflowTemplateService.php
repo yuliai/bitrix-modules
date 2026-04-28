@@ -11,14 +11,15 @@ use Bitrix\Bizproc\Api\Response\WorkflowTemplateService as WorkflowTemplateRespo
 use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
+use Bitrix\Bizproc\Internal\Service\Trigger\Schedule\ScheduledTriggerSyncService;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Query\Query;
 
 class WorkflowTemplateService
 {
 	private const TRACK_ON_INTERVAL = 7 * 86400; // 7 days in seconds
-
 	private WorkflowAccessService $accessService;
 
 	public function __construct(?WorkflowAccessService $accessService = null)
@@ -217,6 +218,8 @@ class WorkflowTemplateService
 			);
 		}
 
+		ServiceLocator::getInstance()->get(ScheduledTriggerSyncService::class)?->syncByTemplate($request->templateId);
+
 		return WorkflowTemplateResponse\SetConstantsResponse::createOk();
 	}
 
@@ -412,9 +415,7 @@ class WorkflowTemplateService
 		$file = $request->file;
 		if (is_uploaded_file($file['tmp_name']))
 		{
-			$fileHandle = fopen($file['tmp_name'], 'rb');
-			$data = fread($fileHandle, filesize($file['tmp_name']));
-			fclose($fileHandle);
+			$data = (new \Bitrix\Main\IO\File($file['tmp_name']))->getContents();
 
 			try
 			{

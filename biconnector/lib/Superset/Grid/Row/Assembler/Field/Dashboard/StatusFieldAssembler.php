@@ -65,7 +65,7 @@ class StatusFieldAssembler extends FieldAssembler
 		return $this->getStatusLabelByStatusType($value['STATUS'], $value['ID']);
 	}
 
-	private function getStatusLabelByStatusType(string $status, int $dashboardId = null): string
+	private function getStatusLabelByStatusType(string $status, ?int $dashboardId = null): string
 	{
 		switch ($status)
 		{

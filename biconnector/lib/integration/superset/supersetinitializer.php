@@ -11,6 +11,7 @@ use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable;
 use Bitrix\BIConnector\Superset\ActionFilter\ProxyAuth;
+use Bitrix\BIConnector\Superset\Config\DatasetSettings;
 use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
 use Bitrix\BIConnector\Superset\DomainLinkService;
 use Bitrix\BIConnector\Superset\Grid\DashboardGrid;
@@ -546,6 +547,8 @@ final class SupersetInitializer
 		Option::delete('biconnector', ['name' => SystemDashboardManager::SYSTEM_DASHBOARDS_DELETED_CODES_OPTION]);
 		Option::delete('biconnector', ['name' => '~superset_init_required_dataset_table_hash']);
 		Option::delete('biconnector', ['name' => '~superset_init_required_dataset_last_attempt']);
+		Option::delete('biconnector', ['name' => DatasetSettings::TYPING_OPTION_NAME]);
+		Option::delete('biconnector', ['name' => DatasetSettings::TYPING_LOCK_OPTION_NAME]);
 		Option::delete('biconnector', ['name' => DataTimezone::OPTION_NAME]);
 
 		\CUserOptions::DeleteOptionsByName('main.ui.filter', DashboardGrid::SUPERSET_DASHBOARD_GRID_ID);

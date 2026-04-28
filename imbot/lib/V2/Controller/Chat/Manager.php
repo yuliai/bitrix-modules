@@ -44,6 +44,13 @@ class Manager extends BotController
 			return null;
 		}
 
+		if (empty($userIds))
+		{
+			$this->addError(new \Bitrix\Main\Error('userIds is required', 'EMPTY_USER_IDS'));
+
+			return null;
+		}
+
 		if ($chat instanceof GroupChat)
 		{
 			$chat->addManagers(array_map('intval', $userIds));
@@ -62,6 +69,13 @@ class Manager extends BotController
 	{
 		if (!empty($this->getErrors()))
 		{
+			return null;
+		}
+
+		if (empty($userIds))
+		{
+			$this->addError(new \Bitrix\Main\Error('userIds is required', 'EMPTY_USER_IDS'));
+
 			return null;
 		}
 

@@ -977,6 +977,14 @@ class CIMRestService extends IRestService
 		$arParams = array_change_key_case($arParams, CASE_UPPER);
 
 		$config = Array('JSON' => 'Y');
+		if (($arParams['WITH_COUNTERS'] ?? 'Y') === 'Y')
+		{
+			$config['WITH_COUNTERS'] = 'Y';
+		}
+		else
+		{
+			$config['WITH_COUNTERS'] = 'N';
+		}
 
 		if ($arParams['ONLY_OPENLINES'] === 'Y')
 		{
@@ -1025,6 +1033,14 @@ class CIMRestService extends IRestService
 		$parseText = $arParams['PARSE_TEXT'] ?? null;
 
 		$config = Array('JSON' => 'Y');
+		if (($arParams['WITH_COUNTERS'] ?? 'Y') === 'Y')
+		{
+			$config['WITH_COUNTERS'] = 'Y';
+		}
+		else
+		{
+			$config['WITH_COUNTERS'] = 'N';
+		}
 		if (isset($arParams['SKIP_OPENLINES']) && $arParams['SKIP_OPENLINES'] === 'Y')
 		{
 			$config['SKIP_OPENLINES'] = 'Y';
@@ -3058,12 +3074,12 @@ class CIMRestService extends IRestService
 		]);
 		while ($botData = $botQuery->fetch())
 		{
-			$result[$botData['BOT_ID']] = Array(
-				'ID' => $botData['BOT_ID'],
+			$result[(int)$botData['BOT_ID']] = [
+				'ID' => (int)$botData['BOT_ID'],
 				'NAME' => \Bitrix\Im\User::getInstance($botData['BOT_ID'])->getFullName(),
 				'CODE' => $botData['CODE'],
 				'OPENLINE' => $botData['OPENLINE'],
-			);
+			];
 		}
 
 		return $result;
@@ -6566,11 +6582,6 @@ class CIMRestService extends IRestService
 		}
 
 		$updateFields = Array();
-
-		if (isset($arParams['FIELDS']['COMMAND']) && !empty($arParams['FIELDS']['COMMAND']))
-		{
-			$updateFields['COMMAND'] = $arParams['FIELDS']['COMMAND'];
-		}
 
 		if (isset($arParams['FIELDS']['HIDDEN']) && !empty($arParams['FIELDS']['HIDDEN']))
 		{

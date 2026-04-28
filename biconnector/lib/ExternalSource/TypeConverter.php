@@ -34,7 +34,7 @@ final class TypeConverter
 	 * @param string $delimiter
 	 * @return float
 	 */
-	public static function convertToDouble(mixed $value, int $precision = null, string $delimiter = '.'): float
+	public static function convertToDouble(mixed $value, ?int $precision = null, string $delimiter = '.'): float
 	{
 		if (is_string($value))
 		{
@@ -187,7 +187,7 @@ final class TypeConverter
 	 * @param string $delimiter
 	 * @return float
 	 */
-	public static function convertToMoney(mixed $value, int $precision = null, string $delimiter = '.'): float
+	public static function convertToMoney(mixed $value, ?int $precision = null, string $delimiter = '.'): float
 	{
 		if (is_string($value))
 		{

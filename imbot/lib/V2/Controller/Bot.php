@@ -8,6 +8,7 @@ use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\V2\Entity\Bot\BotCollection;
 use Bitrix\Im\V2\Entity\Bot\BotItem;
 use Bitrix\Im\V2\Entity\Bot\BotType;
+use Bitrix\Im\V2\Chat\Background\Background;
 use Bitrix\Im\V2\Entity\User\Data\BotData;
 use Bitrix\Imbot\V2\Error\BotError;
 use Bitrix\Main\Engine\Action;
@@ -170,7 +171,7 @@ class Bot extends BotController
 		unset($properties['avatar']);
 
 		$userProperties = $this->mapUserProperties($properties);
-		$dbBackgroundId = self::normalizeBackgroundId($backgroundId);
+		$dbBackgroundId = Background::normalizeBackgroundId($backgroundId);
 
 		$registerFields = array_merge($methods, [
 			'CODE' => $code,
@@ -284,7 +285,7 @@ class Bot extends BotController
 		}
 		if (isset($fields['backgroundId']))
 		{
-			$botUpdateFields['BACKGROUND_ID'] = self::normalizeBackgroundId($fields['backgroundId']);
+			$botUpdateFields['BACKGROUND_ID'] = Background::normalizeBackgroundId($fields['backgroundId']);
 		}
 		if (isset($fields['eventMode']))
 		{
@@ -432,15 +433,6 @@ class Bot extends BotController
 		return null;
 	}
 
-	public static function normalizeBackgroundId(?string $backgroundId): ?string
-	{
-		if ($backgroundId === null || $backgroundId === '')
-		{
-			return null;
-		}
-
-		return $backgroundId;
-	}
 
 	private function prepareWebhookUrl(?string $webhookUrl): ?array
 	{
@@ -604,7 +596,7 @@ class Bot extends BotController
 		$mapped = [
 			'NAME' => $properties['name'] ?? $properties['NAME'] ?? '',
 			'LAST_NAME' => $properties['lastName'] ?? $properties['LAST_NAME'] ?? '',
-			'COLOR' => $properties['color'] ?? $properties['COLOR'] ?? '',
+			'COLOR' => self::normalizeColorCode($properties['color'] ?? $properties['COLOR'] ?? ''),
 			'WORK_POSITION' => $properties['workPosition'] ?? $properties['WORK_POSITION'] ?? '',
 			'PERSONAL_GENDER' => $properties['gender'] ?? $properties['PERSONAL_GENDER'] ?? '',
 		];

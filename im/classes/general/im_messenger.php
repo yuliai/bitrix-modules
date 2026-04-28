@@ -4,14 +4,12 @@ use Bitrix\Im\Integration\Imopenlines;
 use Bitrix\Im\Message;
 use Bitrix\Im\Notify;
 use Bitrix\Im\Text;
-use Bitrix\Im\V2\Analytics\MessageAnalytics;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Entity\User\UserGuest;
 use Bitrix\Im\V2\Message\Params;
-use Bitrix\Im\V2\Message\ReadService;
 use Bitrix\Im\V2\Message\Send\Push\MobilePush;
+use Bitrix\Im\V2\Reading\Counter\Notification\CountersUpdater;
 use Bitrix\Im\V2\Relation;
-use Bitrix\Im\V2\RelationCollection;
 use Bitrix\Im\V2\Sync;
 use Bitrix\Main\Application;
 use Bitrix\Main\Engine\Response\Converter;
@@ -635,6 +633,11 @@ class CIMMessenger
 					$arParams['NOTIFY_BUTTONS'] = serialize($arFields["NOTIFY_BUTTONS"]);
 				}
 
+				\Bitrix\Main\DI\ServiceLocator::getInstance()
+					->get(\Bitrix\Im\V2\Notification\ChatProvider::class)
+					->prime((int)$arFields['TO_USER_ID'], $chatId)
+				;
+
 				if ($skipAdd)
 				{
 					$messageID = time();
@@ -668,7 +671,7 @@ class CIMMessenger
 
 					if ($withTagNotify)
 					{
-						$result = Notify::deleteOldNotifyByTag($messageID, $arParams);
+						$result = Notify::deleteOldNotifyByTag($messageID, $arParams, (int)$arFields['TO_USER_ID']);
 						if (!$result->hasResult())
 						{
 							return false;
@@ -677,7 +680,8 @@ class CIMMessenger
 						$arFields['PARAMS']['USERS'] = $result->getResult();
 					}
 
-					$counter = (new ReadService($userId))->getCounterService()->getByChatWithOverflow($relation->getChatId());
+					$service = \Bitrix\Main\DI\ServiceLocator::getInstance()->get(\Bitrix\Im\V2\Reading\Counter\Notification\CountersService::class);
+					$counter = $service->getForUser($userId);
 
 					if (!empty($arFields['PARAMS']))
 					{
@@ -825,9 +829,9 @@ class CIMMessenger
 		}
 
 		$message->setMessageId($messageId);
+		$messages = \Bitrix\Im\V2\MessageCollection::createFromArray([$message]);
 
-		$relationCollection = (new RelationCollection())->add($relation);
-		(new ReadService($userId))->markNotificationUnread($message, $relationCollection);
+		\Bitrix\Main\DI\ServiceLocator::getInstance()->get(CountersUpdater::class)->add($messages, $userId);
 
 		return $message;
 	}
@@ -2372,8 +2376,7 @@ class CIMMessenger
 
 	public static function GetUnreadCounter($userId)
 	{
-		//todo return counters for user
-		return (new \Bitrix\Im\V2\Message\CounterService($userId))->getForNotifyChat();
+		return 0;
 		//$count = 0;
 		/*$userId = intval($userId);
 		if ($userId <= 0)

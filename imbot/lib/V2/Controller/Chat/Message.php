@@ -234,7 +234,7 @@ class Message extends BotController
 	 */
 	public function deleteAction(
 		\Bitrix\Im\V2\Message $message,
-		string $complete = 'N',
+		$complete = 'N',
 	): ?array
 	{
 		if (!empty($this->getErrors()))
@@ -242,7 +242,9 @@ class Message extends BotController
 			return null;
 		}
 
-		$deleteService = new DeleteService(new MessageCollection([$message]));
+		$messages = new MessageCollection();
+		$messages->add($message);
+		$deleteService = new DeleteService($messages);
 		$deleteService->setContext($this->getBotContext());
 
 		if (self::normalizeBooleanVariable($complete))

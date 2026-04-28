@@ -12,14 +12,20 @@ class Command extends BotController
 {
 	/**
 	 * @restMethod imbot.v2.Command.register
+	 *
+	 * Accepts both formats for backward compatibility:
+	 * - New (preferred): fields: {command, title, params, common, hidden, extranetSupport}
+	 * - Legacy: flat parameters (command, title, params, common, hidden, extranetSupport)
 	 */
 	public function registerAction(
-		string $command,
+		array $fields = [],
+		// Legacy named parameters — backward compatibility
+		?string $command = null,
 		?array $title = null,
 		?array $params = null,
-		string $common = 'N',
-		string $hidden = 'N',
-		string $extranetSupport = 'N',
+		$common = 'N',
+		$hidden = 'N',
+		$extranetSupport = 'N',
 	): ?array
 	{
 		if (!empty($this->getErrors()))
@@ -27,8 +33,18 @@ class Command extends BotController
 			return null;
 		}
 
+		$fields = $this->resolveRegisterFields($fields, $command, $title, $params, $common, $hidden, $extranetSupport);
+
 		$botId = $this->getBotId();
 		$clientId = $this->getClientId();
+
+		$command = $fields['command'] ?? '';
+		if (!is_string($command))
+		{
+			$this->addError(new Error('Command name must be a string', 'COMMAND_NAME_INVALID'));
+
+			return null;
+		}
 
 		if (str_starts_with($command, '/'))
 		{
@@ -42,45 +58,66 @@ class Command extends BotController
 			return null;
 		}
 
-		$existingCommands = \Bitrix\Im\Command::getListCache();
-		foreach ($existingCommands as $cmdId => $existingCmd)
+		$commands = \Bitrix\Im\Command::getListCache();
+		foreach ($commands as $registeredCommandId => $registeredCommand)
 		{
 			if (
-				(int)$existingCmd['BOT_ID'] === $botId
-				&& $existingCmd['COMMAND'] === $command
-				&& $existingCmd['APP_ID'] === $clientId
+				(int)$registeredCommand['BOT_ID'] === $botId
+				&& $registeredCommand['COMMAND'] === $command
+				&& $registeredCommand['APP_ID'] === $clientId
 			)
 			{
 				return [
-					'command' => $this->formatCommand($cmdId),
+					'command' => $this->formatCommand($registeredCommandId),
 				];
 			}
 		}
 
+		$title = $fields['title'] ?? null;
+		$params = $fields['params'] ?? null;
 		$langSet = [];
 		if ($title !== null)
 		{
+			$normalizedParams = [];
+			if ($params !== null)
+			{
+				foreach ($params as $lang => $text)
+				{
+					$normalizedParams[mb_strtolower($lang)] = $text;
+				}
+			}
+
 			foreach ($title as $langId => $titleText)
 			{
+				$langId = mb_strtolower($langId);
 				$langEntry = [
 					'LANGUAGE_ID' => $langId,
 					'TITLE' => $titleText,
 				];
-				if ($params !== null && isset($params[$langId]))
+				if (isset($normalizedParams[$langId]))
 				{
-					$langEntry['PARAMS'] = $params[$langId];
+					$langEntry['PARAMS'] = $normalizedParams[$langId];
 				}
 				$langSet[] = $langEntry;
 			}
+		}
+
+		$isHidden = self::normalizeBooleanVariable($fields['hidden'] ?? 'N');
+
+		if (!$isHidden && empty($langSet))
+		{
+			$this->addError(new Error('Title is required for visible commands', 'COMMAND_TITLE_REQUIRED'));
+
+			return null;
 		}
 
 		$registerFields = [
 			'MODULE_ID' => 'rest',
 			'BOT_ID' => $botId,
 			'COMMAND' => $command,
-			'COMMON' => self::normalizeBooleanVariable($common) ? 'Y' : 'N',
-			'HIDDEN' => self::normalizeBooleanVariable($hidden) ? 'Y' : 'N',
-			'EXTRANET_SUPPORT' => self::normalizeBooleanVariable($extranetSupport) ? 'Y' : 'N',
+			'COMMON' => self::normalizeBooleanVariable($fields['common'] ?? 'N') ? 'Y' : 'N',
+			'HIDDEN' => $isHidden ? 'Y' : 'N',
+			'EXTRANET_SUPPORT' => self::normalizeBooleanVariable($fields['extranetSupport'] ?? 'N') ? 'Y' : 'N',
 			'APP_ID' => $clientId,
 			'LANG' => $langSet,
 		];
@@ -96,6 +133,31 @@ class Command extends BotController
 
 		return [
 			'command' => $this->formatCommand($commandId),
+		];
+	}
+
+	private function resolveRegisterFields(
+		array $fields,
+		?string $command,
+		?array $title,
+		?array $params,
+		$common,
+		$hidden,
+		$extranetSupport,
+	): array
+	{
+		if (!empty($fields))
+		{
+			return $fields;
+		}
+
+		return [
+			'command' => $command,
+			'title' => $title,
+			'params' => $params,
+			'common' => $common,
+			'hidden' => $hidden,
+			'extranetSupport' => $extranetSupport,
 		];
 	}
 
@@ -156,12 +218,43 @@ class Command extends BotController
 
 		if (isset($fields['command']))
 		{
-			$cmd = $fields['command'];
-			if (str_starts_with($cmd, '/'))
+			if (!is_string($fields['command']))
 			{
-				$cmd = mb_substr($cmd, 1);
+				$this->addError(new Error('Command name must be a string', 'COMMAND_NAME_INVALID'));
+
+				return null;
 			}
-			$updateFields['COMMAND'] = $cmd;
+
+			$command = $fields['command'];
+			if (str_starts_with($command, '/'))
+			{
+				$command = mb_substr($command, 1);
+			}
+
+			if ($command === '')
+			{
+				$this->addError(new Error('Command name cannot be empty', 'COMMAND_NAME_EMPTY'));
+
+				return null;
+			}
+
+			$botId = $this->getBotId();
+			$commands = \Bitrix\Im\Command::getListCache();
+			foreach ($commands as $registeredCommandId => $registeredCommand)
+			{
+				if (
+					$registeredCommandId !== $commandId
+					&& (int)$registeredCommand['BOT_ID'] === $botId
+					&& $registeredCommand['COMMAND'] === $command
+				)
+				{
+					$this->addError(new Error('Command with this name already exists', 'COMMAND_ALREADY_EXISTS'));
+
+					return null;
+				}
+			}
+
+			$updateFields['COMMAND'] = $command;
 		}
 
 		if (isset($fields['common']))
@@ -181,20 +274,52 @@ class Command extends BotController
 
 		if (isset($fields['title']))
 		{
-			$langSet = [];
-			foreach ($fields['title'] as $langId => $titleText)
+			if (!is_array($fields['title']))
 			{
-				$langEntry = [
-					'LANGUAGE_ID' => $langId,
-					'TITLE' => $titleText,
-				];
-				if (isset($fields['params'][$langId]))
-				{
-					$langEntry['PARAMS'] = $fields['params'][$langId];
-				}
-				$langSet[] = $langEntry;
+				$this->addError(new Error('Title must be an object with language keys', 'COMMAND_TITLE_INVALID'));
+
+				return null;
 			}
-			$updateFields['LANG'] = $langSet;
+
+			$langSet = [];
+			$orm = \Bitrix\Im\Model\CommandLangTable::getList([
+				'filter' => ['=COMMAND_ID' => $commandId],
+			]);
+			while ($row = $orm->fetch())
+			{
+				$langSet[$row['LANGUAGE_ID']] = [
+					'LANGUAGE_ID' => $row['LANGUAGE_ID'],
+					'TITLE' => $row['TITLE'],
+					'PARAMS' => $row['PARAMS'] ?? '',
+				];
+			}
+
+			$normalizedParams = [];
+			if (isset($fields['params']) && is_array($fields['params']))
+			{
+				foreach ($fields['params'] as $lang => $text)
+				{
+					$normalizedParams[mb_strtolower($lang)] = $text;
+				}
+			}
+
+			foreach ($fields['title'] as $langId => $title)
+			{
+				$langId = mb_strtolower($langId);
+				if ($title === null)
+				{
+					unset($langSet[$langId]);
+					continue;
+				}
+
+				$langSet[$langId] = [
+					'LANGUAGE_ID' => $langId,
+					'TITLE' => $title,
+					'PARAMS' => $normalizedParams[$langId] ?? $langSet[$langId]['PARAMS'] ?? '',
+				];
+			}
+
+			$updateFields['LANG'] = array_values($langSet);
 		}
 
 		$result = \Bitrix\Im\Command::update(
@@ -346,15 +471,15 @@ class Command extends BotController
 			return null;
 		}
 
-		$cmd = $commands[$commandId];
+		$command = $commands[$commandId];
 
 		return [
-			'id' => (int)$cmd['ID'],
-			'botId' => (int)$cmd['BOT_ID'],
-			'command' => '/' . $cmd['COMMAND'],
-			'common' => $cmd['COMMON'] === 'Y',
-			'hidden' => $cmd['HIDDEN'] === 'Y',
-			'extranetSupport' => $cmd['EXTRANET_SUPPORT'] === 'Y',
+			'id' => (int)$command['ID'],
+			'botId' => (int)$command['BOT_ID'],
+			'command' => '/' . $command['COMMAND'],
+			'common' => $command['COMMON'] === 'Y',
+			'hidden' => $command['HIDDEN'] === 'Y',
+			'extranetSupport' => $command['EXTRANET_SUPPORT'] === 'Y',
 		];
 	}
 }

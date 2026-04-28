@@ -247,6 +247,12 @@ class Command
 		}
 
 		$update = Array();
+		if (isset($updateFields['COMMAND']) && $updateFields['COMMAND'] !== '')
+		{
+			$update['COMMAND'] = mb_substr($updateFields['COMMAND'], 0, 1) == '/'
+				? mb_substr($updateFields['COMMAND'], 1)
+				: $updateFields['COMMAND'];
+		}
 		if (isset($updateFields['CLASS']) && !empty($updateFields['CLASS']))
 		{
 			$update['CLASS'] = $updateFields['CLASS'];

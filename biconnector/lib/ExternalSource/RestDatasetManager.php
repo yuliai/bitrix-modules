@@ -12,7 +12,7 @@ use Bitrix\Main\Result;
 
 final class RestDatasetManager extends DatasetManager
 {
-	public static function addWithDataset(array $dataset, array $fields, array $settings = [], int $sourceId = null): Result
+	public static function addWithDataset(array $dataset, array $fields, array $settings = [], ?int $sourceId = null): Result
 	{
 		$result = parent::add($dataset, $fields, $settings, $sourceId);
 		if (!$result->isSuccess())
@@ -193,7 +193,7 @@ final class RestDatasetManager extends DatasetManager
 		array $dataset,
 		array $fields,
 		array $settings,
-		int $sourceId = null
+		?int $sourceId = null
 	): Result
 	{
 		$result = parent::checkAndPrepareBeforeAdd($dataset, $fields, $settings, $sourceId);

@@ -66,11 +66,7 @@ class Chat extends BotController
 		$type = $fields['type'] ?? $fields['TYPE'] ?? 'group';
 		$chatType = $this->getValidatedType($type);
 
-		$color = $fields['color'] ?? $fields['COLOR'] ?? '';
-		if ($color !== '')
-		{
-			$color = mb_strtoupper($color);
-		}
+		$color = self::normalizeColorCode($fields['color'] ?? $fields['COLOR'] ?? '');
 
 		$chatFields = [
 			'TYPE' => $chatType,
@@ -146,7 +142,11 @@ class Chat extends BotController
 
 		if (isset($fields['color']))
 		{
-			$chat->setColor(mb_strtoupper($fields['color']));
+			$color = self::normalizeColorCode($fields['color']);
+			if ($color !== '')
+			{
+				$chat->setColor($color);
+			}
 		}
 
 		$result = $chat->save();

@@ -285,6 +285,22 @@ abstract class BotController extends BaseController
 		return in_array(mb_strtoupper((string)$value), ['Y', '1', 'TRUE'], true);
 	}
 
+	protected static function normalizeColorCode(string $color): string
+	{
+		if ($color === '')
+		{
+			return '';
+		}
+
+		$code = mb_strtoupper(preg_replace('/([a-z])([A-Z])/', '$1_$2', $color));
+		if (!\Bitrix\Im\Color::isSafeColor($code))
+		{
+			return '';
+		}
+
+		return $code;
+	}
+
 	public function getBotId(): int
 	{
 		return $this->botId;

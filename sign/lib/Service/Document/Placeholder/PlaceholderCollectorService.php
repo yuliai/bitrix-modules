@@ -2,6 +2,7 @@
 
 namespace Bitrix\Sign\Service\Document\Placeholder;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Sign\Helper\Field\NameHelper;
 use Bitrix\Sign\Item\Document\Placeholder\HcmLinkCompany;
@@ -66,7 +67,10 @@ class PlaceholderCollectorService
 
 		$fieldsData = $fieldsDataResult->getData();
 		$placeholders = $this->createPlaceholdersFromFields($fieldsData);
-		$placeholders['externalB2eDocument'] = $this->getExternalB2eDocumentPlaceholders();
+		$placeholders['externalB2eDocument'] = Application::getInstance()->getLicense()->getRegion() === 'ru'
+			? $this->getExternalB2eDocumentPlaceholders()
+			: new PlaceholderCollection()
+		;
 		
 		$placeholders = $this->convertAllPlaceholdersToAliases($placeholders);
 
@@ -81,10 +85,10 @@ class PlaceholderCollectorService
 	{
 		$loadPlaceholdersResult = new Result();
 		$placeholdersFromCache = $this->placeholderCacheService->getPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId);
-//		if ($placeholdersFromCache !== null)
-//		{
-//			return $loadPlaceholdersResult->setData($placeholdersFromCache);
-//		}
+		if ($placeholdersFromCache !== null)
+		{
+			return $loadPlaceholdersResult->setData($placeholdersFromCache);
+		}
 
 		$hcmLinkPlaceholders = $this->createHcmLinkPlaceholders($hcmLinkCompanyId);
 		if (!$hcmLinkPlaceholders)

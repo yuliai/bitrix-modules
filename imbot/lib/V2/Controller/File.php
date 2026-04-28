@@ -7,6 +7,7 @@ namespace Bitrix\Imbot\V2\Controller;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Controller\Filter\CheckActionAccess;
 use Bitrix\Im\V2\Controller\Filter\CheckDiskFileAccess;
+use Bitrix\Im\V2\Entity\File\FileError;
 use Bitrix\Im\V2\Entity\File\FileItem;
 use Bitrix\Im\V2\Permission\Action;
 use Bitrix\Im\V2\Service\FileService;
@@ -89,7 +90,7 @@ class File extends BotController
 
 		if ($file === null)
 		{
-			$this->addError(new \Bitrix\Main\Error('File not found', 'FILE_NOT_FOUND'));
+			$this->addError(new FileError(FileError::NOT_FOUND));
 
 			return null;
 		}

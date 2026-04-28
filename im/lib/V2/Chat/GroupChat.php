@@ -111,7 +111,7 @@ class GroupChat extends Chat
 			return $result->addErrors($paramsResult->getErrors());
 		}
 
-		$chat = new static($params);
+		$chat = new static($params, $this->context);
 		$chat->onBeforeAdd();
 		$chat->save();
 

@@ -218,6 +218,7 @@ final class NodeRepository
 			->where('STRUCTURE_ID', $structureId)
 			->where('PARENT_ID', 0)
 			->setCacheTtl(86400)
+			->cacheJoins(true)
 			->fetchObject()
 		;
 

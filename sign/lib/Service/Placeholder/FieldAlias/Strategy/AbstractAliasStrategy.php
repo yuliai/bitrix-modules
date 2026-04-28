@@ -40,7 +40,7 @@ abstract class AbstractAliasStrategy implements AliasStrategyInterface
 	{
 		return [];
 	}
-	
+
 	protected function getRoleName(AliasContext $context, ?int $party = null): string
 	{
 		return $this->aliasRoleResolver->getShortRoleNameByContext($context, $party);

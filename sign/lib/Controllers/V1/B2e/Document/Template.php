@@ -34,6 +34,7 @@ use Bitrix\Sign\Result\Operation\Document\UnserializePortableBlankResult;
 use Bitrix\Sign\Result\Operation\Member\ValidateEntitySelectorMembersResult;
 use Bitrix\Sign\Serializer\MasterFieldSerializer;
 use Bitrix\Sign\Service\Container;
+use Bitrix\Sign\Service\Sign\Document\Template\AccessService;
 use Bitrix\Sign\Type\Access\AccessibleItemType;
 use Bitrix\Sign\Type\Document\InitiatedByType;
 use Bitrix\Sign\Type\DocumentScenario;
@@ -243,8 +244,15 @@ class Template extends Controller
 		itemType: AccessibleItemType::TEMPLATE,
 		itemIdOrUidRequestKey: 'uid',
 	)]
-	public function completeAction(string $uid, int $folderId): array
+	public function completeAction(string $uid, int $folderId, AccessService $templateAccessService): array
 	{
+		if ($folderId > 0 && !$templateAccessService->hasAccessToEditFolderById($folderId))
+		{
+			$this->addErrorByMessage('No access rights to edit target folder');
+
+			return [];
+		}
+
 		$templateRepository = Container::instance()->getDocumentTemplateRepository();
 		$template = $templateRepository->getByUid($uid);
 		if ($template === null)
@@ -332,8 +340,15 @@ class Template extends Controller
 		),
 		new ActionAccess(ActionDictionary::ACTION_B2E_TEMPLATE_ADD),
 	)]
-	public function copyAction(int $templateId, int $folderId): array
+	public function copyAction(int $templateId, int $folderId, AccessService $templateAccessService): array
 	{
+		if ($folderId > 0 && !$templateAccessService->hasAccessToEditFolderById($folderId))
+		{
+			$this->addErrorByMessage('No access rights to edit target folder');
+
+			return [];
+		}
+
 		if ($templateId < 1)
 		{
 			$this->addErrorByMessage('Incorrect template id');

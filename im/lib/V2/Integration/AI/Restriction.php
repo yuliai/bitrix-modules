@@ -73,6 +73,16 @@ class Restriction
 		return self::$isAvailable;
 	}
 
+	public function isHistoryAvailable(): bool
+	{
+		if (!Loader::includeModule('ai'))
+		{
+			return false;
+		}
+
+		return $this->isAvailable();
+	}
+
 	public static function onTuningLoad(): EventResult
 	{
 		$result = new EventResult;
@@ -83,15 +93,24 @@ class Restriction
 		if (!empty(Engine::getListAvailable(self::AI_TEXT_CATEGORY)))
 		{
 			$groups['im_copilot_chat'] = [
-				'title' => Loc::getMessage('IM_RESTRICTION_COPILOT_GROUP_MSGVER_1'),
+				'title' => Loc::getMessage(
+					'IM_RESTRICTION_COPILOT_GROUP_MSGVER_2',
+					['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+				),
 				'description' => Loc::getMessage('IM_RESTRICTION_COPILOT_DESCRIPTION'),
 				'helpdesk' => '18505482',
 			];
 
 			$items[self::SETTING_COPILOT_CHAT] = [
 				'group' => 'im_copilot_chat',
-				'title' => Loc::getMessage('IM_RESTRICTION_COPILOT_TITLE'),
-				'header' => Loc::getMessage('IM_RESTRICTION_COPILOT_HEADER'),
+				'title' => Loc::getMessage(
+					'IM_RESTRICTION_COPILOT_TITLE_MSGVER_1',
+					['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+				),
+				'header' => Loc::getMessage(
+					'IM_RESTRICTION_COPILOT_HEADER_MSGVER_1',
+					['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+				),
 				'type' => \Bitrix\AI\Tuning\Type::BOOLEAN,
 				'default' => self::DEFAULT_COPILOT_ENABLED,
 				'sort' => 100,
@@ -111,7 +130,10 @@ class Restriction
 			$items[self::SETTING_TRANSCRIPTION] = [
 				'group' => 'im_copilot_chat',
 				'title' => Loc::getMessage('IM_RESTRICTION_TRANSCRIPTION_TITLE'),
-				'header' => Loc::getMessage('IM_RESTRICTION_TRANSCRIPTION_HEADER'),
+				'header' => Loc::getMessage(
+					'IM_RESTRICTION_TRANSCRIPTION_HEADER_MSGVER_1',
+					['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+				),
 				'type' => \Bitrix\AI\Tuning\Type::BOOLEAN,
 				'default' => self::DEFAULT_TRANSCRIPTION_ENABLED,
 				'sort' => 140,
@@ -136,7 +158,10 @@ class Restriction
 				$items[self::SETTING_TRANSCRIPTION_EMOTIONS] = [
 					'group' => 'im_copilot_chat',
 					'title' => Loc::getMessage('IM_RESTRICTION_TRANSCRIPTION_EMOTIONS_TITLE'),
-					'header' => Loc::getMessage('IM_RESTRICTION_TRANSCRIPTION_EMOTIONS_HEADER'),
+					'header' => Loc::getMessage(
+						'IM_RESTRICTION_TRANSCRIPTION_EMOTIONS_HEADER_MSGVER_1',
+						['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+					),
 					'type' => \Bitrix\AI\Tuning\Type::BOOLEAN,
 					'default' => self::DEFAULT_TRANSCRIPTION_EMOTIONS_ENABLED,
 					'sort' => 180,
@@ -148,7 +173,10 @@ class Restriction
 			$items[self::SETTING_AUTO_TASK_CREATION] = [
 				'group' => 'im_copilot_chat',
 				'title' => Loc::getMessage('IM_RESTRICTION_AUTO_TASK_CREATION_TITLE'),
-				'header' => Loc::getMessage('IM_RESTRICTION_AUTO_TASK_CREATION_HEADER'),
+				'header' => Loc::getMessage(
+					'IM_RESTRICTION_AUTO_TASK_CREATION_HEADER_MSGVER_1',
+					['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()]
+				),
 				'type' => \Bitrix\AI\Tuning\Type::BOOLEAN,
 				'default' => self::DEFAULT_AUTO_TASK_CREATION_ENABLED,
 				'sort' => 200,

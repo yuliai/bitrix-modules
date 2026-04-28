@@ -81,7 +81,7 @@ class Bot
 		$openline = isset($fields['OPENLINE']) && $fields['OPENLINE'] == 'Y'? 'Y': 'N';
 		$isHidden = isset($fields['HIDDEN']) && $fields['HIDDEN'] === 'Y' ? 'Y' : 'N';
 		$reactionsEnabled = isset($fields['REACTIONS_ENABLED']) && $fields['REACTIONS_ENABLED'] === 'Y' ? 'Y' : 'N';
-		$backgroundId = Background::validateBackgroundId($fields['BACKGROUND_ID'] ?? null);
+		$backgroundId = Background::normalizeBackgroundId($fields['BACKGROUND_ID'] ?? null);
 		$eventMode = in_array($fields['EVENT_MODE'] ?? '', [self::EVENT_MODE_WEBHOOK, self::EVENT_MODE_FETCH], true)
 			? $fields['EVENT_MODE']
 			: self::EVENT_MODE_WEBHOOK;
@@ -575,13 +575,17 @@ class Bot
 		{
 			$update['HIDDEN'] = $updateFields['HIDDEN'] === 'Y' ? 'Y' : 'N';
 		}
+		if (isset($updateFields['OPENLINE']))
+		{
+			$update['OPENLINE'] = $updateFields['OPENLINE'] === 'Y' ? 'Y' : 'N';
+		}
 		if (isset($updateFields['REACTIONS_ENABLED']))
 		{
 			$update['REACTIONS_ENABLED'] = $updateFields['REACTIONS_ENABLED'] === 'Y' ? 'Y' : 'N';
 		}
 		if (isset($updateFields['BACKGROUND_ID']))
 		{
-			$update['BACKGROUND_ID'] = Background::validateBackgroundId($updateFields['BACKGROUND_ID']);
+			$update['BACKGROUND_ID'] = Background::normalizeBackgroundId($updateFields['BACKGROUND_ID']);
 		}
 		$oldEventMode = null;
 		if (
@@ -2122,7 +2126,7 @@ class Bot
 			'select' => ['BOT_ID'],
 		]);
 
-		return array_column($botQuery->fetchAll() ?: [], 'BOT_ID');
+		return array_map('intval', array_column($botQuery->fetchAll() ?: [], 'BOT_ID'));
 	}
 
 	public static function getBotIdByAppId(string $appId): ?int
@@ -2209,6 +2213,6 @@ class Bot
 			'select' => ['BOT_ID'],
 		]);
 
-		return array_column($botQuery->fetchAll() ?: [], 'BOT_ID');
+		return array_map('intval', array_column($botQuery->fetchAll() ?: [], 'BOT_ID'));
 	}
 }

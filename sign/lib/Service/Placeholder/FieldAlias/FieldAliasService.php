@@ -10,7 +10,7 @@ use Bitrix\Sign\Service\Placeholder\FieldAlias\Strategy\CompanyFieldStrategy;
 
 class FieldAliasService
 {
-	private const MAX_ALIAS_LENGTH = 64;
+	private const MAX_ALIAS_LENGTH = 285;
 	
 	private StrategyRegistry $registry;
 
@@ -66,25 +66,29 @@ class FieldAliasService
 
 	public function toAliases(array $fieldNames, AliasContext $context): array
 	{
+		$this->registry->preloadForFieldNames($fieldNames);
+
 		$result = [];
-		
+
 		foreach ($fieldNames as $fieldName)
 		{
 			$alias = $this->toAlias($fieldName, $context);
-			
+
 			if ($alias !== null)
 			{
 				$result[$fieldName] = $alias;
 			}
 		}
-		
+
 		return $result;
 	}
 
 	public function toFieldNames(array $aliases, AliasContext $context): array
 	{
+		$this->registry->preloadForAliases($aliases, $context);
+
 		$result = [];
-		
+
 		foreach ($aliases as $alias)
 		{
 			$fieldName = $this->toFieldName($alias, $context);

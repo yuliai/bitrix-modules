@@ -8,9 +8,8 @@ use Bitrix\Sign\Service\Integration\HumanResources\HcmLinkFieldService;
 use Bitrix\Sign\Service\Container;
 use Bitrix\HumanResources\Type\HcmLink\FieldType as HcmFieldType;
 use Bitrix\Sign\Type\BlockCode;
-use Bitrix\Sign\Type\BlockParty;
 
-class HcmLinkFieldStrategy extends AbstractAliasStrategy
+class HcmLinkFieldStrategy extends AbstractAliasStrategy implements PreloadableStrategyInterface
 {
 	private const ALIAS_PREFIX = '1C';
 
@@ -40,6 +39,49 @@ class HcmLinkFieldStrategy extends AbstractAliasStrategy
 		return str_starts_with($alias, self::ALIAS_PREFIX . '.');
 	}
 
+	public function preloadForAliases(array $aliases, AliasContext $context): void
+	{
+		if ($context->hcmLinkCompanyId === null)
+		{
+			return;
+		}
+
+		foreach ($aliases as $alias)
+		{
+			if ($this->supportsAlias($alias))
+			{
+				$this->hcmLinkFieldService->preloadByCompanyId($context->hcmLinkCompanyId);
+
+				return;
+			}
+		}
+	}
+
+	public function preloadForFieldNames(array $fieldNames): void
+	{
+		$ids = [];
+
+		foreach ($fieldNames as $fieldName)
+		{
+			if (!$this->supportsFieldName($fieldName))
+			{
+				continue;
+			}
+
+			$parsed = $this->hcmLinkFieldService->parseName($fieldName);
+
+			if ($parsed !== null)
+			{
+				$ids[] = $parsed->id;
+			}
+		}
+
+		if (!empty($ids))
+		{
+			$this->hcmLinkFieldService->getFieldsByIds($ids);
+		}
+	}
+
 	public function fieldNameToAlias(string $fieldName, AliasContext $context): ?string
 	{
 		$parsed = $this->hcmLinkFieldService->parseName($fieldName);
@@ -49,10 +91,16 @@ class HcmLinkFieldStrategy extends AbstractAliasStrategy
 			return null;
 		}
 
-		$roleName = $this->getRoleName($context, $parsed->party);
-		$shortTypeName = $this->getShortNameByType($parsed->type);
+		$field = $this->hcmLinkFieldService->getFieldById($parsed->id);
+		if ($field === null)
+		{
+			return null;
+		}
 
-		return self::ALIAS_PREFIX . ".{$roleName}.{$shortTypeName}";
+		$roleName = $this->getRoleName($context, $parsed->party);
+		$aliasPart = $this->codeToShortAlias($field->field);
+
+		return self::ALIAS_PREFIX . ".{$roleName}.{$aliasPart}";
 	}
 
 	public function aliasToFieldName(string $alias, AliasContext $context): ?string
@@ -63,127 +111,66 @@ class HcmLinkFieldStrategy extends AbstractAliasStrategy
 			return null;
 		}
 
-		$shortTypeName = $aliasData['fieldPart'];
+		$aliasPart = $aliasData['fieldPart'];
 		$party = $aliasData['party'];
-		
-		$fieldTypeId = $this->getTypeByShortName($shortTypeName);
-		
-		if ($fieldTypeId === null)
-		{
-			return null;
-		}
-		
+
 		if ($context->hcmLinkCompanyId === null)
 		{
 			return null;
 		}
-		
-		return $this->findFieldByType(
-			$context->hcmLinkCompanyId,
-			$fieldTypeId,
-			$party,
+
+		$code = $this->shortAliasToCode($aliasPart);
+
+		$field = $this->hcmLinkFieldService->getFieldByCode($context->hcmLinkCompanyId, $code);
+		if ($field === null && $code !== $aliasPart)
+		{
+			$field = $this->hcmLinkFieldService->getFieldByCode($context->hcmLinkCompanyId, $aliasPart);
+		}
+		if ($field === null)
+		{
+			return null;
+		}
+
+		$fieldSelectorName = $this->hcmLinkFieldService->buildFieldSelectorName($field, $party);
+
+		return $this->createFieldName(
+			blockCode: BlockCode::B2E_HCMLINK_REFERENCE,
+			fieldType: $this->getFieldTypeStringByHcmType($field->type),
+			party: $party,
+			fieldCode: $fieldSelectorName,
 		);
 	}
-	
-	private function getShortNameByType(int $typeId): string
+
+	private function codeToShortAlias(string $code): string
 	{
-		$typeMap = $this->getFieldTypeShortNames();
-		return $typeMap[$typeId] ?? "Type{$typeId}";
+		return HcmLinkFieldAliasMap::getCodeToAlias()[$code] ?? $code;
 	}
-	
-	private function getTypeByShortName(string $shortName): ?int
+
+	private function shortAliasToCode(string $alias): string
 	{
-		$reverseMap = $this->getShortNameToFieldType();
-		return $reverseMap[$shortName] ?? null;
+		return HcmLinkFieldAliasMap::getAliasToCode()[$alias] ?? $alias;
 	}
-	
-	private function getFieldTypeShortNames(): array
+
+	private function getFieldTypeStringByHcmType(HcmFieldType $type): string
 	{
-		return [
-			HcmFieldType::FIRST_NAME->value => 'Name',
-			HcmFieldType::LAST_NAME->value => 'LastName',
-			HcmFieldType::PATRONYMIC_NAME->value => 'Patronymic',
-			HcmFieldType::POSITION->value => 'Pos',
-			HcmFieldType::SNILS->value => 'Snils',
-			HcmFieldType::PHONE->value => 'Phone',
-			HcmFieldType::EMAIL->value => 'Email',
-			HcmFieldType::BIRTHDAY->value => 'Dob',
-			HcmFieldType::INN->value => 'Inn',
-			HcmFieldType::ADDRESS->value => 'Addr',
-			HcmFieldType::DEPARTMENT->value => 'Dept',
-			HcmFieldType::DOCUMENT_REGISTRATION_NUMBER->value => 'DocNum',
-			HcmFieldType::DOCUMENT_UID->value => 'DocUid',
-			HcmFieldType::DOCUMENT_DATE->value => 'DocDate',
-			HcmFieldType::STRING->value => 'Text',
-		];
-	}
-	
-	/**
-	 * Get reverse mapping: shortName => fieldTypeId
-	 * This is the flipped version of getFieldTypeShortNames()
-	 */
-	private function getShortNameToFieldType(): array
-	{
-		return array_flip($this->getFieldTypeShortNames());
-	}
-	
-	private function findFieldByType(int $companyId, int $fieldTypeId, int $party): ?string
-	{
-		if (!$this->hcmLinkFieldService->isAvailable())
+		return match ($type)
 		{
-			return null;
-		}
-
-		$fields = $this->hcmLinkFieldService->getFieldsForSelector($companyId, true);
-
-		$category = $party === BlockParty::NOT_LAST_PARTY ? 'REPRESENTATIVE' : 'EMPLOYEE';
-
-		if (!isset($fields[$category]['FIELDS']))
-		{
-			return null;
-		}
-
-		foreach ($fields[$category]['FIELDS'] as $field)
-		{
-			if ($field['type'] === $fieldTypeId && $this->getPartyFromFieldName($field['name']) === $party)
-			{
-				return $this->createFieldName(
-					blockCode: BlockCode::B2E_HCMLINK_REFERENCE,
-					fieldType: $this->getFieldTypeByTypeId($fieldTypeId),
-					party: $party,
-					fieldCode: $field['name'],
-				);
-			}
-		}
-
-		return null;
-	}
-	
-	private function getFieldTypeByTypeId(int $fieldTypeId): string
-	{
-		$typeMap = [
-			HcmFieldType::FIRST_NAME->value => 'firstname',
-			HcmFieldType::LAST_NAME->value => 'lastname',
-			HcmFieldType::PATRONYMIC_NAME->value => 'patronymic',
-			HcmFieldType::POSITION->value => 'position',
-			HcmFieldType::SNILS->value => 'snils',
-			HcmFieldType::PHONE->value => 'phone',
-			HcmFieldType::EMAIL->value => 'email',
-			HcmFieldType::BIRTHDAY->value => 'date',
-			HcmFieldType::INN->value => 'string',
-			HcmFieldType::ADDRESS->value => 'address',
-			HcmFieldType::DEPARTMENT->value => 'string',
-			HcmFieldType::DOCUMENT_REGISTRATION_NUMBER->value => 'string',
-			HcmFieldType::DOCUMENT_UID->value => 'string',
-			HcmFieldType::DOCUMENT_DATE->value => 'date',
-			HcmFieldType::STRING->value => 'string',
-		];
-
-		return $typeMap[$fieldTypeId] ?? 'string';
-	}
-	
-	private function getPartyFromFieldName(string $fieldName): ?int
-	{
-		return $this->hcmLinkFieldService->parseName($fieldName)?->party;
+			HcmFieldType::FIRST_NAME => 'firstname',
+			HcmFieldType::LAST_NAME => 'lastname',
+			HcmFieldType::PATRONYMIC_NAME => 'patronymic',
+			HcmFieldType::POSITION => 'position',
+			HcmFieldType::SNILS => 'snils',
+			HcmFieldType::PHONE => 'phone',
+			HcmFieldType::EMAIL => 'email',
+			HcmFieldType::BIRTHDAY => 'date',
+			HcmFieldType::INN => 'string',
+			HcmFieldType::ADDRESS => 'address',
+			HcmFieldType::DEPARTMENT => 'string',
+			HcmFieldType::DOCUMENT_REGISTRATION_NUMBER => 'string',
+			HcmFieldType::DOCUMENT_UID => 'string',
+			HcmFieldType::DOCUMENT_DATE => 'date',
+			HcmFieldType::STRING => 'string',
+			default => 'string',
+		};
 	}
 }

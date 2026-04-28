@@ -1436,17 +1436,10 @@ class CAllIMContactList
 		$strSQL = "DELETE FROM b_im_recent WHERE USER_ID = {$userId} AND {$itemType} AND {$sqlEntityId}";
 		$DB->Query($strSQL);
 
-		if (!$withoutRead && $chat !== null && !($chat instanceof IM\V2\Chat\NullChat) && $chat->getChatId())
+		if (!$withoutRead && $chat?->isExist())
 		{
-			$chat = $chat->withContextUser($userId);
-			if ($chat instanceof IM\V2\Chat\OpenLineChat)
-			{
-				$chat->read(false, false, true);
-			}
-			else
-			{
-				$chat->read();
-			}
+			$reader = \Bitrix\Main\DI\ServiceLocator::getInstance()->get(IM\V2\Reading\Reader::class);
+			$reader->readAllInChat($chat->getId(), $userId, true);
 
 			Sync\Logger::getInstance()->add(
 				new Sync\Event(Sync\Event::DELETE_EVENT, Sync\Event::CHAT_ENTITY, $chat->getChatId()),
@@ -1607,7 +1600,7 @@ class CAllIMContactList
 		$arMessageId = Array();
 
 		$dbRes = $DB->Query($strSql);
-		$counters = (new IM\V2\Message\CounterService($userId))->getForEachChat();
+		$counters = \Bitrix\Main\DI\ServiceLocator::getInstance()->get(IM\V2\Reading\Counter\UserCountersCollector::class)->get($userId);
 		while ($arRes = $dbRes->GetNext(true, false))
 		{
 			$arRes['ITEM_TYPE'] = trim($arRes['ITEM_TYPE']);
@@ -1651,7 +1644,7 @@ class CAllIMContactList
 					'text' => \Bitrix\Im\Text::parse($arRes['M_MESSAGE'], Array('CUT_STRIKE' => 'Y', 'SMILES' => 'N', 'SAFE' => 'N')),
 					'pinned' => $arRes['PINNED'] == 'Y',
 				),
-				'COUNTER' => $counters[(int)$arRes['M_CHAT_ID']],
+				'COUNTER' => $counters->getByChatId((int)$arRes['M_CHAT_ID'])?->counter ?? 0,
 			);
 			$item['MESSAGE']['text'] = preg_replace('#\-{54}.+?\-{54}#s', " [".GetMessage('IM_QUOTE')."] ", strip_tags(str_replace(array("<br>","<br/>","<br />", "#BR#"), Array(" "," ", " ", " "), $item['MESSAGE']['text']), "<img>"));
 

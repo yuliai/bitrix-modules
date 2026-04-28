@@ -57,7 +57,6 @@ CJSCore::RegisterExt('bp_field_type', array(
 		'bp_user_selector',
 		'ui.dialogs.messagebox',
 		'date',
-		'intranet.old-interface.intranet-common',
 	],
 	'oninit' => function()
 	{

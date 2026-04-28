@@ -38,11 +38,6 @@ class Settings
 		return \Bitrix\Im\V2\Sync\SyncService::isEnable();
 	}
 
-	public static function shouldShowChatV2UpdateHint(): bool
-	{
-		return \Bitrix\Main\Config\Option::get('immobile', 'should_show_chat_m1_update_hint', 'Y') === 'Y';
-	}
-
 	public static function planLimits(): ?array
 	{
 		if (!\Bitrix\Main\Loader::includeModule('im'))
@@ -91,6 +86,11 @@ class Settings
 	public static function isOpenlinesInMessengerV2Available(): bool
 	{
 		return \Bitrix\Main\Config\Option::get('immobile', 'openlines_in_messenger_v2_available', 'Y') === 'Y';
+	}
+
+	public static function isRecentFilterAvailable(): bool
+	{
+		return \Bitrix\Main\Config\Option::get('immobile', 'recent_filter_available', 'N') === 'Y';
 	}
 
 	public static function isAutoTaskEnabled(): bool

@@ -560,7 +560,7 @@ return [
 			'sign.access.service.access' => [
 				'className' => AccessService::class,
 			],
-			'sign.service.document.group' => [
+'sign.service.document.group' => [
 				'className' => GroupService::class,
 			],
 			'sign.repository.required_field' => [

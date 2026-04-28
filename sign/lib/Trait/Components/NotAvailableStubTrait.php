@@ -4,8 +4,8 @@ namespace Bitrix\Sign\Trait\Components;
 
 trait NotAvailableStubTrait
 {
-	public const STUB_TYPE_NO_ACCESS = 'noAccess';
-	public const STUB_TYPE_NOT_AVAILABLE = 'notAvailable';
+	protected const STUB_TYPE_NO_ACCESS = 'noAccess';
+	protected const STUB_TYPE_NOT_AVAILABLE = 'notAvailable';
 
 	protected function renderNotAvailableStub(
 		?string $pageTitle = null,

@@ -15,7 +15,7 @@ class Placeholder extends Controller
 {
 
 	#[Attribute\Access\LogicOr(
-		new ActionAccess(permission: ActionDictionary::ACTION_DOCUMENT_EDIT),
+		new ActionAccess(permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT),
 		new ActionAccess(permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT),
 	)]
 	public function listAction(
@@ -43,7 +43,7 @@ class Placeholder extends Controller
 	}
 
 	#[Attribute\Access\LogicOr(
-		new ActionAccess(permission: ActionDictionary::ACTION_DOCUMENT_EDIT),
+		new ActionAccess(permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT),
 		new ActionAccess(permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT),
 	)]
 	public function listByHcmLinkIdAction(
@@ -63,7 +63,7 @@ class Placeholder extends Controller
 	}
 
 	#[Attribute\Access\LogicOr(
-		new ActionAccess(permission: ActionDictionary::ACTION_DOCUMENT_EDIT),
+		new ActionAccess(permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT),
 		new ActionAccess(permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT),
 	)]
 	public function saveLastSelectionBySelectorTypeAction(
@@ -84,7 +84,7 @@ class Placeholder extends Controller
 	}
 
 	#[Attribute\Access\LogicOr(
-		new ActionAccess(permission: ActionDictionary::ACTION_DOCUMENT_EDIT),
+		new ActionAccess(permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT),
 		new ActionAccess(permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT),
 	)]
 	public function getLastSelectionBySelectorTypeAction(

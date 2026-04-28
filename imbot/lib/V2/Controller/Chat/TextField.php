@@ -26,7 +26,7 @@ class TextField extends BotController
 	 */
 	public function enabledAction(
 		Chat $chat,
-		string $enabled = 'Y',
+		$enabled = 'Y',
 	): ?array
 	{
 		if (!empty($this->getErrors()))

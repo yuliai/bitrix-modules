@@ -15,7 +15,7 @@ final class FileImporter
 	private ExternalSource\Type $type;
 	private string $name;
 
-	public function __construct(int $datasetId, array $settings = null)
+	public function __construct(int $datasetId, ?array $settings = null)
 	{
 		$this->datasetId = $datasetId;
 		$this->settings = $settings;

@@ -244,7 +244,6 @@ class File extends Base
 			$msg = htmlspecialcharsbx(Loc::getMessage('BPDT_FILE_CHOOSE_FILE'));
 			$onchange = 'this.nextSibling.textContent = BX.Bizproc.FieldType.File.parseLabel(this.value);';
 			$onchange = htmlspecialcharsbx($onchange);
-			\Bitrix\Main\UI\Extension::load(['intranet.old-interface.intranet-common']);
 
 			return <<<HTML
 				<div class="{$classNameHtml}">

@@ -3,6 +3,7 @@
 namespace Bitrix\Sign\Service\Placeholder\FieldAlias;
 
 use Bitrix\Sign\Service\Placeholder\FieldAlias\Strategy\AliasStrategyInterface;
+use Bitrix\Sign\Service\Placeholder\FieldAlias\Strategy\PreloadableStrategyInterface;
 
 /**
  * Registry for fast strategy resolution by alias prefix
@@ -40,8 +41,36 @@ class StrategyRegistry
 				return $strategy;
 			}
 		}
-		
+
 		return null;
+	}
+
+	/**
+	 * @param string[] $fieldNames
+	 */
+	public function preloadForFieldNames(array $fieldNames): void
+	{
+		foreach ($this->allStrategies as $strategy)
+		{
+			if ($strategy instanceof PreloadableStrategyInterface)
+			{
+				$strategy->preloadForFieldNames($fieldNames);
+			}
+		}
+	}
+
+	/**
+	 * @param string[] $aliases
+	 */
+	public function preloadForAliases(array $aliases, AliasContext $context): void
+	{
+		foreach ($this->allStrategies as $strategy)
+		{
+			if ($strategy instanceof PreloadableStrategyInterface)
+			{
+				$strategy->preloadForAliases($aliases, $context);
+			}
+		}
 	}
 
 	private function buildAliasMap(): void

@@ -64,7 +64,7 @@ class PgsqlConnection extends Main\DB\PgsqlConnection
 	 * @throws Main\DB\ConnectionException
 	 * @throws SqlQueryException
 	 */
-	protected function queryInternal($sql, array $binds = null, Diag\SqlTrackerQuery $trackerQuery = null)
+	protected function queryInternal($sql, ?array $binds = null, ?Diag\SqlTrackerQuery $trackerQuery = null)
 	{
 		$this->connectInternal();
 
@@ -106,7 +106,7 @@ class PgsqlConnection extends Main\DB\PgsqlConnection
 	/**
 	 * @inheritDoc
 	 */
-	protected function createResult($result, Diag\SqlTrackerQuery $trackerQuery = null)
+	protected function createResult($result, ?Diag\SqlTrackerQuery $trackerQuery = null)
 	{
 		if ($this->biMode)
 		{

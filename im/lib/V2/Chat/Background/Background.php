@@ -65,7 +65,7 @@ class Background
 		(new ChatFieldsUpdate($chat, $updateField))->send();
 	}
 
-	public static function validateBackgroundId(mixed $value): ?string
+	public static function normalizeBackgroundId(mixed $value): ?string
 	{
 		if (!isset($value) || $value === '' || !is_string($value))
 		{

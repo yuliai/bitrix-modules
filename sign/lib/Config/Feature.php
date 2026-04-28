@@ -110,7 +110,7 @@ final class Feature
 
 	public function isPlaceholderDocumentEnabled(): bool
 	{
-		return Option::get("sign", "is_placeholder_document_enabled", 'N') === 'Y';
+		return Option::get("sign", "is_placeholder_document_enabled", 'Y') === 'Y';
 	}
 
 	private function read(string $name): mixed

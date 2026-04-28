@@ -482,7 +482,7 @@ class Dataset extends Base
 		return $resultOrder;
 	}
 
-	private static function checkDatasetName(string $name = null): bool
+	private static function checkDatasetName(?string $name = null): bool
 	{
 		return preg_match('/^[a-z][a-z0-9_]*$/', $name);
 	}

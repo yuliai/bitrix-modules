@@ -79,12 +79,26 @@ final class TemplateService
 			}
 		}
 
+		if (!$this->templateFolderRelationRepository->areAllEntitiesInSameParent($templateIds, EntityType::TEMPLATE))
+		{
+			return $result->addError(new Main\Error('All templates must be in the same folder'));
+		}
+
 		$parentIdForTemplateInFolderBeforeUpdate = $this->templateFolderRelationRepository->getByEntityIdAndType(
 			$templateIds[0],
-			EntityType::TEMPLATE
+			EntityType::TEMPLATE,
 		)
 			?->parentId
 		;
+
+		if ($parentIdForTemplateInFolderBeforeUpdate > 0)
+		{
+			$sourceFolder = $this->templateFolderRepository->getById($parentIdForTemplateInFolderBeforeUpdate);
+			if ($sourceFolder !== null && !$this->accessService->hasAccessToEdit($sourceFolder))
+			{
+				return $result->addError(new Main\Error('No access rights to edit source folder'));
+			}
+		}
 
 		$updateParentIdForTemplatesResult = $this->updateParentIdForTemplates(
 			$templateIds,

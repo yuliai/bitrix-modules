@@ -1829,11 +1829,8 @@ class Network extends Base implements NetworkBot
 		if ($connectorMid)
 		{
 			$connectorMessage = new Im\V2\Message($connectorMid);
-			$chat = \Bitrix\Im\V2\Chat::getInstance($connectorMessage->getChatId());
-			$chat
-				->withContextUser(static::getBotId())
-				->readTo($connectorMessage, true)
-			;
+			$botId = static::getBotId() ?: (int)$messageFields['BOT_ID'];
+			ServiceLocator::getInstance()->get(Im\V2\Reading\Reader::class)->readTo($connectorMessage, $botId);
 		}
 
 		if ($messageId > 0)
@@ -4204,6 +4201,7 @@ class Network extends Base implements NetworkBot
 				$send['AVATAR'] = mb_substr($fileTmp['src'], 0, 4) == 'http'
 					? $fileTmp['src']
 					: ImBot\Http::getServerAddress().$fileTmp['src'];
+				$send['AVATAR'] = Main\Web\Uri::urnEncode($send['AVATAR']);
 			}
 		}
 
@@ -4301,6 +4299,7 @@ class Network extends Base implements NetworkBot
 					$update['FIELDS']['AVATAR'] = mb_substr($fileTmp['src'], 0, 4) == 'http'
 						? $fileTmp['src']
 						: ImBot\Http::getServerAddress(). $fileTmp['src'];
+					$update['FIELDS']['AVATAR'] = Main\Web\Uri::urnEncode($update['FIELDS']['AVATAR']);
 				}
 			}
 		}

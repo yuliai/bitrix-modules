@@ -58,7 +58,7 @@ class MysqliConnection extends \Bitrix\Main\DB\MysqliConnection
 	/**
 	 * @inheritDoc
 	 */
-	protected function queryInternal($sql, array $binds = null, Diag\SqlTrackerQuery $trackerQuery = null)
+	protected function queryInternal($sql, ?array $binds = null, ?Diag\SqlTrackerQuery $trackerQuery = null)
 	{
 		$this->connectInternal();
 
@@ -94,7 +94,7 @@ class MysqliConnection extends \Bitrix\Main\DB\MysqliConnection
 	/**
 	 * @inheritDoc
 	 */
-	protected function createResult($result, Diag\SqlTrackerQuery $trackerQuery = null)
+	protected function createResult($result, ?Diag\SqlTrackerQuery $trackerQuery = null)
 	{
 		if ($this->biMode)
 		{

@@ -102,12 +102,20 @@ class DocumentTypeProvider extends BaseProvider
 
 				$dialog->addItem($documentItem);
 			}
+
+			$items = $dialog->getItemCollection();
+			if ($items->count() === 1)
+			{
+				$item = $items->getAll()[0];
+				$item->setNodeOptions(['open' => true]);
+			}
 		}
 		else
 		{
 			foreach ($modules as $moduleId => $moduleDocumentTypes)
 			{
 				$moduleItem = $this->getModuleItem($dialog, $moduleId);
+				$sectionMap = [];
 				foreach ($moduleDocumentTypes as $documentType)
 				{
 					$documentItem = $this->getDocumentItem($dialog, $documentType);
@@ -115,13 +123,23 @@ class DocumentTypeProvider extends BaseProvider
 					$sectionItem = $this->getSectionItem($dialog, $documentType);
 					if ($sectionItem)
 					{
-						$sectionItem->addChild($documentItem);
-						$moduleItem->addChild($sectionItem);
+						$sectionId = $sectionItem->getId();
+						if (!isset($sectionMap[$sectionId]))
+						{
+							$sectionMap[$sectionId] = $sectionItem;
+						}
+
+						$sectionMap[$sectionId]->addChild($documentItem);
 
 						continue;
 					}
 
 					$moduleItem->addChild($documentItem);
+				}
+
+				foreach ($sectionMap as $sectionItem)
+				{
+					$moduleItem->addChild($sectionItem);
 				}
 
 				$dialog->addItem($moduleItem);
@@ -199,7 +217,7 @@ class DocumentTypeProvider extends BaseProvider
 			$documentItem = new Item([
 				'id' => $id,
 				'entityId' => static::ENTITY_ID,
-				'title' => $documentService->getDocumentTypeName($documentType),
+				'title' => $documentService->getDocumentTypeCaption($documentType),
 				'supertitle' => $documentService->getEntityName($moduleId, $entity),
 				'tabs' => static::TAB_ID,
 				'customData' => [

@@ -25,7 +25,7 @@ class DatasetManager
 	 *
 	 * @return Main\Result
 	 */
-	public static function add(array $dataset, array $fields, array $settings = [], int $sourceId = null): Main\Result
+	public static function add(array $dataset, array $fields, array $settings = [], ?int $sourceId = null): Main\Result
 	{
 		$result = new Main\Result();
 
@@ -128,7 +128,7 @@ class DatasetManager
 		array $dataset,
 		array $fields,
 		array $settings,
-		int $sourceId = null
+		?int $sourceId = null
 	): Main\Result
 	{
 		$result = new Main\Result();
