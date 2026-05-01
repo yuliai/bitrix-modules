@@ -8,16 +8,21 @@ use Bitrix\TransformerController\Daemon\Http\Response;
 use Bitrix\TransformerController\Daemon\Http\Utils;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
+use Psr\Http\Message\UriInterface;
 
 class GetInfo extends Request
 {
+	private readonly UriInterface $backUrl;
+
 	public function __construct(
-		private readonly string $backUrl,
+		string $backUrl,
 		private readonly string $format,
 		private readonly int $fileSize,
 	)
 	{
 		parent::__construct();
+
+		$this->backUrl = $this->factory->createUri($backUrl);
 	}
 
 	public function send(): Result

@@ -10,15 +10,20 @@ use Bitrix\TransformerController\Daemon\Http\Request;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
 
 final class Download extends Request
 {
+	private readonly UriInterface $fileUrl;
+	
 	public function __construct(
-		private readonly string $fileUrl,
+		string $fileUrl,
 		private readonly Type $fileType,
 	)
 	{
 		parent::__construct();
+		
+		$this->fileUrl = $this->factory->createUri($fileUrl);
 	}
 
 	public function send(): Result
@@ -27,7 +32,7 @@ final class Download extends Request
 
 		$downloadedFilePath = $this->getFileSavePath();
 		DeleteQueue::getInstance()->add($downloadedFilePath);
-
+		
 		try
 		{
 			$this->factory->getClient()->download(
@@ -48,7 +53,7 @@ final class Download extends Request
 			}
 
 			// todo leaky abstraction?
-			if ($exception->getCode() === CURLE_FILESIZE_EXCEEDED)
+			if (defined('CURLE_FILESIZE_EXCEEDED') && $exception->getCode() === CURLE_FILESIZE_EXCEEDED)
 			{
 				$this->addFileIsTooBigError($result);
 

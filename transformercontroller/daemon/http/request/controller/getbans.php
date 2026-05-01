@@ -9,6 +9,7 @@ use Bitrix\TransformerController\Daemon\Http\Request;
 use Bitrix\TransformerController\Daemon\Http\Utils;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
+use Psr\Http\Message\UriInterface;
 
 final class GetBans extends Request
 {
@@ -100,11 +101,11 @@ final class GetBans extends Request
 		return (new Result())->setDataKey('bans', $this->prepareBans($decodedJson));
 	}
 
-	private function prepareEndpoint(): string
+	private function prepareEndpoint(): UriInterface
 	{
 		$config = Resolver::getCurrent();
 
-		return (string)$this->factory->createUri($config->controllerBaseUrl)
+		return $this->factory->createUri($config->controllerBaseUrl)
 			->withPath('/bitrix/tools/transformercontroller/ban.php')
 			->withQuery(http_build_query(['action' => 'getListForWorker'], '', '&', PHP_QUERY_RFC3986))
 		;

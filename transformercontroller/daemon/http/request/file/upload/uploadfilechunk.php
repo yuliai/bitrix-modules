@@ -9,11 +9,14 @@ use Bitrix\TransformerController\Daemon\Http\Response;
 use Bitrix\TransformerController\Daemon\Http\Utils;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
+use Psr\Http\Message\UriInterface;
 
 final class UploadFileChunk extends Request
 {
+	private readonly UriInterface $backUrl;
+
 	public function __construct(
-		private readonly string $backUrl,
+		string $backUrl,
 		private readonly Response\File\Upload\GetInfo $uploadInfo,
 		private readonly int $fileSize,
 		private readonly bool $isLastPart,
@@ -21,6 +24,8 @@ final class UploadFileChunk extends Request
 	)
 	{
 		parent::__construct();
+
+		$this->backUrl = $this->factory->createUri($backUrl);
 	}
 
 	public function send(): Result

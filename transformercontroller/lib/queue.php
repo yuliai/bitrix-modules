@@ -45,7 +45,7 @@ class Queue
 
 	public function __destruct()
 	{
-		$this->connection->disconnect();
+		$this->connection?->disconnect();
 	}
 
 	/**

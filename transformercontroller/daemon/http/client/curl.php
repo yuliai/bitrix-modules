@@ -28,7 +28,7 @@ final class Curl implements ClientInterface
 	/**
 	 * @inheritDoc
 	 */
-	public function get(UriInterface|string $uri, array $options = []): ResponseInterface
+	public function get(UriInterface $uri, array $options = []): ResponseInterface
 	{
 		$curlOptions = $this->optionsPreparer->prepareCurlOptions(
 			'GET',
@@ -61,7 +61,7 @@ final class Curl implements ClientInterface
 	/**
 	 * @inheritDoc
 	 */
-	public function download(UriInterface|string $uri, string $saveToFilePath, array $options = []): ResponseInterface
+	public function download(UriInterface $uri, string $saveToFilePath, array $options = []): ResponseInterface
 	{
 		$curlOptions = $this->optionsPreparer->prepareCurlOptions(
 			'GET',
@@ -94,7 +94,7 @@ final class Curl implements ClientInterface
 	/**
 	 * @inheritDoc
 	 */
-	public function post(UriInterface|string $uri, array $options = []): ResponseInterface
+	public function post(UriInterface $uri, array $options = []): ResponseInterface
 	{
 		$curlOptions = $this->optionsPreparer->prepareCurlOptions(
 			'POST',

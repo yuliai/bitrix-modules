@@ -9,6 +9,7 @@ use Bitrix\TransformerController\Daemon\Http\Request;
 use Bitrix\TransformerController\Daemon\Http\Utils;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
+use Psr\Http\Message\UriInterface;
 
 final class AddStatistic extends Request
 {
@@ -106,7 +107,7 @@ final class AddStatistic extends Request
 		return new Result();
 	}
 
-	private function getEndpoint(): string
+	private function getEndpoint(): UriInterface
 	{
 		$queryParams = [
 			'data' => 'add',
@@ -121,7 +122,7 @@ final class AddStatistic extends Request
 			'endTimestamp' => $this->stats->endTimestamp,
 		];
 
-		return (string)$this->factory->createUri(Resolver::getCurrent()->controllerBaseUrl)
+		return $this->factory->createUri(Resolver::getCurrent()->controllerBaseUrl)
 			->withPath('/bitrix/tools/transformercontroller/get_statistic.php')
 			->withQuery(http_build_query($queryParams, '', '&', PHP_QUERY_RFC3986))
 		;

@@ -17,7 +17,7 @@ final class Ffmpeg implements Converter, LoggerAwareInterface
 	use LoggerAwareTrait;
 
 	private const COMMAND_TEMPLATES = [
-		'mp4' => '#FFMPEG_PATH# -nostdin -loglevel warning -i #FILE# -c:v libx264 -r 25 -vf scale=w="min(min(#MAX_WIDTH#\,trunc(#MAX_WIDTH#/max(a/1.7778\,1.7778/a)/2)*2)\,trunc(iw/2)*2):h=-2" -strict -2 -preset fast -pix_fmt yuv420p -codec:a aac -f mp4 #RESULT# 2>&1',
+		'mp4' => '#FFMPEG_PATH# -nostdin -loglevel warning -i #FILE# -c:v libx264 -r 25 -vf scale=w="min(min(#MAX_WIDTH#\,trunc(#MAX_WIDTH#/max(a/1.7778\,1.7778/a)/2)*2)\,trunc(iw/2)*2):h=-2" -strict -2 -preset fast -pix_fmt yuv420p -codec:a aac -movflags +faststart -f mp4 #RESULT# 2>&1',
 		'jpg' => '#FFMPEG_PATH# -nostdin -loglevel warning -i #FILE# -an -ss 00:00:00 -vf scale=w="min(min(#MAX_WIDTH#\,trunc(#MAX_WIDTH#/max(a/1.7778\,1.7778/a)/2)*2)\,trunc(iw/2)*2):h=-2" -vframes: 1 -r 1 -y #RESULT# 2>&1',
 	];
 

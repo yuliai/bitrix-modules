@@ -9,6 +9,12 @@ final class Uri implements UriInterface
 	private const MIN_PORT = 0;
 	private const MAX_PORT = 65535;
 
+	// match either valid %XX sequence (group 1) or any byte that is not allowed in the component
+	private const URL_ENCODE_REGEX_TEMPLATE = '#(%[A-Fa-f0-9]{2})|[^' . self::RFC_PCHAR_REGEX . '\/#QUESTION_MARK#]#';
+	private const RFC_PCHAR_REGEX = self::RFC_UNRESERVED_REGEX . self::RFC_SUB_DELIMS_REGEX . ':@';
+	private const RFC_UNRESERVED_REGEX = 'a-zA-Z0-9_\-\.~';
+	private const RFC_SUB_DELIMS_REGEX = '!\$&\'\(\)\*\+,;=';
+
 	private string $scheme = '';
 	private string $host = '';
 	private ?int $port = null;
@@ -29,9 +35,9 @@ final class Uri implements UriInterface
 			$this->port = $parsedUri['port'] ?? $this->port;
 			$this->user = $parsedUri['user'] ?? $this->user;
 			$this->pass = $parsedUri['pass'] ?? $this->pass;
-			$this->path = $parsedUri['path'] ?? $this->path;
-			$this->query = $parsedUri['query'] ?? $this->query;
-			$this->fragment = $parsedUri['fragment'] ?? $this->fragment;
+			$this->path = $this->safeRawUrlEncode($parsedUri['path'] ?? $this->path, false);
+			$this->query = $this->safeRawUrlEncode($parsedUri['query'] ?? $this->query, true);
+			$this->fragment = $this->safeRawUrlEncode($parsedUri['fragment'] ?? $this->fragment, true);
 		}
 	}
 
@@ -198,7 +204,7 @@ final class Uri implements UriInterface
 	{
 		$clone = clone $this;
 
-		$clone->path = $path;
+		$clone->path = $this->safeRawUrlEncode($path, false);
 
 		return $clone;
 	}
@@ -210,7 +216,7 @@ final class Uri implements UriInterface
 	{
 		$clone = clone $this;
 
-		$clone->query = $query;
+		$clone->query = $this->safeRawUrlEncode($query, true);
 
 		return $clone;
 	}
@@ -222,7 +228,7 @@ final class Uri implements UriInterface
 	{
 		$clone = clone $this;
 
-		$clone->fragment = $fragment;
+		$clone->fragment = $this->safeRawUrlEncode($fragment, true);
 
 		return $clone;
 	}
@@ -265,5 +271,24 @@ final class Uri implements UriInterface
 		}
 
 		return $uri;
+	}
+
+	/**
+	 * Encode url component without double-encoding
+	 */
+	private function safeRawUrlEncode(string $component, bool $allowQuestionMark): string
+	{
+		static $callback = null;
+		$callback ??= static function (array $match): string {
+			// group 1 captured a valid %XX → return it as-is, avoid double-encoding
+			// otherwise it's a byte that needs encoding
+			return $match[1] ?? rawurlencode($match[0]);
+		};
+
+		return (string)preg_replace_callback(
+			str_replace('#QUESTION_MARK#', $allowQuestionMark ? '\?' : '', self::URL_ENCODE_REGEX_TEMPLATE),
+			$callback,
+			$component,
+		);
 	}
 }

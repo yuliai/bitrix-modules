@@ -15,17 +15,17 @@ interface ClientInterface
 	public function __construct(array $defaultOptions = []);
 
 	/**
-	 * @param string|UriInterface $uri
+	 * @param UriInterface $uri
 	 * @param array $options
 	 *
 	 * @return ResponseInterface
 	 *
 	 * @throws ClientExceptionInterface
 	 */
-	public function get(string|UriInterface $uri, array $options = []): ResponseInterface;
+	public function get(UriInterface $uri, array $options = []): ResponseInterface;
 
 	/**
-	 * @param string|UriInterface $uri
+	 * @param UriInterface $uri
 	 * @param string $saveToFilePath
 	 * @param array $options
 	 *
@@ -33,15 +33,15 @@ interface ClientInterface
 	 *
 	 * @throws ClientExceptionInterface
 	 */
-	public function download(string|UriInterface $uri, string $saveToFilePath, array $options = []): ResponseInterface;
+	public function download(UriInterface $uri, string $saveToFilePath, array $options = []): ResponseInterface;
 
 	/**
-	 * @param string|UriInterface $uri
+	 * @param UriInterface $uri
 	 * @param array $options
 	 *
 	 * @return ResponseInterface
 	 *
 	 * @throws ClientExceptionInterface
 	 */
-	public function post(string|UriInterface $uri, array $options = []): ResponseInterface;
+	public function post(UriInterface $uri, array $options = []): ResponseInterface;
 }

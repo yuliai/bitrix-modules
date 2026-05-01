@@ -8,17 +8,22 @@ use Bitrix\TransformerController\Daemon\Http\Request;
 use Bitrix\TransformerController\Daemon\Http\Utils;
 use Bitrix\TransformerController\Daemon\Result;
 use Psr\Http\Client\ClientExceptionInterface;
+use Psr\Http\Message\UriInterface;
 
 final class Convert extends Request
 {
+	private readonly UriInterface $convertUrl;
+
 	public function __construct(
-		private readonly string $convertUrl,
+		string $convertUrl,
 		private readonly string $filePath,
 		private readonly array $formats,
 		private readonly int $timeout,
 	)
 	{
 		parent::__construct();
+
+		$this->convertUrl = $this->factory->createUri($convertUrl);
 	}
 
 	/**

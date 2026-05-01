@@ -123,7 +123,7 @@ class Verification
 			return $this->checkByMicroservice($request);
 		}
 
-		if(!$this->isDomainAllowed($backUri))
+		if (!$this->isDomainAllowed($backUri))
 		{
 			return $result->addError(new Error(
 				'Domain is not allowed for this request',
@@ -142,20 +142,35 @@ class Verification
 
 	private function checkByMicroservice(array $request): Result
 	{
-		$licenseVerification = new LicenseVerification();
+		$licenseVerification = new LicenseVerification([
+			'allowCaching' => defined('MICROSERVICE_CACHE_LICENSE') ? MICROSERVICE_CACHE_LICENSE : true,
+			'region' => $request['BX_REGION'] ?? null,
+		]);
+
 		$resultVerify = $licenseVerification->verify($request);
-		if(!$resultVerify->isSuccess())
+		if (!$resultVerify->isSuccess())
 		{
-			return $resultVerify;
+			$errorMessages = array_map(
+				fn(Error $error) => "{$error->getMessage()} ({$error->getCode()})",
+				$resultVerify->getErrors(),
+			);
+
+			return (new Result())->addError(new Error(
+				'License verification failed: ' . implode('; ', $errorMessages),
+				TimeStatistic::ERROR_CODE_RIGHT_CHECK_FAILED
+			));
 		}
+
 		$clientInfo = $resultVerify->getData()['client'] ?? [];
-		if(empty($clientInfo['LICENSE_KEY']))
+
+		if (empty($clientInfo['LICENSE_KEY']))
 		{
 			$clientInfo['LICENSE_KEY'] = $clientInfo['URL'] ?? null;
 		}
-		if(empty($clientInfo['TARIF']))
+
+		if (empty($clientInfo['TARIF']))
 		{
-			(new Result())->addError(new Error(
+			return (new Result())->addError(new Error(
 				'Missing data about license',
 				TimeStatistic::ERROR_CODE_RIGHT_CHECK_FAILED
 			));
@@ -167,7 +182,7 @@ class Verification
 	public function getAllowedDomains(): array
 	{
 		$options = Option::get(static::MODULE_ID, static::OPTION_DOMAINS);
-		if(empty($options))
+		if (empty($options))
 		{
 			return [];
 		}
@@ -180,7 +195,7 @@ class Verification
 			return [];
 		}
 
-		if(empty($domains) || !is_array($domains))
+		if (empty($domains) || !is_array($domains))
 		{
 			return [];
 		}
@@ -198,7 +213,7 @@ class Verification
 		$domain = $backUri->getHost();
 		$domains = $this->getAllowedDomains();
 
-		if(empty($domains))
+		if (empty($domains))
 		{
 			return false;
 		}

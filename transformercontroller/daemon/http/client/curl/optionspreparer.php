@@ -12,7 +12,7 @@ final class OptionsPreparer
 	{
 	}
 
-	public function prepareCurlOptions(string $method, string|UriInterface $uri, array $options): array
+	public function prepareCurlOptions(string $method, UriInterface $uri, array $options): array
 	{
 		$curlOptions = [
 			CURLOPT_URL => (string)$uri,
