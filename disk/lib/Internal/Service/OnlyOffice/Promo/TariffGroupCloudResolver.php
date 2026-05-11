@@ -3,14 +3,13 @@ declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Service\OnlyOffice\Promo;
 
+use Bitrix\Disk\Internal\Service\OnlyOffice\Promo\Interface\TariffGroupResolverInterface;
 use Bitrix\Main\Config\Configuration;
-use Bitrix\Main\Loader;
-use Bitrix\Main\LoaderException;
 use CBitrix24;
 
-class TariffGroupResolver
+class TariffGroupCloudResolver implements TariffGroupResolverInterface
 {
-	private Configuration $diskConfig;
+	protected Configuration $diskConfig;
 
 	public function __construct()
 	{
@@ -18,18 +17,10 @@ class TariffGroupResolver
 	}
 
 	/**
-	 * It's only for cloud editions.
-	 *
-	 * @return TariffGroup|null
-	 * @throws LoaderException
+	 * {@inheritDoc}
 	 */
 	public function resolve(): ?TariffGroup
 	{
-		if (!Loader::includeModule('bitrix24'))
-		{
-			return null;
-		}
-
 		$licenseType = CBitrix24::getLicenseType();
 
 		if ($licenseType === 'basic' || CBitrix24::isFreeLicense())
@@ -45,7 +36,6 @@ class TariffGroupResolver
 		}
 
 		$cloudTariffGroups = $promo['cloud_tariff_groups'] ?? [];
-
 		$extendableTariffs = $cloudTariffGroups['extendable'] ?? [];
 
 		if (in_array($licenseType, $extendableTariffs, true))
@@ -54,6 +44,7 @@ class TariffGroupResolver
 		}
 
 		$largeEnterpriseTariffs = $cloudTariffGroups['large_enterprise'] ?? [];
+
 		if (in_array($licenseType, $largeEnterpriseTariffs, true))
 		{
 			return TariffGroup::LargeEnterprise;
