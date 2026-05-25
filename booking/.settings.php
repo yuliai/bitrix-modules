@@ -38,6 +38,14 @@ return [
 			],
 		],
 	],
+	'aiassistant.marta' => [
+		'value' => [
+			'toolSets' => [
+				\Bitrix\Booking\Internals\Integration\AiAssistant\ToolSet\BookingToolSet::class,
+			],
+		],
+		'readonly' => true,
+	],
 	'services' => [
 		'value' => [
 			'booking.container' => [
@@ -269,6 +277,11 @@ return [
 			],
 			'booking.message.repository' => [
 				'className' => \Bitrix\Booking\Internals\Repository\ORM\BookingMessageRepository::class,
+				'constructorParams' => static function() {
+					return [
+						'mapper' => new \Bitrix\Booking\Internals\Repository\ORM\Mapper\BookingMessageMapper(),
+					];
+				},
 			],
 			'booking.internals.overbooking.service' => [
 				'className' => \Bitrix\Booking\Internals\Service\Overbooking\OverbookingService::class,
@@ -490,14 +503,11 @@ return [
 					];
 				},
 			],
-			\Bitrix\Booking\Internals\Integration\Crm\ClientTypeRepository::class => [
-				'className' => \Bitrix\Booking\Internals\Integration\Crm\ClientTypeRepository::class,
-			],
 			\Bitrix\Booking\Internals\Service\Notifications\MessageSender\BookingDataExtractor::class => [
 				'className' => \Bitrix\Booking\Internals\Service\Notifications\MessageSender\BookingDataExtractor::class,
 			],
-			\Bitrix\Booking\Internals\Integration\Crm\MessageSender::class => [
-				'className' => \Bitrix\Booking\Internals\Integration\Crm\MessageSender::class,
+			\Bitrix\Booking\Internals\Integration\Crm\CrmMessageSender::class => [
+				'className' => \Bitrix\Booking\Internals\Integration\Crm\CrmMessageSender::class,
 				'constructorParams' => static function() {
 					return [
 						\Bitrix\Booking\Internals\Container::getDealDataProvider(),
@@ -589,6 +599,11 @@ return [
 			],
 			\Bitrix\Booking\Internals\Repository\BookingMessageRepositoryInterface::class => [
 				'className' => \Bitrix\Booking\Internals\Repository\ORM\BookingMessageRepository::class,
+				'constructorParams' => static function() {
+					return [
+						'mapper' => new \Bitrix\Booking\Internals\Repository\ORM\Mapper\BookingMessageMapper(),
+					];
+				},
 			],
 			\Bitrix\Booking\Internals\Service\Yandex\IntegrationService::class => [
 				'className' => \Bitrix\Booking\Internals\Service\Yandex\IntegrationService::class,
@@ -688,14 +703,67 @@ return [
 					];
 				},
 			],
-			\Bitrix\Booking\Internals\Service\Notifications\MessageSender\DummyBaseMessageSender::class => [
-				'className' => \Bitrix\Booking\Internals\Service\Notifications\MessageSender\DummyBaseMessageSender::class,
+			\Bitrix\Booking\Internals\Service\Notifications\MessageSender\MessageSenderNotification::class => [
+				'className' => \Bitrix\Booking\Internals\Service\Notifications\MessageSender\MessageSenderNotification::class,
+				'constructorParams' => static function() {
+					return [
+						'senderPicker' => \Bitrix\Booking\Internals\Container::getMessageSenderPicker(),
+					];
+				},
+			],
+			\Bitrix\Booking\Internals\Service\Notifications\MessageSender\DummyMessageSender::class => [
+				'className' => \Bitrix\Booking\Internals\Service\Notifications\MessageSender\DummyMessageSender::class,
 				'constructorParams' => static function() {
 					return [
 						\Bitrix\Booking\Internals\Container::getBookingMessageRepository(),
 						\Bitrix\Booking\Internals\Container::getBookingDataExtractor(),
 					];
 				},
+			],
+			\Bitrix\Booking\Internals\Integration\Bizproc\AiCallMessageSender::class => [
+				'className' => \Bitrix\Booking\Internals\Integration\Bizproc\AiCallMessageSender::class,
+				'constructorParams' => static function() {
+					return [
+						\Bitrix\Booking\Internals\Container::getBookingMessageRepository(),
+						\Bitrix\Booking\Internals\Container::getBookingDataExtractor(),
+					];
+				},
+			],
+			/**
+			 * AiAssistant
+			 */
+			\Bitrix\Booking\Internals\Service\AiAssistant\ContextProvider::class => [
+				'className' => \Bitrix\Booking\Internals\Service\AiAssistant\ContextProvider::class,
+				'constructorParams' => static function()
+				{
+					return [
+						'bookingRepository' => \Bitrix\Booking\Internals\Container::getBookingRepository(),
+						'resourceRepository' => \Bitrix\Booking\Internals\Container::getResourceRepository(),
+						'dateTimeService' => \Bitrix\Booking\Internals\Container::getAiAssistantDateTimeService(),
+					];
+				}
+			],
+			\Bitrix\Booking\Internals\Service\AiAssistant\DateTimeService::class => [
+				'className' => \Bitrix\Booking\Internals\Service\AiAssistant\DateTimeService::class,
+			],
+			\Bitrix\Booking\Internals\Service\ResourceAvailabilityService::class => [
+				'className' => \Bitrix\Booking\Internals\Service\ResourceAvailabilityService::class,
+				'constructorParams' => static function()
+				{
+					return [
+						'bookingRepository' => \Bitrix\Booking\Internals\Container::getBookingRepository(),
+					];
+				}
+			],
+			\Bitrix\Booking\Internals\Service\AiAssistant\ResourceSkuService::class => [
+				'className' => \Bitrix\Booking\Internals\Service\AiAssistant\ResourceSkuService::class,
+				'constructorParams' => static function()
+				{
+					return [
+						'resourceRepository' => \Bitrix\Booking\Internals\Container::getResourceRepository(),
+						'serviceSkuProvider' => \Bitrix\Booking\Internals\Container::getCatalogServiceSkuProvider(),
+					];
+				}
 			],
 		],
 	],
