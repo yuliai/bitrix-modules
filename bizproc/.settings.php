@@ -290,6 +290,7 @@ return [
 				'resume_workflow_queue' => [
 					'broker' => 'workflow_resume_db',
 					'handler' => WorkflowResumeReceiver::class,
+					'limit' => 5,
 				],
 				'scheduled_trigger_queue' => [
 					'broker' => 'workflow_db',
