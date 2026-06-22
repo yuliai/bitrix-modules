@@ -1,18 +1,24 @@
 <?
 ###################################################
 # askaron.agents module
-# Copyright (c) 2011-2023 Askaron Systems ltd.
+# Copyright (c) 2011-2026 Askaron Systems ltd.
 # http://askaron.ru
 # mailto:mail@askaron.ru
 ###################################################
 
-IncludeModuleLangFile(__FILE__);
-IncludeModuleLangFile($_SERVER["DOCUMENT_ROOT"].BX_ROOT."/modules/main/options.php");
-require_once( "prolog.php" );
+use \Bitrix\Main\Localization\Loc;
+Loc::loadMessages(__FILE__);
+Loc::loadMessages($_SERVER['DOCUMENT_ROOT'].BX_ROOT.'/modules/main/options.php');
+//IncludeModuleLangFile(__FILE__);
+//IncludeModuleLangFile($_SERVER["DOCUMENT_ROOT"].BX_ROOT."/modules/main/options.php");
+
+
+require_once( __DIR__."/prolog.php" );
 
 $module_id = "askaron.agents";
 $install_status = CModule::IncludeModuleEx($module_id);
 
+global $APPLICATION;
 $RIGHT = $APPLICATION->GetGroupRight($module_id);
 $RIGHT_W = ($RIGHT>="W");
 $RIGHT_R = ($RIGHT>="R");
@@ -56,15 +62,14 @@ if ($RIGHT_R)
 	$check_agents = COption::GetOptionString("main", "check_agents", "Y");
 
 	$aTabs = array(
-		array("DIV" => "edit1", "TAB" => GetMessage("MAIN_TAB_SET"), "ICON" => "", "TITLE" => GetMessage("MAIN_TAB_TITLE_SET")),
-		array("DIV" => "edit3", "TAB" => GetMessage("MAIN_TAB_RIGHTS"), "ICON" => "", "TITLE" => GetMessage("MAIN_TAB_TITLE_RIGHTS")),
+		array("DIV" => "edit1", "TAB" => Loc::getMessage("MAIN_TAB_SET"), "ICON" => "", "TITLE" => Loc::getMessage("MAIN_TAB_TITLE_SET")),
+		array("DIV" => "edit3", "TAB" => Loc::getMessage("MAIN_TAB_RIGHTS"), "ICON" => "", "TITLE" => Loc::getMessage("MAIN_TAB_TITLE_RIGHTS")),
 	);
 
 	$tabControl = new CAdminTabControl("tabControl", $aTabs);
 	$tabControl->Begin();
 	?>
-
-	<form method="post" action="<?echo $APPLICATION->GetCurPage()?>?mid=<?=htmlspecialchars($mid)?>&lang=<?=LANGUAGE_ID?>">
+	<form method="post" action="<?echo $APPLICATION->GetCurPage()?>?lang=<?=LANGUAGE_ID?>&amp;mid=<?=htmlspecialcharsbx($_REQUEST["mid"])?>&amp;mid_menu=<?=htmlspecialcharsbx($_REQUEST["mid_menu"])?>">
 		<?=bitrix_sessid_post()?>
 		<?$tabControl->BeginNextTab();?>
 		<tr>
@@ -76,8 +81,8 @@ if ($RIGHT_R)
 					CAdminMessage::ShowMessage(
 						Array(
 							"TYPE"=>"OK",
-							"MESSAGE" => GetMessage("askaron_agents_prolog_status_demo"),
-							"DETAILS"=> GetMessage("askaron_agents_prolog_buy_html"),
+							"MESSAGE" => Loc::getMessage("askaron_agents_prolog_status_demo"),
+							"DETAILS"=> Loc::getMessage("askaron_agents_prolog_buy_html"),
 							"HTML"=>true
 						)
 					);
@@ -88,8 +93,8 @@ if ($RIGHT_R)
 					CAdminMessage::ShowMessage(
 						Array(
 							"TYPE"=>"ERROR",
-							"MESSAGE" => GetMessage("askaron_agents_prolog_status_demo_expired"),
-							"DETAILS"=> GetMessage("askaron_agents_prolog_buy_html"),
+							"MESSAGE" => Loc::getMessage("askaron_agents_prolog_status_demo_expired"),
+							"DETAILS"=> Loc::getMessage("askaron_agents_prolog_buy_html"),
 							"HTML"=>true
 						)
 					);	
@@ -98,8 +103,8 @@ if ($RIGHT_R)
 			</td>
 		</tr>
 		<tr>
-			<td valign="top" width="40%" class="field-name"><?=GetMessage("askaron_agents_check_agents")?></td>
-			<td valign="top" width="50%">
+			<td valign="top" width="30%" class="field-name"><?=Loc::getMessage("askaron_agents_check_agents")?></td>
+			<td valign="top" width="70%">
 
 				<input
 					type="radio" 
@@ -111,7 +116,7 @@ if ($RIGHT_R)
 					name="check_agents"
 				/>					
 
-				<label for='askaron_agents_check_agents_Y'><?=GetMessage("askaron_agents_check_agents_Y")?></label><br />
+				<label for='askaron_agents_check_agents_Y'><?=Loc::getMessage("askaron_agents_check_agents_Y")?></label><br />
 
 				<input
 					type="radio" 
@@ -122,7 +127,7 @@ if ($RIGHT_R)
 					<?endif?>						
 					name="check_agents"
 				/>										
-				<label for='askaron_agents_check_agents_N'><?=GetMessage("askaron_agents_check_agents_N")?></label><br />
+				<label for='askaron_agents_check_agents_N'><?=Loc::getMessage("askaron_agents_check_agents_N")?></label><br />
 
 				<?
 				if( $install_status == 3 )
@@ -131,8 +136,8 @@ if ($RIGHT_R)
 					CAdminMessage::ShowMessage(
 						Array(
 							"TYPE"=>"ERROR",
-							"MESSAGE" => GetMessage("askaron_agents_prolog_status_demo_expired"),
-							"DETAILS"=> GetMessage("askaron_agents_all_agents_not_work"),
+							"MESSAGE" => Loc::getMessage("askaron_agents_prolog_status_demo_expired"),
+							"DETAILS"=> Loc::getMessage("askaron_agents_all_agents_not_work"),
 							"HTML"=>true
 						)
 					);	
@@ -144,7 +149,7 @@ if ($RIGHT_R)
 		<tr>
 			<td valign="top" width="100%" colspan="2">
 				<?=BeginNote();?>
-					<?=GetMessage("askaron_agents_check_agents_help", array("#LANG#" => LANG ) );?>
+					<?=Loc::getMessage("askaron_agents_check_agents_help", array("#LANG#" => LANG ) );?>
 				<?=EndNote();?>	
 			</td>				
 		</tr>			
@@ -152,36 +157,32 @@ if ($RIGHT_R)
 		<?$tabControl->BeginNextTab();?>
 		<?require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/admin/group_rights.php");?>
 		<?$tabControl->Buttons();?>		
-		<input <?if(!$RIGHT_W) echo "disabled" ?> type="submit" name="Update" value="<?=GetMessage("MAIN_SAVE")?>" title="<?=GetMessage("MAIN_OPT_SAVE_TITLE")?>">
-		<input <?if(!$RIGHT_W) echo "disabled" ?> type="submit" name="RestoreDefaults" title="<?echo GetMessage("MAIN_HINT_RESTORE_DEFAULTS")?>" OnClick="return confirm('<?echo AddSlashes(GetMessage("MAIN_HINT_RESTORE_DEFAULTS_WARNING"))?>')" value="<?echo GetMessage("MAIN_RESTORE_DEFAULTS")?>">
+		<input <?if(!$RIGHT_W) echo "disabled" ?> type="submit" name="Update" value="<?=Loc::getMessage("MAIN_SAVE")?>" title="<?=Loc::getMessage("MAIN_OPT_SAVE_TITLE")?>">
+		<input <?if(!$RIGHT_W) echo "disabled" ?> type="submit" name="RestoreDefaults" title="<?=Loc::getMessage("MAIN_HINT_RESTORE_DEFAULTS")?>"
+			  OnClick="return confirm('<?echo AddSlashes(Loc::getMessage("MAIN_HINT_RESTORE_DEFAULTS_WARNING"))?>')" value="<?echo Loc::getMessage("MAIN_RESTORE_DEFAULTS")?>">
 		<?$tabControl->End();?>
 	</form>
 
 	<?=BeginNote();?>
 		<?
-			$server_version = GetMessage("askaron_agents_not_vmbitrix");
-			
+			$server_version = Loc::getMessage("askaron_agents_not_vmbitrix");
 			$vm_version = getenv("BITRIX_VA_VER");
-			
 			if ( mb_strlen( $vm_version ) > 0 )
 			{
-				$server_version = GetMessage("askaron_agents_vmbitrix")." ".$vm_version;
+				$server_version = Loc::getMessage("askaron_agents_vmbitrix")." ".$vm_version;
 			}
 		?>
-
-		<?=GetMessage("askaron_agents_cron_help", array("#DOCUMENT_ROOT#" => $_SERVER["DOCUMENT_ROOT"], "#VMBITRIX#" => $server_version ) );?>
+		<?=Loc::getMessage("askaron_agents_cron_help", array("#DOCUMENT_ROOT#" => $_SERVER["DOCUMENT_ROOT"], "#VMBITRIX#" => $server_version ) );?>
 	<?=EndNote();?>	
 
 	<?=BeginNote();?>
-		<?=GetMessage("askaron_agents_check_agents_mail");?>
+		<?=Loc::getMessage("askaron_agents_check_agents_mail");?>
 		<?if ( defined( "BX_CRONTAB_SUPPORT" ) && (BX_CRONTAB_SUPPORT === true) ):?>
-			<br><br><?=GetMessage("askaron_agents_check_agents_mail_is_set");?>
+			<br><br><?=Loc::getMessage("askaron_agents_check_agents_mail_is_set");?>
 		<?else:?>
-			<br><br><?=GetMessage("askaron_agents_check_agents_mail_is_not_set");?>
+			<br><br><?=Loc::getMessage("askaron_agents_check_agents_mail_is_not_set");?>
 		<?endif?>
-	<?=EndNote();?>	
-
+	<?=EndNote();?>
 <?
 }
-
 ?>

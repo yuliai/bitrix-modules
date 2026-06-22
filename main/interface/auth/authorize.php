@@ -1,5 +1,12 @@
-<?
+<?php
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
+
+/**
+ * @global CMain $APPLICATION
+ * @var string $last_login Defined in wrapper.php
+ * @var string $authUrl Defined in wrapper.php
+ * @var string $not_show_links Defined in CMain::AuthForm()
+ */
 
 $store_password = COption::GetOptionString("main", "store_password", "Y");
 $bNeedCaptcha = $APPLICATION->NeedCAPTHAForLogin($last_login);

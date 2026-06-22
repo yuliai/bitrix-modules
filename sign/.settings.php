@@ -287,6 +287,9 @@ return [
 			'sign.service.integration.humanresources.structurenode' => [
 				'className' => \Bitrix\Sign\Service\Integration\HumanResources\StructureNodeService::class,
 			],
+			'sign.service.integration.disk' => [
+				'className' => Service\Integration\Disk\DiskService::class,
+			],
 			'sign.container' => [
 				'className' => Service\Container::class,
 			],
@@ -410,6 +413,9 @@ return [
 				'constructorParams' => static fn() => [
 					'accessControllerFactory' => Service\Container::instance()->getAccessControllerFactory(),
 				],
+			],
+			'sign.service.sign.blank.archive' => [
+				'className' => Service\Sign\BlankArchiveService::class,
 			],
 			'sign.service.sign.blank.file' => [
 				'className' => Service\Sign\BlankFileService::class,
@@ -575,8 +581,18 @@ return [
 			'sign.repository.signerslistuser' => [
 				'className' => Repository\SignersList\SignersListUserRepository::class,
 			],
-			'sign.service.signerslist' => [
+			Service\SignersListService::class => [
 				'className' => Service\SignersListService::class,
+			],
+			Service\Sign\SignersList\AccessService::class => [
+				'className' => Service\Sign\SignersList\AccessService::class,
+				'constructorParams' => static function() {
+					$container = Service\Container::instance();
+					return [
+						'signersListService' => $container->getSignersListService(),
+						'accessControllerFactory' => $container->getAccessControllerFactory(),
+					];
+				},
 			],
 			'sign.service.onboarding' => [
 				'className' => Service\OnboardingService::class,

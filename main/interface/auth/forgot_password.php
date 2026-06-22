@@ -1,5 +1,10 @@
-<?
+<?php
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
+
+/**
+ * @var string $last_login Defined in wrapper.php
+ * @var string $authUrl Defined in wrapper.php
+ */
 
 $bNeedCaptcha = (COption::GetOptionString("main", "captcha_restoring_password", "N") == "Y");
 ?>

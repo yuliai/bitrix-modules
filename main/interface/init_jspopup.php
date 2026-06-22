@@ -21,4 +21,3 @@ function JSPopupRedirectHandler(&$url, $skip_security_check)
 }
 
 AddEventHandler('main', 'OnBeforeLocalRedirect', 'JSPopupRedirectHandler');
-?>

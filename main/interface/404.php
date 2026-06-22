@@ -1,4 +1,9 @@
 <?
+
+/**
+ * @global CMain $APPLICATION
+ */
+
 if($_SERVER["REDIRECT_STATUS"]=="404")
 	define("ERROR_404","Y");
 

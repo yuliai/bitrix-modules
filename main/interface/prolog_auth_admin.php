@@ -1,6 +1,10 @@
 <?
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
 
+/**
+ * @global CMain $APPLICATION
+ */
+
 if (isset($_REQUEST['bxsender']))
 {
 	if ($_REQUEST['bxsender'] == 'core_window_cauthdialog')

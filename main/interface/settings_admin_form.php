@@ -4,6 +4,10 @@ use Bitrix\Main\Web\Json;
 
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
 
+/**
+ * @global CMain $APPLICATION
+ */
+
 IncludeModuleLangFile(__FILE__);
 
 if (!isset($adminFormParams) || !is_array($adminFormParams))

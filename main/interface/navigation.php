@@ -1,5 +1,13 @@
-<?
+<?php
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
+
+/**
+ * Defined in CAllDBResult::GetNavPrint():
+ * @var string $strNavQueryString
+ * @var string $sUrlPath
+ * @var string $title
+ */
+
 IncludeModuleLangFile(__FILE__);
 
 if($this->bPostNavigation)
@@ -24,12 +32,12 @@ if($this->NavRecordCount>0)
 		<a class="adm-nav-page adm-nav-page-prev" href="javascript:void(0)" onclick="<?echo $this->table_id?>.<?=$nav_func_name?>('<?echo $sJSUrlPath.'?PAGEN_'.$this->NavNum.'='.($this->NavPageNomer-1).'&amp;SIZEN_'.$this->NavNum.'='.$this->NavPageSize.$sQueryString;?>');<?=$showWait?>"></a>
 <?
 	}
-	else //$this->NavPageNomer > 1
+	else
 	{
 ?>
 		<span class="adm-nav-page adm-nav-page-prev"></span>
 <?
-	} //$this->NavPageNomer > 1
+	}
 
 	//$NavRecordGroup = $this->nStartPage;
 	$NavRecordGroup = 1;
@@ -46,7 +54,7 @@ if($this->NavRecordCount>0)
 ?>
 		<a href="javascript:void(0)" onclick="<?=$this->table_id?>.<?=$nav_func_name?>('<?=$sJSUrlPath.'?PAGEN_'.$this->NavNum.'='.$NavRecordGroup.'&amp;SIZEN_'.$this->NavNum.'='.$this->NavPageSize.$sQueryString?>');<?=$showWait?>" class="adm-nav-page"><?=$NavRecordGroup?></a>
 <?
-		} //endif($NavRecordGroup == $this->NavPageNomer):
+		}
 
 		if($NavRecordGroup == 2 && $this->nStartPage > 3)
 		{
@@ -76,7 +84,7 @@ if($this->NavRecordCount>0)
 			$NavRecordGroup++;
 		}
 
-	} // endwhile;//($NavRecordGroup <= $this->nEndPage):
+	}
 
 	if($this->NavPageNomer < $this->NavPageCount)
 	{
@@ -84,12 +92,12 @@ if($this->NavRecordCount>0)
 		<a class="adm-nav-page adm-nav-page-next" href="javascript:void(0)" onclick="<?echo $this->table_id?>.<?=$nav_func_name?>('<?echo $sJSUrlPath.'?PAGEN_'.$this->NavNum.'='.($this->NavPageNomer+1).'&amp;SIZEN_'.$this->NavNum.'='.$this->NavPageSize.$sQueryString;?>');<?=$showWait?>"></a>
 <?
 	}
-	else //($this->NavPageNomer < $this->NavPageCount):
+	else
 	{
 ?>
 		<span class="adm-nav-page adm-nav-page-next"></span>
 <?
-	} //endif; //($this->NavPageNomer < $this->NavPageCount):
+	}
 ?>
 	</div>
 	<div class="adm-nav-pages-total-block"><?
@@ -116,19 +124,19 @@ if($this->NavRecordCount>0)
 ?>
 		<option value="<?echo $size?>"<?if($this->NavPageSize == $size)echo ' selected="selected"'?>><?echo $size?></option>
 <?
-	} //endforeach;
+	}
 
 	if($this->bShowAll)
 	{
 ?>
 			<option value="0"<?if($this->NavShowAll) echo ' selected="selected"'?>><?echo GetMessage("navigation_records_all")?></option>
 <?
-	} //endif;
+	}
 ?>
 	</select><?}?></span></span></div>
 </div>
 <?
-} //endif; //$this->NavRecordCount>0;
+}
 
 if (!isset($_REQUEST['admin_history']))
 {
@@ -138,5 +146,4 @@ if (!isset($_REQUEST['admin_history']))
 		var parentWindow = (window.BX||window.parent.BX).PageObject.getParentWindowOfCurrentHost(window);
 		topWindow.BX.adminHistory.put('<?=CUtil::JSEscape($sUrlPath.'?PAGEN_'.$this->NavNum.'='.$this->NavPageNomer.'&amp;SIZEN_'.$this->NavNum.'='.$this->NavPageSize.$strNavQueryString)?>', topWindow.BX.proxy((topWindow.<?=$this->table_id?>)?parentWindow.<?=$this->table_id?>.<?=$nav_func_name?>:<?=$this->table_id?>.<?=$nav_func_name?>, window.<?=$this->table_id?>), ['mode', 'table_id']);</script>
 	<?
-} //endif;
-?>
+}

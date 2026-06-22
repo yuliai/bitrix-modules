@@ -1,4 +1,8 @@
-<?
+<?php
+
+/**
+ * @var array $arLangButton Defined in prolog_auth_admin.php
+ */
 
 use Bitrix\Main\Web\Json;
 

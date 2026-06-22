@@ -2,6 +2,7 @@
 
 /**
  * @global CMain $APPLICATION
+ * @var float $main_exec_time Defined in epilog_admin_after.php
 **/
 
 use Bitrix\Main\Localization\Loc;

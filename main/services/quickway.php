@@ -405,7 +405,7 @@ if (
 	&& ($requestedWidth < $originalWidth || $requestedHeight < $originalHeight)
 )
 {
-	$exact = $_GET['exact'] === 'Y' ? 2 : 1;
+	$exact = (isset($_GET['exact']) && $_GET['exact'] === 'Y' ? 2 : 1);
 
 	if (empty($storedData['handlerId']))
 	{

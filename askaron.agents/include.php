@@ -1,7 +1,7 @@
 <?php
 ###################################################
 # askaron.agents module
-# Copyright (c) 2011-2023 Askaron Systems ltd.
+# Copyright (c) 2011-2026 Askaron Systems ltd.
 # http://askaron.ru
 # mailto:mail@askaron.ru
 ###################################################

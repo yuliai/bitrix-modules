@@ -203,6 +203,8 @@ foreach($deviceNotifyCodes as $code)
 }
 $deviceNotify .= '</div><a href="javascript:void(0)" class="bx-action-href" onclick="DeviceNotifyFor()">'.GetMessage("main_sett_add_users").'</a>';
 
+$SERVER_NAME = $_SERVER['SERVER_NAME'] ?? '';
+
 $arAllOptions = array(
 	"main" => Array(
 		Array("site_name", GetMessage("MAIN_OPTION_SITENAME"), $SERVER_NAME, Array("text", 30)),
@@ -588,10 +590,10 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && !empty($_POST["Update"]) && ($USER->Can
 	COption::SetOptionString("main", "imageeditor_proxy_white_list", serialize($_POST["imageeditor_proxy_white_list"] ?? ''));
 	COption::SetOptionString("main", "cookie_name", \Bitrix\Main\Web\Cookie::normalizeName($_POST["cookie_name"]));
 
-	$module_id = "main";
-	COption::SetOptionString($module_id, "GROUP_DEFAULT_TASK", $GROUP_DEFAULT_TASK, "Task for groups by default");
+	$GROUP_DEFAULT_TASK = $_POST['GROUP_DEFAULT_TASK'] ?? '';
+	COption::SetOptionString("main", "GROUP_DEFAULT_TASK", $GROUP_DEFAULT_TASK, "Task for groups by default");
 	$letter = ($l = CTask::GetLetter($GROUP_DEFAULT_TASK)) ? $l : 'D';
-	COption::SetOptionString($module_id, "GROUP_DEFAULT_RIGHT", $letter, "Right for groups by default");
+	COption::SetOptionString("main", "GROUP_DEFAULT_RIGHT", $letter, "Right for groups by default");
 
 	$nID = COperation::GetIDByName('edit_subordinate_users');
 	$nID2 = COperation::GetIDByName('view_subordinate_users');
@@ -610,12 +612,12 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && !empty($_POST["Update"]) && ($USER->Can
 
 		$rt = ($tid) ? CTask::GetLetter($tid) : '';
 		if ($rt <> '' && $rt != "NOT_REF")
-			$APPLICATION->SetGroupRight($module_id, $value["ID"], $rt);
+			$APPLICATION->SetGroupRight("main", $value["ID"], $rt);
 		else
-			$APPLICATION->DelGroupRight($module_id, array($value["ID"]));
+			$APPLICATION->DelGroupRight("main", array($value["ID"]));
 	}
 
-	CGroup::SetTasksForModule($module_id, $arTasksInModule);
+	CGroup::SetTasksForModule("main", $arTasksInModule);
 
 	if(!empty($_REQUEST["back_url_settings"]) && empty($_REQUEST["Apply"]))
 		LocalRedirect($_REQUEST["back_url_settings"]);
@@ -758,15 +760,14 @@ ShowParamsHTMLByArray($arAllOptions["update"]);
 
 $tabControl->BeginNextTab();
 
-$module_id="main";
-$GROUP_DEFAULT_TASK = COption::GetOptionString($module_id, "GROUP_DEFAULT_TASK", "");
+$GROUP_DEFAULT_TASK = COption::GetOptionString("main", "GROUP_DEFAULT_TASK", "");
 
 if ($GROUP_DEFAULT_TASK == '')
 {
-	$GROUP_DEFAULT_RIGHT = COption::GetOptionString($module_id, "GROUP_DEFAULT_RIGHT", "D");
-	$GROUP_DEFAULT_TASK = CTask::GetIdByLetter($GROUP_DEFAULT_RIGHT,$module_id,'module');
+	$GROUP_DEFAULT_RIGHT = COption::GetOptionString("main", "GROUP_DEFAULT_RIGHT", "D");
+	$GROUP_DEFAULT_TASK = CTask::GetIdByLetter($GROUP_DEFAULT_RIGHT, 'main', 'module');
 	if ($GROUP_DEFAULT_TASK)
-		COption::SetOptionString($module_id, "GROUP_DEFAULT_TASK", $GROUP_DEFAULT_TASK);
+		COption::SetOptionString("main", "GROUP_DEFAULT_TASK", $GROUP_DEFAULT_TASK);
 }
 ?>
 	<tr>
@@ -774,7 +775,7 @@ if ($GROUP_DEFAULT_TASK == '')
 		<td width="50%">
 		<script>var arSubordTasks = [];</script>
 		<?
-		$arTasksInModule = CTask::GetTasksInModules(true,$module_id,'module');
+		$arTasksInModule = CTask::GetTasksInModules(true, 'main', 'module');
 		$nID = COperation::GetIDByName('edit_subordinate_users');
 		$nID2 = COperation::GetIDByName('view_subordinate_users');
 		$arTasks = $arTasksInModule['main'];

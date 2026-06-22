@@ -1,4 +1,7 @@
 <?php
+use \Bitrix\Main\Localization\Loc;
 define("ADMIN_MODULE_NAME", "askaron.agents");
-IncludeModuleLangFile(__FILE__);
+
+Loc::loadMessages(__FILE__);
+
 

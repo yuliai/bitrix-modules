@@ -1,5 +1,13 @@
-<?
+<?php
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
+
+/**
+ * @global CUser $USER
+ * @var array $aOptions Defined in CAdminList::ShowSettings()
+ * @var array $aAllCols Defined in CAdminList::ShowSettings()
+ * @var array $aCols Defined in CAdminList::ShowSettings()
+ */
+
 IncludeModuleLangFile(__FILE__);
 
 if($this->sort)
@@ -139,4 +147,3 @@ $obJSPopup->StartButtons();
 <input type="button" value="<?=GetMessage("admin_lib_sett_reset")?>" onclick="if(confirm('<?=CUtil::JSEscape(GetMessage("admin_lib_sett_reset_ask"))?>'))<?=$this->table_id?>.DeleteSettings()" title="<?=GetMessage("admin_lib_sett_reset_title")?>" />
 <?
 $obJSPopup->EndButtons();
-?>
