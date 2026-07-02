@@ -18,6 +18,8 @@ foreach (
 		'PhpParser' => '/vendor/nikic/php-parser/lib/PhpParser',
 		'Recurr' => '/vendor/simshaun/recurr/src/Recurr',
 		'Psr\\SimpleCache' => '/vendor/psr/simple-cache/src',
+		'Symfony\\Polyfill\\Ctype' => '/vendor/symfony/polyfill-ctype',
+		'Symfony\\Component\\Yaml' => '/vendor/symfony/yaml',
 	]
 	as $namespace => $namespacePath
 )

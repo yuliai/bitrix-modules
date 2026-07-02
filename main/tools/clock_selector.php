@@ -1,4 +1,4 @@
-<?
+<?php
 
 /**
  * @global CUser $USER
@@ -32,7 +32,6 @@ CClock::Show(
 	)
 );
 
-?><script>BX.onCustomEvent('onClockRegister',[{<?=CUtil::JSEscape($_REQUEST['clock_id'])?>:'<?=$clock_input_id?>'}])</script><?
+?><script>BX.onCustomEvent('onClockRegister',[{<?=CUtil::JSEscape($_REQUEST['clock_id'])?>:'<?=$clock_input_id?>'}])</script><?php
 
 require($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/epilog_after.php");
-?>

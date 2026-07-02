@@ -1248,7 +1248,7 @@ class CAdminMenu
 			// Populate list with data
 			if(!$submenu)
 				continue;
-			$row = &$lAdmin->AddRow(0, null, $submenu["url"], GetMessage("admin_lib_index_go"));
+			$row = $lAdmin->AddRow(0, null, $submenu["url"], GetMessage("admin_lib_index_go"));
 			$row->AddField("NAME", '<a href="'.$submenu["url"].'" title="'.$submenu["title"].'">'.$submenu["text"].'</a>');
 			$row->AddField("DESCRIPTION", $submenu["title"]);
 		}
@@ -1828,12 +1828,12 @@ BX.Fix(right_bar, {type: 'right', limit_node: BX.previousSibling(right_bar)});
 
 			if ($icon == 'btn_list'/* || $icon == 'btn_up'*/):
 ?>
-	<a <?if ($this->isPublicFrame):?>target="_top"<?endif;?> href="<?=($onclick !== '' ? 'javascript:void(0)' : $link)?>" <?=$item["LINK_PARAM"]?> class="adm-detail-toolbar-btn" title="<?=$item["TITLE"].$hkInst->GetTitle($icon)?>"<?=($onclick !== '' ? ' onclick="'.htmlspecialcharsbx($onclick).'"':'')?><?=(!empty($item["ICON"])? ' id="'.$item["ICON"].'"':'')?>><span class="adm-detail-toolbar-btn-l"></span><span class="adm-detail-toolbar-btn-text"><?=$item["TEXT"]?></span><span class="adm-detail-toolbar-btn-r"></span></a>
+	<a <?php if ($this->isPublicFrame):?>target="_top"<?php endif;?> href="<?=($onclick !== '' ? 'javascript:void(0)' : $link)?>" <?=$item["LINK_PARAM"]?> class="adm-detail-toolbar-btn" title="<?=$item["TITLE"].$hkInst->GetTitle($icon)?>"<?=($onclick !== '' ? ' onclick="'.htmlspecialcharsbx($onclick).'"':'')?><?=(!empty($item["ICON"])? ' id="'.$item["ICON"].'"':'')?>><span class="adm-detail-toolbar-btn-l"></span><span class="adm-detail-toolbar-btn-text"><?=$item["TEXT"]?></span><span class="adm-detail-toolbar-btn-r"></span></a>
 <?
 			else:
 				$sClassName = $this->GetClassByID($icon);
 ?>
-	<a <?if ($this->isPublicFrame):?>target="_top"<?endif;?> href="<?=($onclick !== '' ? 'javascript:void(0)' : $link)?>" <?=$item["LINK_PARAM"]?> class="adm-btn<?=$sClassName != '' ? ' '.$sClassName : ''?>" title="<?=$item["TITLE"].$hkInst->GetTitle($icon)?>"<?=($onclick !== '' ? ' onclick="'.htmlspecialcharsbx($onclick).'"' : '')?><?=(!empty($item["ICON"])? ' id="'.$item["ICON"].'"':'')?>><?=$item["TEXT"]?></a>
+	<a <?php if ($this->isPublicFrame):?>target="_top"<?php endif;?> href="<?=($onclick !== '' ? 'javascript:void(0)' : $link)?>" <?=$item["LINK_PARAM"]?> class="adm-btn<?=$sClassName != '' ? ' '.$sClassName : ''?>" title="<?=$item["TITLE"].$hkInst->GetTitle($icon)?>"<?=($onclick !== '' ? ' onclick="'.htmlspecialcharsbx($onclick).'"' : '')?><?=(!empty($item["ICON"])? ' id="'.$item["ICON"].'"':'')?>><?=$item["TEXT"]?></a>
 <?
 			endif;
 

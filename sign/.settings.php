@@ -2,7 +2,6 @@
 
 use Bitrix\Sign\Access\Model\UserModelRepository;
 use Bitrix\Sign\Access\Service\AccessService;
-use Bitrix\Sign\Debug\Logger;
 use Bitrix\Sign\Serializer\ItemPropertyJsonSerializer;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Config;
@@ -238,6 +237,9 @@ return [
 	],
 	'services' => [
 		'value' => [
+			\Bitrix\Sign\Debug\Logger::class => [
+				'constructor' => static fn() => Service\Container::instance()->getLogger(),
+			],
 			'sign.service.integration.crm.document' => [
 				'className' => \Bitrix\Sign\Service\Integration\Crm\BaseDocumentService::class,
 				'constructorParams' => static function() {
@@ -280,6 +282,9 @@ return [
 			],
 			'sign.service.integration.crm.events' => [
 				'className' => \Bitrix\Sign\Service\Integration\Crm\EventHandlerService::class,
+			],
+			'sign.service.integration.crm.access' => [
+				'className' => Service\Integration\Crm\AccessService::class,
 			],
 			'sign.service.integration.signmobile.member' => [
 				'className' => \Bitrix\Sign\Service\Integration\SignMobile\MemberService::class,
@@ -668,9 +673,6 @@ return [
 			],
 			'sign.service.placeholder.aliasRoleResolver' => [
 				'className' => Service\Placeholder\FieldAlias\AliasRoleResolver::class,
-			],
-			'sign.debug.logger' => [
-				'constructor' => static fn() => Logger::getInstance(),
 			],
 			'sign.service.placeholder.block' => [
 				'className' => Service\Sign\PlaceholderBlockService::class,

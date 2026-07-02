@@ -1,4 +1,4 @@
-<?
+<?php
 /**
  * @global CUser $USER
  * @global CMain $APPLICATION
@@ -22,7 +22,8 @@ $APPLICATION->SetTitle(GetMessage("admin_index_title"));
 
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_admin_after.php");
 ?>
-<?$APPLICATION->IncludeComponent(
+<?php
+$APPLICATION->IncludeComponent(
 	"bitrix:desktop",
 	"admin",
 	Array(
@@ -40,7 +41,7 @@ require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_admi
 	array(
 		"HIDE_ICONS" => "Y"
 	)
-	);?>
-<?
-require($_SERVER["DOCUMENT_ROOT"].BX_ROOT."/modules/main/include/epilog_admin.php");
+	);
 ?>
+<?php
+require($_SERVER["DOCUMENT_ROOT"].BX_ROOT."/modules/main/include/epilog_admin.php");

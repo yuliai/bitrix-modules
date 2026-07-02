@@ -19,7 +19,7 @@ use Bitrix\Main\SystemException;
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/start.php");
 
 $application = Main\Application::getInstance();
-$application->initializeExtendedKernel(array(
+$application->initializeContext(array(
 	"get" => $_GET,
 	"post" => $_POST,
 	"files" => $_FILES,
