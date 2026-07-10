@@ -10,17 +10,24 @@ use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
+use Bitrix\Note\Internal\Service\Import\WikiImportAvailability;
 use Bitrix\Note\Public\Provider\CollectionProvider;
 
 class InitialCollectionsService
 {
 	private CollectionRepository $repository;
 
+	private WikiImportAvailability $wikiImportAvailability;
+
 	private const INITIAL_COLLECTIONS_PAGE_SIZE = 50;
 
-	public function __construct(?CollectionRepository $repository = null)
+	public function __construct(
+		?CollectionRepository $repository = null,
+		?WikiImportAvailability $wikiImportAvailability = null,
+	)
 	{
 		$this->repository = $repository ?? new CollectionRepository();
+		$this->wikiImportAvailability = $wikiImportAvailability ?? new WikiImportAvailability();
 	}
 
 	public function resolve(int $pageSize = self::INITIAL_COLLECTIONS_PAGE_SIZE): array
@@ -113,21 +120,52 @@ class InitialCollectionsService
 			];
 		}
 
+		$items = array_values($rows);
+		$this->registerPullWatches($items);
+
 		return [
-			'items' => array_values($rows),
+			'items' => $items,
 			'nextCursor' => $nextCursor,
 			'permissions' => $globalPermissions,
 		];
 	}
 
+	private function registerPullWatches(array $items): void
+	{
+		if (!\Bitrix\Main\Loader::includeModule('pull'))
+		{
+			return;
+		}
+
+		$userId = (int)CurrentUser::get()->getId();
+		if ($userId <= 0)
+		{
+			return;
+		}
+
+		\CPullWatch::Add($userId, 'NOTE_GLOBAL');
+		foreach ($items as $item)
+		{
+			$collectionId = (int)($item['id'] ?? 0);
+			if ($collectionId <= 0)
+			{
+				continue;
+			}
+			\CPullWatch::Add($userId, 'NOTE_COLLECTION_' . $collectionId);
+			\CPullWatch::Add($userId, 'NOTE_COLLECTION_' . $collectionId . '_ACL');
+		}
+	}
+
 	private function resolveGlobalPermissions(): array
 	{
 		$userId = (int)CurrentUser::get()->getId();
+		$canImport = AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_IMPORT);
 
 		return [
 			'canEditCollections' => AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_CREATE_COLLECTIONS),
 			'canEditGlobalPermissions' => AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_EDIT_PERMISSIONS),
-			'canImport' => AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_IMPORT),
+			'canImport' => $canImport,
+			'canImportWiki' => $canImport && $this->wikiImportAvailability->isEnabled(),
 			'hasManageableCollection' => CollectionAccessService::userHasManageableCollection($userId),
 		];
 	}

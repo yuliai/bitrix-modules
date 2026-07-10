@@ -63,12 +63,11 @@ class RetryAttachmentsStep implements StepInterface
 				continue;
 			}
 
-			$tmpPath = $downloadResult->data['tmpPath'];
 			$fileName = $downloadResult->data['fileName'];
 			$contentType = $downloadResult->data['contentType'];
 			$size = $downloadResult->data['size'];
 
-			$fileId = $this->fileService->saveAttachment($tmpPath, $fileName, $contentType, $size);
+			$fileId = $this->fileService->persistAttachment($downloadResult->data);
 			if ($fileId === null)
 			{
 				ImportLogger::logError("Retry save failed: attachmentId={$attachmentId}, docId={$docId}, fileName={$fileName}");

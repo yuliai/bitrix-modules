@@ -11,6 +11,7 @@ use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
 use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
@@ -24,6 +25,7 @@ class MoveDocumentCommand extends AbstractCommand
 	private readonly PositionService $positionService;
 	private readonly DocumentRepository $repository;
 	private readonly RecycleBinFilter $recycleBinFilter;
+	private readonly PushNotificationService $pushService;
 
 	public function __construct(
 		int $id,
@@ -34,6 +36,7 @@ class MoveDocumentCommand extends AbstractCommand
 		?PositionService $positionService = null,
 		?DocumentRepository $repository = null,
 		?RecycleBinFilter $recycleBinFilter = null,
+		?PushNotificationService $pushService = null,
 	)
 	{
 		$this->id = $id;
@@ -44,6 +47,7 @@ class MoveDocumentCommand extends AbstractCommand
 		$this->positionService = $positionService ?? new PositionService();
 		$this->repository = $repository ?? new DocumentRepository();
 		$this->recycleBinFilter = $recycleBinFilter ?? new RecycleBinFilter();
+		$this->pushService = $pushService ?? new PushNotificationService();
 	}
 
 	protected function execute(): Result
@@ -58,6 +62,9 @@ class MoveDocumentCommand extends AbstractCommand
 		{
 			throw new DocumentArchivedException();
 		}
+
+		$sourceCollectionId = $document !== null ? (int)$document->getCollectionId() : null;
+		$sourceParentId = $document !== null ? $document->getParentId() : null;
 
 		if ($this->parentId !== null)
 		{
@@ -87,9 +94,11 @@ class MoveDocumentCommand extends AbstractCommand
 
 		$data = $result->getData();
 		$document = $data['document'] ?? null;
+		$affectedPositions = $data['affectedPositions'] ?? [];
+
 		if ($document === null)
 		{
-			return $this->createResult(['document' => null]);
+			return $this->createResult(['document' => null, 'affectedPositions' => $affectedPositions]);
 		}
 
 		if (!$document instanceof Document)
@@ -97,7 +106,80 @@ class MoveDocumentCommand extends AbstractCommand
 			throw new SystemException('Unable to move document.');
 		}
 
-		return $this->createResult(['document' => $document]);
+		// PositionService returns a meta-only Document (ID/COLLECTION_ID/PARENT_ID/POSITION).
+		// Reload full record once — reused both for the push payload (title) and the action response.
+		$fullDocument = $this->repository->getById((int)$document->getId());
+
+		$this->emitDocumentMove($document, $fullDocument, $affectedPositions, $sourceCollectionId, $sourceParentId);
+
+		return $this->createResult([
+			'document' => $document,
+			'fullDocument' => $fullDocument,
+			'affectedPositions' => $affectedPositions,
+		]);
+	}
+
+	private function emitDocumentMove(
+		Document $document,
+		?Document $fullDocument,
+		array $affectedPositions,
+		?int $sourceCollectionId,
+		?int $sourceParentId,
+	): void
+	{
+		$documentId = (int)$document->getId();
+		$targetCollectionId = (int)$document->getCollectionId();
+		$targetParentId = $document->getParentId();
+		$finalPosition = (int)$document->getPosition();
+		$title = $fullDocument !== null ? (string)$fullDocument->getTitle() : '';
+
+		$hasChildren = $this->repository->hasChildren($targetCollectionId, $documentId);
+		$fromParentHasChildren = ($sourceParentId !== null && $sourceCollectionId !== null)
+			? $this->repository->hasChildren($sourceCollectionId, $sourceParentId)
+			: null;
+		$initiatorUserId = $this->userId;
+		$pushService = $this->pushService;
+		$threshold = PushNotificationService::REALTIME_BATCH_THRESHOLD;
+		$requestRefetch = count($affectedPositions) > $threshold;
+
+		$payload = [
+			'documentId' => $documentId,
+			'collectionId' => $targetCollectionId,
+			'parentId' => $targetParentId,
+			'position' => $finalPosition,
+			'title' => $title,
+			'hasChildren' => $hasChildren,
+			'fromCollectionId' => $sourceCollectionId,
+			'fromParentId' => $sourceParentId,
+		];
+		if ($fromParentHasChildren !== null)
+		{
+			$payload['fromParentHasChildren'] = $fromParentHasChildren;
+		}
+		if ($requestRefetch)
+		{
+			$payload['requestRefetch'] = true;
+		}
+		else
+		{
+			$payload['affectedPositions'] = $affectedPositions;
+		}
+
+		$collectionsToNotify = [$targetCollectionId];
+		if ($sourceCollectionId !== null && $sourceCollectionId !== $targetCollectionId)
+		{
+			$collectionsToNotify[] = $sourceCollectionId;
+		}
+
+		$pushService->dispatchAfterCommit(static function () use (
+			$pushService, $payload, $collectionsToNotify, $documentId, $initiatorUserId,
+		): void {
+			foreach ($collectionsToNotify as $collectionId)
+			{
+				$pushService->sendToCollection($collectionId, 'documentMove', $payload, $initiatorUserId);
+			}
+			$pushService->sendToDocument($documentId, 'documentMove', $payload, $initiatorUserId);
+		});
 	}
 
 	private function createResult(array $data = []): Result

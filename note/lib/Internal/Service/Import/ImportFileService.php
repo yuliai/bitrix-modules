@@ -17,6 +17,37 @@ class ImportFileService
 		$this->fileLinkRepository = $fileLinkRepository ?? new DocumentFileLinkRepository();
 	}
 
+	/**
+	 * Resolves one downloadAttachment() result into a note-owned file id.
+	 *
+	 * Internal sources (wiki) duplicate the file inside Bitrix and hand back a
+	 * ready `fileId`; external sources (Outline) hand back a `tmpPath` that we
+	 * persist here via CFile::SaveFile. The import steps stay source-agnostic.
+	 *
+	 * @param array<string, mixed> $data SourceResult::$data from downloadAttachment().
+	 */
+	public function persistAttachment(array $data): ?int
+	{
+		$preSavedFileId = $data['fileId'] ?? null;
+		if ($preSavedFileId !== null)
+		{
+			return (int)$preSavedFileId > 0 ? (int)$preSavedFileId : null;
+		}
+
+		$tmpPath = (string)($data['tmpPath'] ?? '');
+		if ($tmpPath === '')
+		{
+			return null;
+		}
+
+		return $this->saveAttachment(
+			$tmpPath,
+			(string)($data['fileName'] ?? ''),
+			(string)($data['contentType'] ?? 'application/octet-stream'),
+			(int)($data['size'] ?? 0),
+		);
+	}
+
 	public function saveAttachment(string $tmpPath, string $fileName, string $mimeType, int $size): ?int
 	{
 		if ($size <= 0)

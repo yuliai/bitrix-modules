@@ -9,6 +9,7 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\RecycleBin\HardDeleteService;
 
 class HardDeleteDocumentCommand extends AbstractCommand
@@ -20,6 +21,7 @@ class HardDeleteDocumentCommand extends AbstractCommand
 		private readonly int $userId,
 		private readonly RecycleBinRepository $recycleBinRepository = new RecycleBinRepository(),
 		private readonly HardDeleteService $hardDeleteService = new HardDeleteService(),
+		private readonly PushNotificationService $pushService = new PushNotificationService(),
 	) {}
 
 	protected function execute(): Result
@@ -53,9 +55,26 @@ class HardDeleteDocumentCommand extends AbstractCommand
 			$cleanupPayload['documentIds'],
 		);
 
+		$this->emitHardDelete($documentId);
+
 		$result = new Result();
 		$result->setData(['documentId' => $documentId]);
 
 		return $result;
+	}
+
+	private function emitHardDelete(int $documentId): void
+	{
+		$initiatorUserId = $this->userId;
+		$pushService = $this->pushService;
+
+		$pushService->dispatchAfterCommit(static function () use ($pushService, $documentId, $initiatorUserId): void {
+			$pushService->sendToDocument(
+				$documentId,
+				'documentHardDelete',
+				['documentId' => $documentId],
+				$initiatorUserId,
+			);
+		});
 	}
 }

@@ -36,7 +36,7 @@ class CollaborationProvider
 			return null;
 		}
 
-		$this->subscribeUserToDocumentTag($userId, $documentId);
+		$this->subscribeUserToDocumentTag($userId, $documentId, $collectionId);
 
 		return [
 			'readOnly' => !$canEdit,
@@ -56,17 +56,19 @@ class CollaborationProvider
 		$patches = $this->updateRepository->getByDocumentId($documentId);
 		$lastPatchId = $this->updateRepository->getLastId($documentId);
 
-		$this->subscribeUserToDocumentTag($userId, $documentId);
+		$this->subscribeUserToDocumentTag($userId, $documentId, (int)($document?->getCollectionId() ?? 0));
 
+		$contentFormat = (string)($document?->getContentFormat() ?? DocumentTable::CONTENT_FORMAT_YJS);
 		$yjsState = $document?->getYjsState();
 		if ($document !== null
-			&& $document->getContentFormat() === DocumentTable::CONTENT_FORMAT_YJS
+			&& $contentFormat === DocumentTable::CONTENT_FORMAT_YJS
 			&& $yjsState !== null
 			&& $yjsState !== ''
 		)
 		{
 			return [
 				'yjsState' => $yjsState,
+				'contentFormat' => $contentFormat,
 				'patches' => $patches,
 				'lastPatchId' => $lastPatchId,
 			];
@@ -74,6 +76,7 @@ class CollaborationProvider
 
 		return [
 			'markdown' => $document?->getMarkdown(),
+			'contentFormat' => $contentFormat,
 			'patches' => $patches,
 			'lastPatchId' => $lastPatchId,
 		];
@@ -90,15 +93,30 @@ class CollaborationProvider
 		];
 	}
 
-	private function subscribeUserToDocumentTag(int $userId, int $documentId): void
+	private function subscribeUserToDocumentTag(int $userId, int $documentId, int $collectionId = 0): void
 	{
 		if (!Loader::includeModule('pull'))
 		{
 			return;
 		}
 
-		\CPullWatch::Add($userId, 'NOTE_DOC_' . $documentId);
-		\CPullWatch::Add($userId, 'NOTE_DOC_AWARE_' . $documentId);
+		$tags = [
+			'NOTE_DOC_' . $documentId,
+			'NOTE_DOC_AWARE_' . $documentId,
+			// ACL channel — capability pushes flow here. FE extendWatch only renews; server-side Add is required.
+			'NOTE_DOC_' . $documentId . '_ACL',
+		];
+		if ($collectionId > 0)
+		{
+			// Collection cascade (archive/delete) and ACL flips fan out via these tags;
+			// without server-side Add an editor opened on a bare template would never get them.
+			$tags[] = 'NOTE_COLLECTION_' . $collectionId;
+			$tags[] = 'NOTE_COLLECTION_' . $collectionId . '_ACL';
+		}
+		foreach ($tags as $tag)
+		{
+			\CPullWatch::Add($userId, $tag);
+		}
 	}
 
 	private function resolveUserDisplayName(int $userId): string

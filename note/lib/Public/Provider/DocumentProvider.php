@@ -58,7 +58,8 @@ final class DocumentProvider
 
 	public function getForRead(int $id): DocumentReadDto
 	{
-		$document = $this->documentRepository->getById($id);
+		// Meta only: markdown is fetched below via getRawMarkdown, so the heavy MARKDOWN/YJS_STATE blobs are skipped here.
+		$document = $this->documentRepository->getMetaById($id);
 		if ($document === null || $document->getIsArchived())
 		{
 			throw new DocumentNotFoundException();
@@ -83,8 +84,9 @@ final class DocumentProvider
 			position: (int)$document->getPosition(),
 			createdBy: (int)$document->getCreatedBy(),
 			updatedBy: (int)$document->getUpdatedBy(),
-			createdAt: $document->getCreatedAt()->format('c'),
-			updatedAt: $document->getUpdatedAt()->format('c'),
+			// REST-only read path: datetime is returned in UTC (ISO 8601 with Z).
+			createdAt: gmdate('Y-m-d\TH:i:s\Z', $document->getCreatedAt()->getTimestamp()),
+			updatedAt: gmdate('Y-m-d\TH:i:s\Z', $document->getUpdatedAt()->getTimestamp()),
 		);
 	}
 

@@ -10,7 +10,7 @@ use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
 
-final class CollectionPositionService
+class CollectionPositionService
 {
 	private readonly CollectionRepository $repository;
 	private readonly PositionCalculator $calculator;

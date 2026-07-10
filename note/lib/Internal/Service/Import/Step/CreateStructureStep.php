@@ -81,6 +81,7 @@ class CreateStructureStep implements StepInterface
 		;
 
 		$existingParentIdMap = [];
+		$existingCollectionIdMap = [];
 		if ($overwrite)
 		{
 			$existingDocIds = [];
@@ -93,10 +94,11 @@ class CreateStructureStep implements StepInterface
 			}
 			if (!empty($existingDocIds))
 			{
-				$rows = $this->documentService->findByIds($existingDocIds, ['ID', 'PARENT_ID']);
+				$rows = $this->documentService->findByIds($existingDocIds, ['ID', 'PARENT_ID', 'COLLECTION_ID']);
 				foreach ($rows as $id => $row)
 				{
 					$existingParentIdMap[$id] = $row['PARENT_ID'] !== null ? (int)$row['PARENT_ID'] : null;
+					$existingCollectionIdMap[$id] = $row['COLLECTION_ID'] !== null ? (int)$row['COLLECTION_ID'] : null;
 				}
 			}
 		}
@@ -122,7 +124,18 @@ class CreateStructureStep implements StepInterface
 
 				$existingDocId = $existingMappings[$externalId]['documentId'] ?? null;
 
-				if ($existingDocId !== null)
+				// A mapped document can be updated in place only if it still exists AND
+				// already lives in the target collection. If it's gone, or stranded in a
+				// different / deleted collection (deleting a collection in the UI orphans
+				// its documents — they keep the old COLLECTION_ID — without clearing the
+				// import map), its position branch is invalid and a move would fail with
+				// "Document not found in source branch". In that case recreate it fresh in
+				// the target collection so the re-import doesn't end up empty.
+				$canReuse = $existingDocId !== null
+					&& array_key_exists($existingDocId, $existingCollectionIdMap)
+					&& ($existingCollectionIdMap[$existingDocId] ?? null) === $collectionId;
+
+				if ($canReuse)
 				{
 					try
 					{
@@ -144,9 +157,9 @@ class CreateStructureStep implements StepInterface
 
 					try
 					{
+						// Same collection is guaranteed here; only the parent may differ.
 						$currentParentId = $existingParentIdMap[$existingDocId] ?? null;
-						$hasMapping = array_key_exists($existingDocId, $existingParentIdMap);
-						if ($hasMapping && $currentParentId !== $parentId)
+						if ($currentParentId !== $parentId)
 						{
 							$this->positionService->move(
 								documentId: $existingDocId,

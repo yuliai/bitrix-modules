@@ -68,6 +68,19 @@ class CollectionRepository
 		return CollectionTable::getByPrimary($id)->fetchObject();
 	}
 
+	/**
+	 * Existence-only check: a single indexed PK lookup selecting just ID, no row hydration.
+	 */
+	public function exists(int $id): bool
+	{
+		if ($id <= 0)
+		{
+			return false;
+		}
+
+		return CollectionTable::getByPrimary($id, ['select' => ['ID']])->fetch() !== false;
+	}
+
 	public function getListByIds(
 		array $ids,
 		?int $limit = null,

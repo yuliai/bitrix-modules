@@ -43,6 +43,7 @@ final readonly class BranchManager
 			return $this->createErrorResult('Document not found in source branch.');
 		}
 
+		$renumbered = [];
 		$newPosition = $this->resolveGapPosition(
 			$siblings,
 			$collectionId,
@@ -50,13 +51,16 @@ final readonly class BranchManager
 			$targetPosition,
 			$userId,
 			$documentId,
+			$renumbered,
 		);
 
-		return $this->updateDocument($document, [
+		$updateResult = $this->updateDocument($document, [
 			'POSITION' => $newPosition,
 			'UPDATED_BY' => $userId,
 			'UPDATED_AT' => new DateTime(),
 		]);
+
+		return $this->attachAffectedPositions($updateResult, $renumbered, $documentId, $newPosition);
 	}
 
 	public function moveBetweenBranches(
@@ -78,12 +82,15 @@ final readonly class BranchManager
 		}
 
 		$targetDocuments = $this->repository->getDocumentMetaByParent($targetCollectionId, $targetParentId);
+		$renumbered = [];
 		$newPosition = $this->resolveGapPosition(
 			$targetDocuments,
 			$targetCollectionId,
 			$targetParentId,
 			$targetPosition,
 			$userId,
+			null,
+			$renumbered,
 		);
 
 		$rootUpdateResult = $this->updateDocument($document, [
@@ -112,7 +119,7 @@ final readonly class BranchManager
 			}
 		}
 
-		return $rootUpdateResult;
+		return $this->attachAffectedPositions($rootUpdateResult, $renumbered, $documentId, $newPosition);
 	}
 
 	private function cascadeDescendantsCollection(
@@ -147,13 +154,20 @@ final readonly class BranchManager
 		$branchDocuments = $this->repository->getBranchDocumentsMeta($collectionId, $parentId);
 		if (empty($branchDocuments))
 		{
-			return new Result();
+			return $this->createResultWithAffected([]);
 		}
 
 		$normalizedIds = $this->normalizeIds($orderedIds);
 		$orderedBranch = $this->buildReorderedBranch($branchDocuments, $normalizedIds);
 
-		return $this->persistBranchOrder($orderedBranch, $collectionId, $parentId, $userId, null, true);
+		$changes = [];
+		$persistResult = $this->persistBranchOrder($orderedBranch, $collectionId, $parentId, $userId, null, true, $changes);
+		if (!$persistResult->isSuccess())
+		{
+			return $persistResult;
+		}
+
+		return $this->createResultWithAffected($changes);
 	}
 
 	public function updateDocument(Document $document, array $fields): Result
@@ -181,7 +195,8 @@ final readonly class BranchManager
 		?int $parentId,
 		int $userId,
 		?int $touchDocumentId,
-		bool $touchAll
+		bool $touchAll,
+		array &$changesOut = []
 	): Result
 	{
 		$result = new Result();
@@ -210,6 +225,7 @@ final readonly class BranchManager
 			if ($document->getPosition() !== $desiredPosition)
 			{
 				$fields['POSITION'] = $desiredPosition;
+				$changesOut[$documentId] = $desiredPosition;
 			}
 			if ($touchAll || ($touchDocumentId !== null && $documentId === $touchDocumentId))
 			{
@@ -239,7 +255,8 @@ final readonly class BranchManager
 		?int $parentId,
 		?int $targetPosition,
 		int $userId,
-		?int $excludedDocumentId = null
+		?int $excludedDocumentId = null,
+		array &$renumberedOut = []
 	): ?int
 	{
 		$newPosition = $this->calculator->calculateGapPosition(
@@ -251,7 +268,7 @@ final readonly class BranchManager
 			return $newPosition;
 		}
 
-		$this->renumberBranch($collectionId, $parentId, $userId);
+		$this->renumberBranch($collectionId, $parentId, $userId, $renumberedOut);
 
 		$documents = $this->repository->getDocumentMetaByParent($collectionId, $parentId);
 		if ($excludedDocumentId !== null)
@@ -296,7 +313,7 @@ final readonly class BranchManager
 		return $foundDocument ? $siblings : null;
 	}
 
-	private function renumberBranch(int $collectionId, ?int $parentId, int $userId): void
+	private function renumberBranch(int $collectionId, ?int $parentId, int $userId, array &$changesOut = []): void
 	{
 		$documents = $this->repository->getDocumentMetaByParent($collectionId, $parentId);
 		if (empty($documents))
@@ -304,7 +321,7 @@ final readonly class BranchManager
 			return;
 		}
 
-		$this->persistBranchOrder($documents, $collectionId, $parentId, $userId, null, false);
+		$this->persistBranchOrder($documents, $collectionId, $parentId, $userId, null, false, $changesOut);
 	}
 
 	private function buildReorderedBranch(array $branchDocuments, array $orderedIds): array
@@ -387,9 +404,61 @@ final readonly class BranchManager
 	private function createDocumentResult(?Document $document): Result
 	{
 		$result = new Result();
-		$result->setData(['document' => $document]);
+		$result->setData(['document' => $document, 'affectedPositions' => []]);
 
 		return $result;
+	}
+
+	/**
+	 * Merges renumber-induced position changes with the moved document's
+	 * final position. The moved document's final position always wins over
+	 * any earlier renumber entry for the same id.
+	 */
+	private function attachAffectedPositions(
+		Result $result,
+		array $renumbered,
+		int $movedDocumentId,
+		?int $finalPosition
+	): Result
+	{
+		if (!$result->isSuccess())
+		{
+			return $result;
+		}
+
+		if ($finalPosition !== null)
+		{
+			$renumbered[$movedDocumentId] = $finalPosition;
+		}
+
+		$data = $result->getData();
+		$data['affectedPositions'] = $this->buildAffectedList($renumbered);
+		$result->setData($data);
+
+		return $result;
+	}
+
+	private function createResultWithAffected(array $changes): Result
+	{
+		$result = new Result();
+		$result->setData(['affectedPositions' => $this->buildAffectedList($changes)]);
+
+		return $result;
+	}
+
+	/**
+	 * @param array<int,int> $changes id => position
+	 * @return list<array{id:int,position:int}>
+	 */
+	private function buildAffectedList(array $changes): array
+	{
+		$out = [];
+		foreach ($changes as $id => $position)
+		{
+			$out[] = ['id' => (int)$id, 'position' => (int)$position];
+		}
+
+		return $out;
 	}
 
 	private function createErrorResult(string $message): Result

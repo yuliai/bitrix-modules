@@ -12,7 +12,6 @@ use Bitrix\Main\Engine\Contract\Controllerable;
 use Bitrix\Main\Engine\Response\BFile;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\UI\Viewer\ItemAttributes;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
@@ -146,7 +145,7 @@ class FileController extends Controller
 			return null;
 		}
 
-		$payload = $this->buildFilePayload($fileId, [
+		$payload = $documentFileService->buildFilePayload($fileId, [
 			'name' => (string)($uploadedFile['name'] ?? ''),
 			'size' => (int)($uploadedFile['size'] ?? 0),
 			'type' => (string)($uploadedFile['type'] ?? ''),
@@ -234,6 +233,24 @@ class FileController extends Controller
 		$linkRepository = new DocumentFileLinkRepository();
 		$documentFileService = new DocumentFileService();
 		$result = [];
+		$failed = [];
+		$adoptCandidates = [];
+
+		// Files borrowed from another document (e.g. cross-document copy/paste, or REST-written
+		// markdown lazily converted to nodes) are healed in place: if the viewer may edit this
+		// document, adopt them (clone + link + remap id) below; otherwise they stay placeholders.
+		$canEdit = DocumentAccessService::currentUserHasLevel(
+			$documentId,
+			(int)$document->getCollectionId(),
+			DocumentAccessService::LEVEL_EDIT,
+		);
+
+		// One query for the whole batch instead of a per-file isLinked() lookup.
+		$linkedFileIds = [];
+		foreach ($linkRepository->getByDocumentAndFileIds($documentId, $fileIds) as $link)
+		{
+			$linkedFileIds[(int)$link['FILE_ID']] = true;
+		}
 
 		foreach ($fileIds as $rawFileId)
 		{
@@ -243,37 +260,72 @@ class FileController extends Controller
 				continue;
 			}
 
-			if (!$linkRepository->isLinked($documentId, $fileId))
+			if (!isset($linkedFileIds[$fileId]))
 			{
+				if ($canEdit)
+				{
+					$adoptCandidates[] = $fileId;
+				}
+				else
+				{
+					$failed[] = [
+						'fileId' => $fileId,
+						'reason' => 'not_linked',
+						'message' => Loc::getMessage('NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE'),
+					];
+				}
+
 				continue;
 			}
 
 			if ($documentFileService->getValidatedNoteFile($fileId) === null)
 			{
+				$failed[] = [
+					'fileId' => $fileId,
+					'reason' => 'file_source',
+					'message' => Loc::getMessage('NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE_SOURCE'),
+				];
+
 				continue;
 			}
 
-			$showUrl = NoteFileUrlService::createShowUrl($fileId);
-			if ($showUrl === '')
+			$payload = $documentFileService->buildFilePayload($fileId);
+			if ($payload === null)
 			{
+				$failed[] = [
+					'fileId' => $fileId,
+					'reason' => 'not_found',
+					'message' => Loc::getMessage('NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE'),
+				];
+
 				continue;
 			}
 
-			$fileData = \CFile::GetFileArray($fileId);
-			$fileName = is_array($fileData) ? (string)($fileData['ORIGINAL_NAME'] ?? '') : '';
-			$viewerAttributes = ItemAttributes::tryBuildByFileId($fileId, $showUrl)
-				->setTitle($fileName);
-
-			$result[] = [
-				'fileId' => $fileId,
-				'downloadUrl' => $showUrl,
-				'showUrl' => $showUrl,
-				'name' => $fileName,
-				'viewerAttrs' => $viewerAttributes->toDataSet(),
-			];
+			$result[] = $payload;
 		}
 
-		return ['files' => $result];
+		if (!empty($adoptCandidates))
+		{
+			$adopted = $documentFileService->adoptFiles(
+				$documentId,
+				$adoptCandidates,
+				(int)$this->getCurrentUser()->getId(),
+			);
+			foreach ($adopted['files'] as $payload)
+			{
+				$result[] = $payload;
+			}
+			foreach ($adopted['failed'] as $failure)
+			{
+				$failed[] = [
+					'fileId' => (int)($failure['fileId'] ?? 0),
+					'reason' => (string)($failure['reason'] ?? ''),
+					'message' => $this->mapAdoptFailureMessage((string)($failure['reason'] ?? '')),
+				];
+			}
+		}
+
+		return ['files' => $result, 'failed' => $failed];
 	}
 
 	public function resolveDownloadAction(int $documentId, int $fileId): ?array
@@ -391,30 +443,16 @@ class FileController extends Controller
 		];
 	}
 
-	private function buildFilePayload(int $fileId, array $fallback): ?array
+	private function mapAdoptFailureMessage(string $reason): string
 	{
-		$fileData = \CFile::GetFileArray($fileId) ?: [];
-		$showUrl = NoteFileUrlService::createShowUrl($fileId);
-		if ($showUrl === '')
+		$code = match ($reason)
 		{
-			return null;
-		}
+			'file_source' => 'NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE_SOURCE',
+			'access' => 'NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_ACCESS',
+			default => 'NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE',
+		};
 
-		$fileName = (string)($fileData['ORIGINAL_NAME'] ?? $fallback['name'] ?? '');
-		$viewerAttributes = ItemAttributes::tryBuildByFileId($fileId, $showUrl)
-			->setTitle($fileName)
-		;
-
-		return [
-			'id' => $fileId,
-			'fileId' => $fileId,
-			'name' => $fileName,
-			'size' => (int)($fileData['FILE_SIZE'] ?? $fallback['size'] ?? 0),
-			'type' => (string)($fileData['CONTENT_TYPE'] ?? $fallback['type'] ?? ''),
-			'downloadUrl' => $showUrl,
-			'showUrl' => $showUrl,
-			'viewerAttrs' => $viewerAttributes->toDataSet(),
-		];
+		return (string)Loc::getMessage($code);
 	}
 
 	private function assertDocumentEditAccess(int $documentId, int $collectionId, string $errorCode): bool

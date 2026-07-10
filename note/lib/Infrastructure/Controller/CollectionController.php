@@ -79,10 +79,33 @@ class CollectionController extends Controller
 			$batch['isAdmin'],
 		);
 
+		$this->registerSidebarPullWatches($items);
+
 		return [
 			'items' => $items,
 			'nextCursor' => $batch['nextCursor'],
 		];
+	}
+
+	private function registerSidebarPullWatches(array $items): void
+	{
+		$userId = (int)\Bitrix\Main\Engine\CurrentUser::get()->getId();
+		if ($userId <= 0)
+		{
+			return;
+		}
+
+		\CPullWatch::Add($userId, 'NOTE_GLOBAL');
+		foreach ($items as $item)
+		{
+			$collectionId = (int)($item['id'] ?? 0);
+			if ($collectionId <= 0)
+			{
+				continue;
+			}
+			\CPullWatch::Add($userId, 'NOTE_COLLECTION_' . $collectionId);
+			\CPullWatch::Add($userId, 'NOTE_COLLECTION_' . $collectionId . '_ACL');
+		}
 	}
 
 	public function listManageableShortAction(int $limit = 2): array
@@ -201,6 +224,25 @@ class CollectionController extends Controller
 				CollectionAccessService::getCollectionPolicyLevel($id)
 			),
 			'permissions' => CollectionAccessService::getCollectionPermissions($id),
+		];
+	}
+
+	public function getMyAccessAction(int $id): array
+	{
+		$snapshot = CollectionAccessService::getCurrentUserAccessSnapshot($id);
+		$effective = (int)$snapshot['effective'];
+		// Hide policy from callers without VIEW so getMyAccess doesn't leak the policy
+		// label of collections the user can't see anyway.
+		$policy = $effective >= CollectionAccessService::LEVEL_VIEW
+			? (int)$snapshot['policy']
+			: CollectionAccessService::LEVEL_NONE;
+
+		return [
+			'collectionId' => $id,
+			'level' => CollectionAccessService::levelToCode($effective),
+			'policyLevel' => CollectionAccessService::levelToCode($policy),
+			'canEditCollection' => $effective >= CollectionAccessService::LEVEL_MANAGE,
+			'canManagePermissions' => $effective >= CollectionAccessService::LEVEL_MODERATE,
 		];
 	}
 

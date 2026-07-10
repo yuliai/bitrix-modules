@@ -6,12 +6,15 @@ namespace Bitrix\Note\Internal\Access\Service;
 
 use Bitrix\Main\Access\AccessCode;
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Access\Model\CollectionAccessChange;
 use Bitrix\Note\Internal\Access\Permission\PermissionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Model\CollectionAccessTable;
 use Bitrix\Note\Internal\Model\CollectionTable;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\User\SystemUser;
 
 final class CollectionAccessService
@@ -324,7 +327,8 @@ final class CollectionAccessService
 		int $collectionId,
 		array $permissions,
 		int $actorId,
-		string|int $policyLevel = self::LEVEL_NONE
+		string|int $policyLevel = self::LEVEL_NONE,
+		?PushNotificationService $pushService = null
 	): Result
 	{
 		$result = new Result();
@@ -336,6 +340,9 @@ final class CollectionAccessService
 		}
 
 		$normalizedPolicyLevel = self::normalizePolicyLevel($policyLevel);
+
+		// Snapshot the existing ACL outside the transaction so the diff can fire after commit.
+		$oldRows = self::fetchAclMap($collectionId);
 
 		$prepared = [];
 		$prepared['*'] = [
@@ -389,6 +396,7 @@ final class CollectionAccessService
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
+		$committed = false;
 		try
 		{
 			$updateCollectionResult = CollectionTable::update($collectionId, [
@@ -435,6 +443,7 @@ final class CollectionAccessService
 			}
 
 			$connection->commitTransaction();
+			$committed = true;
 		}
 		catch (\Throwable $e)
 		{
@@ -444,7 +453,81 @@ final class CollectionAccessService
 
 		PermissionDictionary::clearCollectionPermissionsCache();
 
+		if ($committed && $oldRows !== [])
+		{
+			// Initial ACL bootstrap (oldRows empty) is covered by collectionCreate emission;
+			// no one is subscribed to NOTE_COLLECTION_{id}_ACL yet anyway.
+			$newRows = self::projectAclMap($prepared);
+			$change = CollectionAccessChange::lexical($oldRows, $newRows);
+			self::dispatchAccessChange($collectionId, $change, $pushService);
+		}
+
 		return $result;
+	}
+
+	/**
+	 * @return array<string, int> SUBJECT_CODE => LEVEL
+	 */
+	private static function fetchAclMap(int $collectionId): array
+	{
+		$query = CollectionAccessTable::query()
+			->setSelect(['SUBJECT_CODE', 'LEVEL'])
+			->where('COLLECTION_ID', $collectionId)
+			->exec()
+		;
+
+		$map = [];
+		while ($row = $query->fetch())
+		{
+			$code = (string)$row['SUBJECT_CODE'];
+			if ($code !== '')
+			{
+				$map[$code] = (int)$row['LEVEL'];
+			}
+		}
+
+		return $map;
+	}
+
+	/**
+	 * @param array<string, array{LEVEL: int, SUBJECT_CODE: string, ...}> $prepared
+	 * @return array<string, int>
+	 */
+	private static function projectAclMap(array $prepared): array
+	{
+		$map = [];
+		foreach ($prepared as $code => $row)
+		{
+			$code = (string)$code;
+			if ($code !== '')
+			{
+				$map[$code] = (int)$row['LEVEL'];
+			}
+		}
+
+		return $map;
+	}
+
+	private static function dispatchAccessChange(int $collectionId, CollectionAccessChange $change, ?PushNotificationService $pushService): void
+	{
+		if (Option::get('note', 'phase4_broadcast_enabled', 'Y') !== 'Y')
+		{
+			return;
+		}
+
+		$push = $pushService ?? new PushNotificationService();
+		$maybeBoundary = $change->maybeBoundary();
+		$push->dispatchAfterCommit(static function () use ($push, $collectionId, $maybeBoundary): void {
+			$push->sendToCollectionAcl($collectionId, 'collectionCapabilities', [
+				'collectionId' => $collectionId,
+			]);
+			if ($maybeBoundary)
+			{
+				$push->sendGlobal('collectionListInvalidated', [
+					'collectionId' => $collectionId,
+				]);
+			}
+		});
 	}
 
 	public static function getCollectionPermissions(int $collectionId): array

@@ -143,6 +143,13 @@ class OutlineSource implements SourceInterface
 		]);
 	}
 
+	public function getCollectionAccess(string $collectionId): SourceResult
+	{
+		// Outline access is not modelled here; the imported collection keeps the
+		// default private ACL created for the importing user.
+		return new SourceResult(true, ['permissions' => [], 'policyLevel' => null]);
+	}
+
 	public function downloadAttachment(string $attachmentId): SourceResult
 	{
 		$url = $this->baseUrl . '/api/attachments.redirect?id=' . urlencode($attachmentId);

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\Document;
 
 use Bitrix\Main\SystemException;
+use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
+use Bitrix\Note\Internal\Exceptions\ParentDocumentMismatchException;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
 use Bitrix\Note\Internal\Service\DocumentFileService;
@@ -21,6 +24,7 @@ class DocumentService
 		private readonly DocumentFileService $documentFileService = new DocumentFileService(),
 		private readonly PositionCalculator $positionCalculator = new PositionCalculator(),
 		private readonly SearchIndexService $searchIndexService = new SearchIndexService(),
+		private readonly CollectionRepository $collectionRepository = new CollectionRepository(),
 	)
 	{
 	}
@@ -39,6 +43,7 @@ class DocumentService
 		string $contentFormat = DocumentTable::CONTENT_FORMAT_YJS,
 	): Document
 	{
+		$this->assertCollectionExists($collectionId);
 		$this->assertParentBelongsToCollection($parentId, $collectionId);
 
 		$position = $this->positionCalculator->calculateNextPosition(
@@ -300,7 +305,18 @@ class DocumentService
 	}
 
 	/**
-	 * @throws SystemException when parent does not exist or lives in another collection.
+	 * @throws CollectionNotFoundException when the target collection does not exist.
+	 */
+	private function assertCollectionExists(int $collectionId): void
+	{
+		if (!$this->collectionRepository->exists($collectionId))
+		{
+			throw new CollectionNotFoundException();
+		}
+	}
+
+	/**
+	 * @throws ParentDocumentMismatchException when parent does not exist or lives in another collection.
 	 */
 	private function assertParentBelongsToCollection(?int $parentId, int $collectionId): void
 	{
@@ -312,7 +328,7 @@ class DocumentService
 		$parent = $this->repository->getMetaById($parentId, ['ID', 'COLLECTION_ID']);
 		if ($parent === null || (int)$parent->getCollectionId() !== $collectionId)
 		{
-			throw new SystemException('Parent document does not belong to the target collection.');
+			throw new ParentDocumentMismatchException();
 		}
 	}
 }

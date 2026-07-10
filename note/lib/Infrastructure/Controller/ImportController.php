@@ -18,6 +18,8 @@ use Bitrix\Note\Internal\Repository\ImportMapRepository;
 use Bitrix\Note\Internal\Repository\ImportSessionRepository;
 use Bitrix\Note\Internal\Service\Import\Source\OutlineSource;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
+use Bitrix\Note\Internal\Service\Import\Source\WikiSource;
+use Bitrix\Note\Internal\Service\Import\WikiImportAvailability;
 use Bitrix\Note\Public\Command\Import\CancelImportCommand;
 use Bitrix\Note\Public\Command\Import\StartImportCommand;
 
@@ -95,6 +97,11 @@ class ImportController extends Controller
 			return null;
 		}
 
+		if (!$this->isWikiSourceAvailable($sourceType))
+		{
+			return null;
+		}
+
 		$userId = (int)$this->getCurrentUser()->getId();
 		$existing = (new ImportSessionRepository())->getByUser($userId);
 		if ($existing !== null && $existing['STATUS'] === 'in_progress')
@@ -132,6 +139,11 @@ class ImportController extends Controller
 			return null;
 		}
 
+		if (!$this->isWikiSourceAvailable($sourceType))
+		{
+			return null;
+		}
+
 		$mapRepository = new ImportMapRepository();
 		$mappings = $mapRepository->bulkLookup($sourceType, $collectionIds);
 
@@ -154,6 +166,11 @@ class ImportController extends Controller
 			return null;
 		}
 
+		if (!$this->isWikiSourceAvailable($sourceType))
+		{
+			return null;
+		}
+
 		$source = $this->createSource($sourceType, $url, $token);
 		$result = $source->getCollections();
 
@@ -170,6 +187,11 @@ class ImportController extends Controller
 	public function getDocumentTreeAction(string $sourceType, string $url, string $token, string $collectionId): ?array
 	{
 		if (!$this->assertImportAccess())
+		{
+			return null;
+		}
+
+		if (!$this->isWikiSourceAvailable($sourceType))
 		{
 			return null;
 		}
@@ -200,11 +222,19 @@ class ImportController extends Controller
 			return null;
 		}
 
+		if (!$this->isWikiSourceAvailable($sourceType))
+		{
+			return null;
+		}
+
 		$userId = (int)$this->getCurrentUser()->getId();
 
 		try
 		{
-			$this->validateSourceUrl($url);
+			if ($sourceType !== 'wiki')
+			{
+				$this->validateSourceUrl($url);
+			}
 			$result = (new StartImportCommand(
 				$sourceType,
 				$url,
@@ -399,15 +429,27 @@ class ImportController extends Controller
 		return false;
 	}
 
+	private function isWikiSourceAvailable(string $sourceType): bool
+	{
+		return $sourceType !== 'wiki' || (new WikiImportAvailability())->isEnabled();
+	}
+
 	private function createSource(string $sourceType, string $url, string $token): SourceInterface
 	{
-		$this->validateSourceUrl($url);
-
 		return match ($sourceType)
 		{
-			'outline' => new OutlineSource($url, $token),
+			'outline' => $this->createOutlineSource($url, $token),
+			'wiki' => new WikiSource((int)$this->getCurrentUser()->getId()),
 			default => throw new SystemException('Unsupported source type: ' . $sourceType),
 		};
+	}
+
+	private function createOutlineSource(string $url, string $token): SourceInterface
+	{
+		// URL-based source: validate scheme/host before any network call.
+		$this->validateSourceUrl($url);
+
+		return new OutlineSource($url, $token);
 	}
 
 	private function validateSourceUrl(string $url): void

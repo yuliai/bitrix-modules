@@ -8,18 +8,18 @@ use Bitrix\Main\Application;
 
 class DocumentLockService
 {
-	private const LOCK_PREFIX = 'note_doc_compact_';
+	private const LOCK_PREFIX = 'note_doc_';
 
-	public function acquireLock(int $documentId, int $timeoutSeconds = 0): bool
+	public function acquireLock(int $documentId, int $timeoutSeconds = 0, string $scope = 'compact'): bool
 	{
 		return Application::getConnection()->lock(
-			self::LOCK_PREFIX . $documentId,
+			self::LOCK_PREFIX . $scope . '_' . $documentId,
 			$timeoutSeconds,
 		);
 	}
 
-	public function releaseLock(int $documentId): void
+	public function releaseLock(int $documentId, string $scope = 'compact'): void
 	{
-		Application::getConnection()->unlock(self::LOCK_PREFIX . $documentId);
+		Application::getConnection()->unlock(self::LOCK_PREFIX . $scope . '_' . $documentId);
 	}
 }

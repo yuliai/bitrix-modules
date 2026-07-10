@@ -402,6 +402,26 @@ class DocumentRepository
 		return array_reverse($path);
 	}
 
+	public function hasChildren(int $collectionId, int $parentId): bool
+	{
+		if ($collectionId <= 0 || $parentId <= 0)
+		{
+			return false;
+		}
+
+		$query = DocumentTable::query()
+			->setSelect(['ID'])
+			->where('COLLECTION_ID', $collectionId)
+			->where('PARENT_ID', $parentId)
+			->where('IS_ARCHIVED', 'N')
+			->setLimit(1)
+			->setCacheTtl(self::ORM_CACHE_TTL)
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+
+		return $query->exec()->fetch() !== false;
+	}
+
 	public function getHasChildrenMap(int $collectionId, array $documentIds): array
 	{
 		$normalizedIds = array_values(array_unique(array_filter(
@@ -558,12 +578,13 @@ class DocumentRepository
 		$connection = Application::getConnection();
 		$placeholders = implode(',', $normalizedIds);
 		$userIdSafe = (int)$userId;
+		$nowSql = $this->currentDateTimeSql($connection);
 		$connection->queryExecute(
 			"UPDATE b_note_document"
 			. " SET IS_ARCHIVED = 'Y',"
-			. " ARCHIVED_AT = NOW(),"
+			. " ARCHIVED_AT = {$nowSql},"
 			. " ARCHIVED_BY = {$userIdSafe},"
-			. " UPDATED_AT = NOW(),"
+			. " UPDATED_AT = {$nowSql},"
 			. " UPDATED_BY = {$userIdSafe}"
 			. " WHERE ID IN ({$placeholders})"
 			. " AND IS_ARCHIVED = 'N'"
@@ -585,12 +606,13 @@ class DocumentRepository
 		$connection = Application::getConnection();
 		$placeholders = implode(',', $normalizedIds);
 		$userIdSafe = (int)$userId;
+		$nowSql = $this->currentDateTimeSql($connection);
 		$connection->queryExecute(
 			"UPDATE b_note_document"
 			. " SET IS_ARCHIVED = 'N',"
 			. " ARCHIVED_AT = NULL,"
 			. " ARCHIVED_BY = NULL,"
-			. " UPDATED_AT = NOW(),"
+			. " UPDATED_AT = {$nowSql},"
 			. " UPDATED_BY = {$userIdSafe}"
 			. " WHERE ID IN ({$placeholders})"
 			. " AND IS_ARCHIVED = 'Y'"
@@ -711,6 +733,15 @@ class DocumentRepository
 		$connection = Application::getConnection();
 		$placeholders = implode(',', $normalized);
 		$connection->queryExecute("DELETE FROM b_note_document WHERE ID IN ({$placeholders})");
+	}
+
+	/**
+	 * Second-precision "now" SQL like the ORM writes DatetimeField. Raw NOW() yields
+	 * microseconds on PG, which breaks the second-precision ARCHIVED_AT cursor pagination.
+	 */
+	private function currentDateTimeSql(\Bitrix\Main\DB\Connection $connection): string
+	{
+		return $connection->getSqlHelper()->getCharToDateFunction((new DateTime())->format('Y-m-d H:i:s'));
 	}
 
 	private function buildFailedSaveResult(OrmResult $ormResult): Result

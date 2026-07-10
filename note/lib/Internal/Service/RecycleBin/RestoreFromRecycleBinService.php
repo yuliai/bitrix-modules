@@ -48,6 +48,7 @@ class RestoreFromRecycleBinService
 			return $result;
 		}
 
+		$wasArchivedBeforeTrash = $document->getIsArchived();
 		$originalCollectionId = (int)$document->getCollectionId();
 		$pickedCollectionId = $targetCollectionId ?? $originalCollectionId;
 		$collection = $this->collectionRepository->getById($pickedCollectionId);
@@ -101,6 +102,7 @@ class RestoreFromRecycleBinService
 			'collectionId' => $collectionId,
 			'parentId' => $parentId,
 			'position' => $position,
+			'wasArchivedBeforeTrash' => $wasArchivedBeforeTrash,
 		]);
 
 		return $result;

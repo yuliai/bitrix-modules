@@ -10,6 +10,7 @@ use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Service\Import\ImportService;
 use Bitrix\Note\Internal\Service\Import\Source\OutlineSource;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
+use Bitrix\Note\Internal\Service\Import\Source\WikiSource;
 
 class ProcessImportStepCommand extends AbstractCommand
 {
@@ -42,10 +43,12 @@ class ProcessImportStepCommand extends AbstractCommand
 		$sourceType = $this->option['sourceType'] ?? '';
 		$sourceUrl = $this->option['sourceUrl'] ?? '';
 		$sourceToken = $this->option['sourceToken'] ?? '';
+		$userId = (int)($this->option['userId'] ?? 0);
 
 		return match ($sourceType)
 		{
 			'outline' => new OutlineSource($sourceUrl, $sourceToken),
+			'wiki' => new WikiSource($userId),
 			default => throw new \Bitrix\Main\SystemException('Unsupported source type: ' . $sourceType),
 		};
 	}

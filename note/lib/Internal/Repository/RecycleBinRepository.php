@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Repository;
 
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\Ddl\DbType;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Entity\RecycleBin\RecycleBinRecord;
@@ -55,9 +56,16 @@ class RecycleBinRepository
 				continue;
 			}
 
-			$sql = 'INSERT IGNORE INTO b_note_recycle_bin'
-				. ' (DOCUMENT_ID, TRASHED_AT, TRASHED_BY, ORIGIN)'
-				. ' VALUES ' . implode(',', $rows);
+			$valuesClause = ' (DOCUMENT_ID, TRASHED_AT, TRASHED_BY, ORIGIN) VALUES ' . implode(',', $rows);
+			// PG does not support INSERT IGNORE; ON CONFLICT DO NOTHING (bare) matches any constraint.
+			if (DbType::getByConnectionType($connection->getType()) === DbType::PostgreSql)
+			{
+				$sql = 'INSERT INTO b_note_recycle_bin' . $valuesClause . ' ON CONFLICT DO NOTHING';
+			}
+			else
+			{
+				$sql = 'INSERT IGNORE INTO b_note_recycle_bin' . $valuesClause;
+			}
 			$connection->queryExecute($sql);
 		}
 	}
@@ -130,6 +138,66 @@ class RecycleBinRepository
 		}
 
 		return RecycleBinRecordMapper::convertFromOrm($row);
+	}
+
+	/**
+	 * @param int[] $documentIds
+	 * @return array<int, RecycleBinRecord> indexed by documentId
+	 */
+	public function getByDocumentIds(array $documentIds): array
+	{
+		$ids = array_values(array_unique(array_filter(array_map('intval', $documentIds), static fn (int $id) => $id > 0)));
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$rows = RecycleBinTable::query()
+			->setSelect(['ID', 'DOCUMENT_ID', 'TRASHED_AT', 'TRASHED_BY', 'ORIGIN'])
+			->whereIn('DOCUMENT_ID', $ids)
+			->fetchAll();
+
+		$result = [];
+		foreach ($rows as $row)
+		{
+			$record = RecycleBinRecordMapper::convertFromOrm($row);
+			$result[(int)$record->getDocumentId()] = $record;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Lightweight projection used by cascade pushes — only ID + TRASHED_AT, no mapper hop.
+	 *
+	 * @param int[] $documentIds
+	 * @return array<int, array{id: int, trashedAt: string}> keyed by documentId
+	 */
+	public function getIdsByDocumentIds(array $documentIds): array
+	{
+		$ids = array_values(array_unique(array_filter(array_map('intval', $documentIds), static fn (int $id) => $id > 0)));
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$rows = RecycleBinTable::query()
+			->setSelect(['ID', 'DOCUMENT_ID', 'TRASHED_AT'])
+			->whereIn('DOCUMENT_ID', $ids)
+			->fetchAll()
+		;
+
+		$result = [];
+		foreach ($rows as $row)
+		{
+			$trashedAt = $row['TRASHED_AT'] ?? null;
+			$result[(int)$row['DOCUMENT_ID']] = [
+				'id' => (int)$row['ID'],
+				'trashedAt' => $trashedAt instanceof DateTime ? $trashedAt->format('Y-m-d H:i:s') : (string)($trashedAt ?? ''),
+			];
+		}
+
+		return $result;
 	}
 
 	public function isInRecycleBin(int $documentId): bool

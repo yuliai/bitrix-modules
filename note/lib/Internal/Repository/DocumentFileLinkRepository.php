@@ -211,6 +211,39 @@ class DocumentFileLinkRepository
 		];
 	}
 
+	/**
+	 * Batch sibling of getLinkByFileId(): resolves the owning DOCUMENT_ID for many
+	 * fileIds in one query. Returns a fileId => DOCUMENT_ID map; unlinked ids are absent.
+	 *
+	 * @return array<int, int>
+	 */
+	public function getLinksByFileIds(array $fileIds): array
+	{
+		$normalizedFileIds = IdNormalizer::normalize($fileIds);
+		if (empty($normalizedFileIds))
+		{
+			return [];
+		}
+
+		$map = [];
+		$items = DocumentFileTable::getList([
+			'select' => ['DOCUMENT_ID', 'FILE_ID'],
+			'filter' => ['=FILE_ID' => $normalizedFileIds],
+		])->fetchCollection();
+
+		foreach ($items as $item)
+		{
+			$documentId = (int)$item->getDocumentId();
+			$fileId = (int)$item->getFileId();
+			if ($documentId > 0 && $fileId > 0)
+			{
+				$map[$fileId] = $documentId;
+			}
+		}
+
+		return $map;
+	}
+
 	private function collectionToRows($collection): array
 	{
 		$result = [];

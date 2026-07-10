@@ -80,12 +80,11 @@ class DownloadAttachmentsStep implements StepInterface
 
 				if ($downloadResult->success)
 				{
-					$tmpPath = $downloadResult->data['tmpPath'];
 					$fileName = $downloadResult->data['fileName'];
 					$contentType = $downloadResult->data['contentType'];
 					$size = $downloadResult->data['size'];
 
-					$fileId = $this->fileService->saveAttachment($tmpPath, $fileName, $contentType, $size);
+					$fileId = $this->fileService->persistAttachment($downloadResult->data);
 					if ($fileId !== null)
 					{
 						$this->fileService->linkFileToDocument($docId, $fileId, $userId);

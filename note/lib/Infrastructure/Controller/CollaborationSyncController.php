@@ -195,7 +195,15 @@ class CollaborationSyncController extends Controller
 			return null;
 		}
 
-		return ['success' => true];
+		$data = $result->getData();
+
+		return [
+			'success' => true,
+			// applied=false → a concurrent client already saved genesis; yjsState carries it
+			// so the late client can rebuild its Y.Doc onto the shared baseline.
+			'applied' => (bool)($data['applied'] ?? true),
+			'yjsState' => $data['yjsState'] ?? null,
+		];
 	}
 
 	public function sendAwarenessAction(int $documentId, string $awareness): ?array

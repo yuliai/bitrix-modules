@@ -8,6 +8,7 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 class ArchiveCollectionCommand extends AbstractCommand
@@ -17,6 +18,7 @@ class ArchiveCollectionCommand extends AbstractCommand
 	private readonly CollectionRepository $collectionRepository;
 	private readonly DocumentRepository $documentRepository;
 	private readonly SearchIndexService $searchIndexService;
+	private readonly PushNotificationService $pushService;
 
 	public function __construct(
 		int $collectionId,
@@ -24,6 +26,7 @@ class ArchiveCollectionCommand extends AbstractCommand
 		?CollectionRepository $collectionRepository = null,
 		?DocumentRepository $documentRepository = null,
 		?SearchIndexService $searchIndexService = null,
+		?PushNotificationService $pushService = null,
 	)
 	{
 		$this->collectionId = $collectionId;
@@ -31,6 +34,7 @@ class ArchiveCollectionCommand extends AbstractCommand
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
 		$this->documentRepository = $documentRepository ?? new DocumentRepository();
 		$this->searchIndexService = $searchIndexService ?? new SearchIndexService();
+		$this->pushService = $pushService ?? new PushNotificationService();
 	}
 
 	protected function execute(): Result
@@ -62,10 +66,26 @@ class ArchiveCollectionCommand extends AbstractCommand
 
 		$collectionArchived = $this->collectionRepository->archiveById($this->collectionId);
 
+		if ($collectionArchived)
+		{
+			$this->emitCollectionArchive($this->collectionId, $documentIds);
+		}
+
 		return $this->createResult([
 			'success' => $collectionArchived,
 			'archivedIds' => $documentIds,
 		]);
+	}
+
+	private function emitCollectionArchive(int $collectionId, array $archivedDocumentIds): void
+	{
+		$this->pushService->emitDocumentCascade(
+			collectionId: $collectionId,
+			documentIds: $archivedDocumentIds,
+			collectionCommand: 'collectionArchive',
+			globalCommand: 'collectionArchive',
+			globalPayload: ['collectionId' => $collectionId],
+		);
 	}
 
 	private function createResult(array $data = []): Result

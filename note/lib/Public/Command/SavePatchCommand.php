@@ -6,7 +6,6 @@ namespace Bitrix\Note\Public\Command;
 
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
-use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Repository\DocumentUpdateRepository;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 

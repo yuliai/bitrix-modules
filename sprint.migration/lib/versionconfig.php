@@ -4,9 +4,14 @@ namespace Sprint\Migration;
 
 use Sprint\Migration\Builders\AgentBuilder;
 use Sprint\Migration\Builders\BlankBuilder;
+use Sprint\Migration\Builders\BlogBuilder;
+use Sprint\Migration\Builders\BlogPostBuilder;
+use Sprint\Migration\Builders\BlogUserTypeEntitiesBuilder;
 use Sprint\Migration\Builders\CacheCleanerBuilder;
+use Sprint\Migration\Builders\CultureBuilder;
 use Sprint\Migration\Builders\EventBuilder;
 use Sprint\Migration\Builders\FormBuilder;
+use Sprint\Migration\Builders\ForumBuilder;
 use Sprint\Migration\Builders\HlblockBuilder;
 use Sprint\Migration\Builders\HlblockElementsBuilder;
 use Sprint\Migration\Builders\IblockBuilder;
@@ -14,14 +19,19 @@ use Sprint\Migration\Builders\IblockCategoryBuilder;
 use Sprint\Migration\Builders\IblockDeleteBuilder;
 use Sprint\Migration\Builders\IblockElementsBuilder;
 use Sprint\Migration\Builders\IblockPropertyBuilder;
+use Sprint\Migration\Builders\IblockPropertyDeleteBuilder;
+use Sprint\Migration\Builders\LanguageBuilder;
 use Sprint\Migration\Builders\MarkerBuilder;
 use Sprint\Migration\Builders\MedialibElementsBuilder;
 use Sprint\Migration\Builders\OptionBuilder;
 use Sprint\Migration\Builders\OrderPropertiesBuilder;
+use Sprint\Migration\Builders\SaleDiscountBuilder;
+use Sprint\Migration\Builders\SubscribeBuilder;
 use Sprint\Migration\Builders\TransferBuilder;
 use Sprint\Migration\Builders\UserGroupBuilder;
 use Sprint\Migration\Builders\UserOptionsBuilder;
 use Sprint\Migration\Builders\UserTypeEntitiesBuilder;
+use Sprint\Migration\Builders\VoteBuilder;
 use Sprint\Migration\Enum\VersionEnum;
 use Sprint\Migration\Exceptions\MigrationException;
 
@@ -259,26 +269,35 @@ class VersionConfig
     public static function getDefaultBuilders(): array
     {
         return [
-            'UserGroupBuilder'        => UserGroupBuilder::class,
-            'IblockBuilder'           => IblockBuilder::class,
-            'IblockPropertyBuilder'   => IblockPropertyBuilder::class,
-            'IblockCategoryBuilder'   => IblockCategoryBuilder::class,
-            'IblockElementsBuilder'   => IblockElementsBuilder::class,
-            'IblockDeleteBuilder'     => IblockDeleteBuilder::class,
-            'HlblockBuilder'          => HlblockBuilder::class,
-            'HlblockElementsBuilder'  => HlblockElementsBuilder::class,
-            'UserTypeEntitiesBuilder' => UserTypeEntitiesBuilder::class,
-            'AgentBuilder'            => AgentBuilder::class,
-            'OptionBuilder'           => OptionBuilder::class,
-            'FormBuilder'             => FormBuilder::class,
-            'EventBuilder'            => EventBuilder::class,
-            'UserOptionsBuilder'      => UserOptionsBuilder::class,
-            'OrderPropertiesBuilder'  => OrderPropertiesBuilder::class,
-            'MedialibElementsBuilder' => MedialibElementsBuilder::class,
-            'BlankBuilder'            => BlankBuilder::class,
-            'CacheCleanerBuilder'     => CacheCleanerBuilder::class,
-            'MarkerBuilder'           => MarkerBuilder::class,
-            'TransferBuilder'         => TransferBuilder::class,
+            'UserGroupBuilder'            => UserGroupBuilder::class,
+            'LanguageBuilder'             => LanguageBuilder::class,
+            'IblockBuilder'               => IblockBuilder::class,
+            'IblockPropertyBuilder'       => IblockPropertyBuilder::class,
+            'IblockPropertyDeleteBuilder' => IblockPropertyDeleteBuilder::class,
+            'IblockCategoryBuilder'       => IblockCategoryBuilder::class,
+            'IblockElementsBuilder'       => IblockElementsBuilder::class,
+            'IblockDeleteBuilder'         => IblockDeleteBuilder::class,
+            'HlblockBuilder'              => HlblockBuilder::class,
+            'HlblockElementsBuilder'      => HlblockElementsBuilder::class,
+            'UserTypeEntitiesBuilder'     => UserTypeEntitiesBuilder::class,
+            'AgentBuilder'                => AgentBuilder::class,
+            'BlogBuilder'                 => BlogBuilder::class,
+            'BlogPostBuilder'             => BlogPostBuilder::class,
+            'BlogUserTypeEntitiesBuilder' => BlogUserTypeEntitiesBuilder::class,
+            'OptionBuilder'               => OptionBuilder::class,
+            'FormBuilder'                 => FormBuilder::class,
+            'ForumBuilder'                => ForumBuilder::class,
+            'VoteBuilder'                 => VoteBuilder::class,
+            'EventBuilder'                => EventBuilder::class,
+            'SubscribeBuilder'            => SubscribeBuilder::class,
+            'UserOptionsBuilder'          => UserOptionsBuilder::class,
+            'OrderPropertiesBuilder'      => OrderPropertiesBuilder::class,
+            'SaleDiscountBuilder'         => SaleDiscountBuilder::class,
+            'MedialibElementsBuilder'     => MedialibElementsBuilder::class,
+            'BlankBuilder'                => BlankBuilder::class,
+            'CacheCleanerBuilder'         => CacheCleanerBuilder::class,
+            'MarkerBuilder'               => MarkerBuilder::class,
+            'TransferBuilder'             => TransferBuilder::class,
         ];
     }
 

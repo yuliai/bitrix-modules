@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Access\Service;
 
 use Bitrix\Main\Access\AccessCode;
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Result;
@@ -16,6 +17,7 @@ use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\DocumentAccessTable;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 
 final class DocumentAccessService
 {
@@ -226,7 +228,8 @@ final class DocumentAccessService
 	public static function replaceDocumentPermissions(
 		int $documentId,
 		array $permissions,
-		int $actorId
+		int $actorId,
+		?PushNotificationService $pushService = null
 	): Result
 	{
 		$result = new Result();
@@ -237,6 +240,7 @@ final class DocumentAccessService
 			return $result;
 		}
 
+		$hadAclBefore = self::hasAnyAclRow($documentId);
 		$prepared = [];
 
 		foreach ($permissions as $permission)
@@ -259,6 +263,7 @@ final class DocumentAccessService
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
+		$committed = false;
 		try
 		{
 			$deleteResult = self::deleteByDocumentId($documentId);
@@ -294,6 +299,7 @@ final class DocumentAccessService
 			}
 
 			$connection->commitTransaction();
+			$committed = true;
 		}
 		catch (\Throwable $e)
 		{
@@ -303,7 +309,52 @@ final class DocumentAccessService
 
 		self::$userHasAnyGrantCache = null;
 
+		if ($committed)
+		{
+			$hasAclAfter = $prepared !== [];
+			if ($hadAclBefore || $hasAclAfter)
+			{
+				// Skip emission only when both sides are empty (nothing changed, no subscribers cared).
+				self::dispatchDocumentCapabilities($documentId, $pushService);
+			}
+		}
+
 		return $result;
+	}
+
+	private static function hasAnyAclRow(int $documentId): bool
+	{
+		if ($documentId <= 0)
+		{
+			return false;
+		}
+
+		$row = DocumentAccessTable::query()
+			->setSelect(['ID'])
+			->where('DOCUMENT_ID', $documentId)
+			->setLimit(1)
+			->exec()
+			->fetch()
+		;
+
+		return $row !== false;
+	}
+
+	private static function dispatchDocumentCapabilities(int $documentId, ?PushNotificationService $pushService): void
+	{
+		if (Option::get('note', 'phase4_broadcast_enabled', 'Y') !== 'Y')
+		{
+			return;
+		}
+
+		$push = $pushService ?? new PushNotificationService();
+		$push->dispatchAfterCommit(static function () use ($push, $documentId): void {
+			$push->sendByTag(
+				'NOTE_DOC_' . $documentId . '_ACL',
+				'documentCapabilities',
+				['documentId' => $documentId],
+			);
+		});
 	}
 
 	public static function getDocumentPermissions(int $documentId): array

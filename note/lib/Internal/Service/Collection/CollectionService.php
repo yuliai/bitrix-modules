@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Internal\Service\Collection;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Model\Collection;
@@ -20,11 +21,79 @@ class CollectionService
 	}
 
 	/**
-	 * Creates a new collection and its default access rows.
+	 * Creates a new collection.
+	 *
+	 * Default behaviour (no policyLevel/permissions): installs the standard
+	 * "moderator + globally-blocked" ACL pair via createDefaultAccess().
+	 *
+	 * Atomic behaviour (when $policyLevel or $permissions is supplied): wraps
+	 * collection insert + ACL replacement in a single transaction. If ACL
+	 * application fails (e.g. permissions list contains no moderator), the
+	 * collection insert is rolled back.
 	 *
 	 * @throws SystemException on persistence failure
 	 */
-	public function create(string $name, int $userId, int $position = 0): Collection
+	public function create(
+		string $name,
+		int $userId,
+		int $position = 0,
+		string|int|null $policyLevel = null,
+		?array $permissions = null,
+	): Collection
+	{
+		if ($policyLevel === null && $permissions === null)
+		{
+			$saved = $this->persistCollection($name, $userId, $position);
+			CollectionAccessService::createDefaultAccess((int)$saved->getId(), $userId);
+
+			return $saved;
+		}
+
+		$connection = Application::getConnection();
+		$connection->startTransaction();
+		try
+		{
+			$saved = $this->persistCollection($name, $userId, $position);
+
+			$aclResult = CollectionAccessService::replaceCollectionPermissions(
+				(int)$saved->getId(),
+				$permissions ?? [],
+				$userId,
+				$policyLevel ?? CollectionAccessService::LEVEL_NONE,
+			);
+			if (!$aclResult->isSuccess())
+			{
+				$connection->rollbackTransaction();
+
+				throw new SystemException($this->buildSaveErrorMessage(
+					$aclResult->getErrorMessages(),
+					'Unable to install collection permissions.',
+				));
+			}
+
+			$connection->commitTransaction();
+
+			return $saved;
+		}
+		catch (SystemException $e)
+		{
+			throw $e;
+		}
+		catch (\Throwable $e)
+		{
+			try
+			{
+				$connection->rollbackTransaction();
+			}
+			catch (\Throwable)
+			{
+			}
+
+			throw new SystemException($e->getMessage());
+		}
+	}
+
+	private function persistCollection(string $name, int $userId, int $position): Collection
 	{
 		$resolvedPosition = $position > 0
 			? $position
@@ -52,8 +121,6 @@ class CollectionService
 		{
 			throw new SystemException('Unable to save collection.');
 		}
-
-		CollectionAccessService::createDefaultAccess((int)$saved->getId(), $userId);
 
 		return $saved;
 	}

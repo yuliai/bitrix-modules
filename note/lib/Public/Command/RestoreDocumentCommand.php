@@ -8,9 +8,12 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
+use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
+use Bitrix\Note\Internal\Service\Collection\CollectionRestoreService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
@@ -22,6 +25,8 @@ class RestoreDocumentCommand extends AbstractCommand
 	private readonly SearchIndexService $searchIndexService;
 	private readonly PositionCalculator $positionCalculator;
 	private readonly CollectionRepository $collectionRepository;
+	private readonly CollectionRestoreService $collectionRestoreService;
+	private readonly PushNotificationService $pushService;
 
 	public function __construct(
 		int $id,
@@ -30,6 +35,8 @@ class RestoreDocumentCommand extends AbstractCommand
 		?SearchIndexService $searchIndexService = null,
 		?PositionCalculator $positionCalculator = null,
 		?CollectionRepository $collectionRepository = null,
+		?PushNotificationService $pushService = null,
+		?CollectionRestoreService $collectionRestoreService = null,
 	)
 	{
 		$this->id = $id;
@@ -38,6 +45,9 @@ class RestoreDocumentCommand extends AbstractCommand
 		$this->searchIndexService = $searchIndexService ?? new SearchIndexService();
 		$this->positionCalculator = $positionCalculator ?? new PositionCalculator();
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
+		$this->pushService = $pushService ?? new PushNotificationService();
+		$this->collectionRestoreService = $collectionRestoreService
+			?? new CollectionRestoreService($this->collectionRepository, $this->pushService);
 	}
 
 	protected function execute(): Result
@@ -49,12 +59,14 @@ class RestoreDocumentCommand extends AbstractCommand
 		}
 
 		$collectionId = (int)$document->getCollectionId();
-		$collection = $collectionId > 0 ? $this->collectionRepository->getById($collectionId) : null;
 		$restoredCollection = null;
-		if ($collection !== null && $collection->getIsArchived())
+		if ($collectionId > 0)
 		{
-			$this->collectionRepository->restoreById($collectionId);
-			$restoredCollection = $this->collectionRepository->getById($collectionId);
+			$restoreResult = $this->collectionRestoreService->restore($collectionId, $this->userId);
+			if (($restoreResult->getData()['transitioned'] ?? false) === true)
+			{
+				$restoredCollection = $restoreResult->getData()['collection'] ?? null;
+			}
 		}
 
 		$originalParentId = $document->getParentId() !== null ? (int)$document->getParentId() : null;
@@ -94,6 +106,8 @@ class RestoreDocumentCommand extends AbstractCommand
 		DocumentTable::cleanCache();
 		$restored = $this->repository->getById($this->id);
 
+		$this->emitDocumentRestore($restored, $collectionId, $targetParent, $position);
+
 		$result = new Result();
 		$result->setData([
 			'id' => $this->id,
@@ -105,5 +119,36 @@ class RestoreDocumentCommand extends AbstractCommand
 		]);
 
 		return $result;
+	}
+
+	private function emitDocumentRestore(
+		?Document $restored,
+		int $collectionId,
+		?int $parentId,
+		int $position,
+	): void
+	{
+		$documentId = $this->id;
+		$initiatorUserId = $this->userId;
+		$pushService = $this->pushService;
+		$title = $restored !== null ? (string)$restored->getTitle() : '';
+		$hasChildrenMap = $this->repository->getHasChildrenMap($collectionId, [$documentId]);
+		$hasChildren = (bool)($hasChildrenMap[$documentId] ?? false);
+
+		$payload = [
+			'documentId' => $documentId,
+			'collectionId' => $collectionId,
+			'parentId' => $parentId,
+			'position' => $position,
+			'title' => $title,
+			'hasChildren' => $hasChildren,
+		];
+
+		$pushService->dispatchAfterCommit(static function () use (
+			$pushService, $collectionId, $documentId, $payload, $initiatorUserId,
+		): void {
+			$pushService->sendToCollection($collectionId, 'documentRestore', $payload, $initiatorUserId);
+			$pushService->sendToDocument($documentId, 'documentRestore', $payload, $initiatorUserId);
+		});
 	}
 }

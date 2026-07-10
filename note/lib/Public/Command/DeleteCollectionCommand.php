@@ -8,6 +8,8 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
+use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Import\CollectionImportLockService;
 use Bitrix\Note\Internal\Service\RecycleBin\MoveToRecycleBinService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
@@ -20,6 +22,8 @@ class DeleteCollectionCommand extends AbstractCommand
 	private readonly MoveToRecycleBinService $moveService;
 	private readonly SearchIndexService $searchIndexService;
 	private readonly CollectionImportLockService $importLockService;
+	private readonly PushNotificationService $pushService;
+	private readonly RecycleBinRepository $recycleBinRepository;
 
 	public function __construct(
 		int $id,
@@ -28,6 +32,8 @@ class DeleteCollectionCommand extends AbstractCommand
 		?MoveToRecycleBinService $moveService = null,
 		?SearchIndexService $searchIndexService = null,
 		?CollectionImportLockService $importLockService = null,
+		?PushNotificationService $pushService = null,
+		?RecycleBinRepository $recycleBinRepository = null,
 	)
 	{
 		$this->id = $id;
@@ -36,6 +42,8 @@ class DeleteCollectionCommand extends AbstractCommand
 		$this->moveService = $moveService ?? new MoveToRecycleBinService();
 		$this->searchIndexService = $searchIndexService ?? new SearchIndexService();
 		$this->importLockService = $importLockService ?? new CollectionImportLockService();
+		$this->pushService = $pushService ?? new PushNotificationService();
+		$this->recycleBinRepository = $recycleBinRepository ?? new RecycleBinRepository();
 	}
 
 	protected function execute(): Result
@@ -78,10 +86,36 @@ class DeleteCollectionCommand extends AbstractCommand
 		{
 		}
 
+		$this->emitCollectionDelete($this->id, $trashedIds);
+
 		return $this->createResult([
 			'success' => true,
 			'trashedIds' => $trashedIds,
 		]);
+	}
+
+	private function emitCollectionDelete(int $collectionId, array $trashedDocumentIds): void
+	{
+		// Skip the map when the cascade falls back to requestRefetch — editors will
+		// pick up recycleBinId/trashedAt via the getMyAccess refetch path instead.
+		$extra = [];
+		if (count($trashedDocumentIds) <= PushNotificationService::REALTIME_BATCH_THRESHOLD)
+		{
+			$map = $this->recycleBinRepository->getIdsByDocumentIds($trashedDocumentIds);
+			if (!empty($map))
+			{
+				$extra['recycleBinMap'] = $map;
+			}
+		}
+
+		$this->pushService->emitDocumentCascade(
+			collectionId: $collectionId,
+			documentIds: $trashedDocumentIds,
+			collectionCommand: 'collectionDelete',
+			collectionPayloadExtra: $extra,
+			globalCommand: 'collectionDelete',
+			globalPayload: ['collectionId' => $collectionId],
+		);
 	}
 
 	private function createResult(array $data = []): Result

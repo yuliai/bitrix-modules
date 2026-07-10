@@ -159,17 +159,36 @@ class DocumentController extends Controller
 
 			return null;
 		}
-		$document = $result->getData()['document'] ?? null;
+		$data = $result->getData();
+		$document = $data['document'] ?? null;
 		if (!$document instanceof Document)
 		{
 			return null;
 		}
 
+		$documentId = (int)$document->getId();
+		// MoveDocumentCommand performed the single full read needed for the title — reuse it
+		// here instead of issuing another getById.
+		$fullDocument = $data['fullDocument'] ?? null;
+		if (!$fullDocument instanceof Document)
+		{
+			return null;
+		}
+
+		$collectionIdOut = (int)$fullDocument->getCollectionId();
+		$childrenCountMap = (new DocumentRepository())->getChildrenCountMapByParentIds(
+			$collectionIdOut,
+			[$documentId],
+		);
+
 		return [
-			'id' => $document->getId(),
-			'collectionId' => $document->getCollectionId(),
-			'parentId' => $document->getParentId(),
-			'position' => $document->getPosition(),
+			'id' => $documentId,
+			'collectionId' => $collectionIdOut,
+			'parentId' => $fullDocument->getParentId(),
+			'position' => $fullDocument->getPosition(),
+			'title' => $fullDocument->getTitle(),
+			'hasChildren' => isset($childrenCountMap[$documentId]),
+			'affectedPositions' => $data['affectedPositions'] ?? [],
 		];
 	}
 
@@ -402,6 +421,91 @@ class DocumentController extends Controller
 		return [
 			'documentId' => $id,
 			'permissions' => DocumentAccessService::getDocumentPermissions($id),
+		];
+	}
+
+	public function getMyAccessAction(int $id): array
+	{
+		$document = (new DocumentProvider())->getMetaById($id);
+		if ($document === null)
+		{
+			// Lost-access path: caller knows the document id but can no longer resolve it.
+			// Return a fully-locked snapshot so the editor can tear down without leaking metadata.
+			return [
+				'documentId' => $id,
+				'collectionId' => null,
+				'canView' => false,
+				'canEdit' => false,
+				'canViewCollection' => false,
+				'canEditCollection' => false,
+				'canManagePermissions' => false,
+				'sharedAccess' => true,
+				'recycleBinId' => null,
+				'trashedAt' => null,
+				'canRestore' => false,
+				'canHardDelete' => false,
+				'isOrphan' => false,
+			];
+		}
+
+		$collectionId = (int)$document->getCollectionId();
+
+		// Trashed documents resolve access via the recycle-bin gate (mirrors getAction):
+		// the author / trasher keep view access on an orphaned doc even after the source
+		// collection — and thus the normal ACL path — is gone. Trashed docs are read-only.
+		$trashRecord = (new RecycleBinRepository())->getByDocumentId($id);
+		if ($trashRecord !== null)
+		{
+			$userId = (int)$this->getCurrentUser()->getId();
+			$canView = DocumentAccessService::canViewInRecycleBin($userId, $trashRecord);
+			$trashedAt = $trashRecord->getTrashedAt();
+
+			// Action flags power the in-editor more-menu after a push-driven mode flip.
+			// Outsiders get false-everything together with canView so they cannot enumerate trash rows.
+			$canRestore = $canView && DocumentAccessService::canRestoreFromRecycleBin($userId, $trashRecord);
+			$canHardDelete = $canView && DocumentAccessService::canHardDeleteFromRecycleBin($userId, $trashRecord);
+
+			// Orphan-state mirrors mapTrashedDocument's logic — banner copy depends on it.
+			$rawCollectionId = (int)$document->getCollectionId();
+			$isOrphan = $rawCollectionId <= 0 || !$this->collectionExists($rawCollectionId);
+
+			return [
+				'documentId' => $id,
+				'collectionId' => null,
+				'canView' => $canView,
+				'canEdit' => false,
+				'canViewCollection' => false,
+				'canEditCollection' => false,
+				'canManagePermissions' => false,
+				'sharedAccess' => true,
+				// Editor uses these to power the in-place restore banner after a cascade trash
+				// arrives via NOTE_COLLECTION_{id} without a per-doc payload — record is already
+				// loaded above, so this is a free exposure.
+				'recycleBinId' => $canView ? (int)$trashRecord->getId() : null,
+				'trashedAt' => $canView ? $trashedAt->format('Y-m-d H:i:s') : null,
+				'canRestore' => $canRestore,
+				'canHardDelete' => $canHardDelete,
+				'isOrphan' => $canView && $isOrphan,
+			];
+		}
+
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot($id, $collectionId);
+
+		return [
+			'documentId' => $id,
+			// Hide collection id when the user has no document access — same privacy rule as DocumentReadDto.
+			'collectionId' => ($snapshot['canView'] ?? false) ? $collectionId : null,
+			'canView' => (bool)($snapshot['canView'] ?? false),
+			'canEdit' => (bool)($snapshot['canEdit'] ?? false),
+			'canViewCollection' => (bool)($snapshot['canViewCollection'] ?? false),
+			'canEditCollection' => (bool)($snapshot['canEditCollection'] ?? false),
+			'canManagePermissions' => (bool)($snapshot['canManagePermissions'] ?? false),
+			'sharedAccess' => (bool)($snapshot['sharedAccess'] ?? true),
+			'recycleBinId' => null,
+			'trashedAt' => null,
+			'canRestore' => false,
+			'canHardDelete' => false,
+			'isOrphan' => false,
 		];
 	}
 
@@ -754,6 +858,23 @@ class DocumentController extends Controller
 	private function denyAccess(): void
 	{
 		$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
+	}
+
+	private function collectionExists(int $collectionId): bool
+	{
+		if ($collectionId <= 0)
+		{
+			return false;
+		}
+
+		$row = CollectionTable::query()
+			->setSelect(['ID'])
+			->where('ID', $collectionId)
+			->setLimit(1)
+			->fetch()
+		;
+
+		return $row !== false;
 	}
 
 	/**

@@ -7,16 +7,21 @@ namespace Bitrix\Note\Internal\Service\Import\Step;
 use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Repository\ImportMapRepository;
 use Bitrix\Note\Internal\Service\Collection\CollectionService;
+use Bitrix\Note\Internal\Service\Import\CollectionAccessTransfer;
 use Bitrix\Note\Internal\Service\Import\ImportLogger;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
 
 class CreateCollectionStep implements StepInterface
 {
+	private CollectionAccessTransfer $accessTransfer;
+
 	public function __construct(
 		private readonly CollectionService $collectionService,
 		private readonly ImportMapRepository $mapRepository,
+		?CollectionAccessTransfer $accessTransfer = null,
 	)
 	{
+		$this->accessTransfer = $accessTransfer ?? new CollectionAccessTransfer();
 	}
 
 	public function execute(array &$option, ?SourceInterface $source): void
@@ -74,6 +79,10 @@ class CreateCollectionStep implements StepInterface
 			);
 			ImportLogger::logInfo("createCollection: created {$option['resultCollectionId']} ({$collectionName})");
 		}
+
+		// Reproduce the source base's access on the new collection (best-effort;
+		// no-op for sources without source-side permissions, e.g. Outline).
+		$this->accessTransfer->apply($option, $source);
 
 		$option['step'] = 'createStructure';
 		$option['importedDocIds'] = [];

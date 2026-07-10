@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Repository;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\DB\Ddl\DbType;
 use Bitrix\Main\Entity\EntityInterface;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\ORM\Fields\ExpressionField;
@@ -174,9 +175,19 @@ class DocumentSearchRepository implements RepositoryInterface
 			return $collection;
 		}
 
-		$sqlHelper = Application::getConnection()->getSqlHelper();
+		$connection = Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
 		$escapedQuery = $sqlHelper->forSql($booleanQuery);
-		$matchExpression = $sqlHelper->getMatchFunction('%s', "'$escapedQuery'");
+
+		// PG: ts_rank gives a real float rank; MySQL MATCH AGAINST already returns relevance.
+		if (DbType::getByConnectionType($connection->getType()) === DbType::PostgreSql)
+		{
+			$matchExpression = "ts_rank(to_tsvector('english', %s), to_tsquery('english', '{$escapedQuery}'))";
+		}
+		else
+		{
+			$matchExpression = $sqlHelper->getMatchFunction('%s', "'$escapedQuery'");
+		}
 
 		$withSnippets = $snippetTokens !== [];
 		$select = [
@@ -266,9 +277,11 @@ class DocumentSearchRepository implements RepositoryInterface
 			// extractTokens splits by word characters, so wildcards should not appear, and even
 			// if they did the worst case is a broader match, never an injection.
 			$escaped = $sqlHelper->forSql($token);
+			// getIlikeOperator(): PG → ILIKE (case-insensitive, no LOWER over column);
+			// MySQL → LIKE (case-insensitive via ci collation, original behavior). Dialect-agnostic.
 			// %% is the sprintf-escape for a literal % used by ExpressionField when it inlines
 			// buildFrom field names into the expression template.
-			$likeFragments[] = "%s LIKE '%%{$escaped}%%'";
+			$likeFragments[] = $sqlHelper->getIlikeOperator('%s', "'%%{$escaped}%%'");
 			$buildFrom[] = 'DOCUMENT.TITLE';
 		}
 
@@ -277,7 +290,8 @@ class DocumentSearchRepository implements RepositoryInterface
 			return;
 		}
 
-		$titleMatchSql = 'IF(' . implode(' OR ', $likeFragments) . ', 1, 0)';
+		// CASE WHEN is cross-dialect; IF() is MySQL-only.
+		$titleMatchSql = 'CASE WHEN (' . implode(' OR ', $likeFragments) . ') THEN 1 ELSE 0 END';
 
 		$query->registerRuntimeField(
 			'TITLE_MATCH',
