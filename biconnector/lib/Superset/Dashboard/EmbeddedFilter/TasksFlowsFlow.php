@@ -54,6 +54,7 @@ class TasksFlowsFlow extends PresetFilter
 
 		$presetValueCollection = new PresetValueCollection();
 
+		//TODO: use ServiceLocator::getInstance()->get('biconnector.provider.scopeAccessibleValue')
 		$provider = new FlowProvider();
 		$query = new ExpandedFlowQuery($userId);
 		$query

@@ -4,17 +4,18 @@ namespace Bitrix\BIConnector\ExternalSource;
 
 use Bitrix\Main;
 use Bitrix\BIConnector;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorInterface;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 
 final class SupersetIntegration
 {
-	private Integrator $integrator;
+	private IntegratorInterface $integrator;
 
 	public function __construct()
 	{
-		$this->integrator = Integrator::getInstance();
+		$this->integrator = IntegratorFactory::getInstance();
 	}
 
 	/**

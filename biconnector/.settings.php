@@ -5,6 +5,7 @@ use Bitrix\BIConnector\Integration\UI\EntitySelector\ExternalConnectionProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\ExternalTableProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardTagProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\UnlinkedSupersetDashboardProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetGroupProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetScopeProvider;
 use Bitrix\Biconnector\Internal\Integration\Im\DashboardDiscussionChatAccessSyncService;
@@ -16,6 +17,7 @@ use Bitrix\BIConnector\Internal\Repository\Mapper\SupersetDashboardShareMapper;
 use Bitrix\BIConnector\Internal\Repository\SupersetDashboardShareRepository;
 use Bitrix\BIConnector\Internal\Services\Share\SharePasswordService;
 use Bitrix\BIConnector\Public\Provider\ShareProvider;
+use Bitrix\BIConnector\Public\Provider\ScopeAccessibleValueProvider;
 use Bitrix\Main\Config\Option;
 
 $biDashboardsToolSets = Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y'
@@ -76,6 +78,9 @@ return [
 					'repository' => \Bitrix\Main\DI\ServiceLocator::getInstance()->get('biconnector.repository.share'),
 				],
 			],
+			'biconnector.provider.scopeAccessibleValue' => [
+				'className' => ScopeAccessibleValueProvider::class,
+			],
 		],
 		'readonly' => true,
 	],
@@ -87,6 +92,13 @@ return [
 					'provider' => [
 						'moduleId' => 'biconnector',
 						'className' => SupersetDashboardProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-superset-unlinked-dashboard',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => UnlinkedSupersetDashboardProvider::class,
 					],
 				],
 				[

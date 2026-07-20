@@ -59,21 +59,11 @@ abstract class ImportMdTransformer
 				$file = $attachmentFileMap[$attachmentId];
 				$fileIds[] = $file['fileId'];
 
-				$safeName = str_replace(['"', '}'], ['', ''], $file['name']);
-				$attrs = sprintf(
-					'{fileId=%d documentId=%d type="%s" name="%s" size=%d mimeType="%s"}',
-					$file['fileId'],
-					$documentId,
+				return sprintf(
+					'[[%s fileId=%d]]',
 					$this->resolveType($file['mimeType']),
-					$safeName,
-					$file['size'],
-					$file['mimeType'],
+					$file['fileId'],
 				);
-
-				$linkPart = $matches['linkPart'];
-				$url = $matches['url'];
-
-				return $linkPart . '(' . $url . ')' . $attrs;
 			},
 			$markdown,
 		);
@@ -84,24 +74,22 @@ abstract class ImportMdTransformer
 	}
 
 	/**
-	 * Regex for enriched-asset syntax produced by transform():
-	 *   !?[label](url){attrs}
-	 *
-	 * Assumes flat (non-nested) brackets/parens/braces — which is always the case
-	 * for output of transform(): safeName strips '"' and '}', url comes from
-	 * Outline's /api/attachments.redirect?id=... with no parens.
+	 * Regex for block asset token produced by transform():
+	 *   [[image|file|video fileId=N(optional attrs)]]
 	 */
-	private const ASSET_PATTERN = '/(?<raw>(?<bang>!?)\[(?<label>[^\]\n]*)\]\((?<url>[^)\n]+)\)\{(?<attrs>[^}\n]+)\})/';
+	private const ASSET_PATTERN = '/(?<raw>\[\[(?:image|file|video) fileId=\d+(?:[^\]\n]*)\]\])/';
 
 	/**
-	 * Ensures every enriched asset occupies its own line so the frontend
-	 * block-level tokenizer recognises it. Preserves structural context:
-	 * blockquote `>` prefixes and list-item indentation. Leaves fenced code
-	 * blocks untouched.
+	 * Isolates every enriched asset as a standalone top-level block: pulled to
+	 * column 0 and wrapped in blank lines. The block-level tokenizer only
+	 * recognises an asset that owns its line and is not lazily absorbed by a
+	 * preceding list item or blockquote, so any list/quote nesting around the
+	 * source asset is dropped on purpose. Text around the asset keeps its
+	 * structural prefix. Fenced code blocks are left untouched.
 	 */
 	private function splitInlineAssets(string $markdown): string
 	{
-		if ($markdown === '' || !str_contains($markdown, '{'))
+		if ($markdown === '' || !str_contains($markdown, '[['))
 		{
 			return $markdown;
 		}
@@ -110,6 +98,23 @@ abstract class ImportMdTransformer
 		$out = [];
 		$inFence = false;
 		$fenceMarker = '';
+
+		$pushBlank = static function (array &$out): void {
+			if (!empty($out) && trim((string)end($out)) !== '')
+			{
+				$out[] = '';
+			}
+		};
+
+		// Set after an asset is pulled out of an indented/list context. The lines
+		// that followed that asset belonged to the now-broken item; once the list
+		// is gone, any line indented by >=4 spaces would be parsed as an indented
+		// code block. De-indent those orphans to column 0 until the next real block.
+		$deindentOrphans = false;
+
+		// Set after an asset block is emitted: a blank line must follow it. Honoured
+		// lazily so an already-blank source line is reused instead of doubled.
+		$pendingSep = false;
 
 		foreach ($lines as $line)
 		{
@@ -122,6 +127,30 @@ abstract class ImportMdTransformer
 					$fenceMarker = '';
 				}
 				continue;
+			}
+
+			if ($pendingSep)
+			{
+				if (trim($line) !== '')
+				{
+					$pushBlank($out);
+				}
+				$pendingSep = false;
+			}
+
+			if ($deindentOrphans)
+			{
+				if (trim($line) === '')
+				{
+					$out[] = $line;
+					continue;
+				}
+				if (preg_match('/^(?: {4,}|\t)/', $line))
+				{
+					$out[] = ltrim($line, " \t");
+					continue;
+				}
+				$deindentOrphans = false;
 			}
 
 			if (preg_match('/^[ \t]{0,3}(?<fence>```+|~~~+)/', $line, $fenceMatch))
@@ -141,30 +170,23 @@ abstract class ImportMdTransformer
 				continue;
 			}
 
-			if (count($matches[0]) === 1 && trim($body) === $matches[0][0][0])
-			{
-				$out[] = $line;
-				continue;
-			}
-
 			$segments = [];
 			$lastEnd = 0;
 			foreach ($matches[0] as $match)
 			{
 				[$rawAsset, $offset] = $match;
-				$before = substr($body, $lastEnd, $offset - $lastEnd);
-				$beforeTrim = trim($before);
-				if ($beforeTrim !== '')
+				$before = trim(substr($body, $lastEnd, $offset - $lastEnd));
+				if ($before !== '')
 				{
-					$segments[] = $beforeTrim;
+					$segments[] = ['text', $before];
 				}
-				$segments[] = $rawAsset;
+				$segments[] = ['asset', $rawAsset];
 				$lastEnd = $offset + strlen($rawAsset);
 			}
 			$tail = trim(substr($body, $lastEnd));
 			if ($tail !== '')
 			{
-				$segments[] = $tail;
+				$segments[] = ['text', $tail];
 			}
 
 			if (empty($segments))
@@ -174,21 +196,36 @@ abstract class ImportMdTransformer
 			}
 
 			$first = true;
-			foreach ($segments as $segment)
+			foreach ($segments as [$type, $text])
 			{
-				if ($first)
+				if ($type === 'asset')
 				{
-					$out[] = $prefixInfo['firstPrefix'] . $segment;
-					$first = false;
-					continue;
+					$pushBlank($out);
+					$out[] = $text;
+					$pendingSep = true;
 				}
+				else
+				{
+					if ($pendingSep)
+					{
+						$pushBlank($out);
+						$pendingSep = false;
+					}
+					$out[] = ($first ? $prefixInfo['firstPrefix'] : $prefixInfo['contPrefix']) . $text;
+				}
+				$first = false;
+			}
 
-				$out[] = $prefixInfo['blankPrefix'];
-				$out[] = $prefixInfo['contPrefix'] . $segment;
+			// Pure asset line lifted out of a list/indent: its trailing siblings
+			// may now be orphaned indented continuations.
+			if ($prefixInfo['prefixLen'] > 0 && count($segments) === 1 && $segments[0][0] === 'asset')
+			{
+				$deindentOrphans = true;
 			}
 		}
 
-		return implode("\n", $out);
+		// Trailing blank lines from the per-asset separator carry no meaning in markdown.
+		return rtrim(implode("\n", $out), "\n");
 	}
 
 	/**
@@ -196,7 +233,7 @@ abstract class ImportMdTransformer
 	 * list marker) from its content body. Returns prefixes used to emit
 	 * subsequent split segments while preserving the original block context.
 	 *
-	 * @return array{prefixLen:int, firstPrefix:string, contPrefix:string, blankPrefix:string}
+	 * @return array{prefixLen:int, firstPrefix:string, contPrefix:string}
 	 */
 	private function analyzeLinePrefix(string $line): array
 	{
@@ -215,7 +252,6 @@ abstract class ImportMdTransformer
 			'prefixLen' => strlen($bq) + strlen($indent) + strlen($marker),
 			'firstPrefix' => $bq . $indent . $marker,
 			'contPrefix' => $bq . $indent . $markerAsSpaces,
-			'blankPrefix' => rtrim($bq),
 		];
 	}
 

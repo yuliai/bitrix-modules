@@ -126,6 +126,22 @@ class WikiMarkupConverter
 
 	private function protect(string $text): string
 	{
+		// <pre> is a preformatted block: capture it whole (first, so its content is
+		// not re-scanned by the constructs below) and route it through the same
+		// protected-code bucket as {{{...}}} so restore() emits a fenced ``` block.
+		// This keeps newlines (a multi-line <pre> must not collapse into a backtick
+		// span) and stops adjacent blocks gluing into "````". An inner <code>
+		// wrapper is unwrapped; entities are decoded now because the block is
+		// restored verbatim after the html cleanup pass.
+		$text = preg_replace_callback('#<\s*pre\b[^>]*>(.*?)<\s*/\s*pre\s*>#isu', function (array $m): string {
+			$code = preg_replace('#<\s*/?\s*code\b[^>]*>#iu', '', $m[1]) ?? $m[1];
+			$code = html_entity_decode($code, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+			$i = count($this->protectedCode);
+			$this->protectedCode[] = $code;
+
+			return '##WIKICODE' . $i . '##';
+		}, $text) ?? $text;
+
 		$text = preg_replace_callback('/\{\{\{(.*?)\}\}\}/su', function (array $m): string {
 			$i = count($this->protectedCode);
 			$this->protectedCode[] = $m[1];
@@ -282,14 +298,59 @@ class WikiMarkupConverter
 			return $text;
 		}
 
+		// <script>/<style> have no markdown equivalent and their bodies are not
+		// content: the trailing strip_tags below would drop the tags but leave the
+		// raw JS/CSS as visible text (e.g. rendered like-widget chrome pasted into a
+		// body). Drop the whole element, content included, before anything else.
+		$text = preg_replace('#<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>#isu', '', $text) ?? $text;
+
+		// Markdown inline emphasis cannot span a line break, must hug its content
+		// (a marker next to whitespace is not "flanking" and fails to form), and
+		// directly-adjacent same-type spans glue into a stray "****". Normalize the
+		// emphasis HTML tags before the tag rules below, in this order:
+		//   1. pull trailing break(s) out of the span: <b>x<br></b> -> <b>x</b><br>
+		//      so the closing marker is not orphaned on its own line;
+		//   2. pull boundary whitespace/&nbsp; outside the markers: <b>x </b> -> <b>x</b> ;
+		//   3. drop emphasis that now wraps nothing: <b></b> / <b>&nbsp;</b> -> removed;
+		//   4. merge directly-adjacent same-type spans: <b>a</b><b>b</b> -> <b>ab</b>.
+		$emphasis = '(?:b|strong|i|em)';
+		$ws = '(?:\s|&nbsp;|&#160;)';
+		// 1.
+		$text = preg_replace(
+			'/((?:<\s*br(?=[\s\/>])[^>]*>\s*)+)(<\s*\/\s*' . $emphasis . '\s*>)/iu',
+			'$2$1',
+			$text,
+		) ?? $text;
+		// 2. boundary whitespace moved outside the markers (kept verbatim).
+		$text = preg_replace('/(' . $ws . '+)(<\s*\/\s*' . $emphasis . '\s*>)/iu', '$2$1', $text) ?? $text;
+		$text = preg_replace('/(<\s*' . $emphasis . '(?=[\s\/>])[^>]*>)(' . $ws . '+)/iu', '$2$1', $text) ?? $text;
+		// 3.
+		$text = preg_replace(
+			'/<\s*(' . $emphasis . ')(?=[\s\/>])[^>]*>' . $ws . '*<\s*\/\s*\1\s*>/iu',
+			'',
+			$text,
+		) ?? $text;
+		// 4.
+		$text = preg_replace('/<\s*\/\s*(' . $emphasis . ')\s*><\s*\1(?=[\s\/>])[^>]*>/iu', '', $text) ?? $text;
+
+		// Open-tag rules anchor the tag name with a (?=[\s\/>]) lookahead so they
+		// match only the tag itself and not any tag whose name merely starts with
+		// the same letter: <br> stays a line break (incl. with attributes) instead
+		// of being eaten by the bold rule, <img>/<input> reach the image rule/strip
+		// instead of the italic rule, and <pre>/<param> reach the code rule instead
+		// of the paragraph rule. <br> stays first so it wins over the bold rule.
 		$replacements = [
-			'/<\s*br\s*\/?\s*>/iu' => "\n",
+			'/<\s*br(?=[\s\/>])[^>]*>/iu' => "\n",
 			'/<\s*\/\s*p\s*>/iu' => "\n\n",
-			'/<\s*p[^>]*>/iu' => "\n\n",
+			'/<\s*p(?=[\s\/>])[^>]*>/iu' => "\n\n",
+			// <div> has no markdown equivalent; treat its boundaries as a block
+			// break so adjacent block divs are not merged onto one line. Redundant
+			// breaks (e.g. around nested <p>) collapse via the \n{3,} cleanup below.
+			'/<\s*\/?\s*div[^>]*>/iu' => "\n\n",
 			'/<\s*\/\s*(?:b|strong)\s*>/iu' => '**',
-			'/<\s*(?:b|strong)[^>]*>/iu' => '**',
+			'/<\s*(?:b|strong)(?=[\s\/>])[^>]*>/iu' => '**',
 			'/<\s*\/\s*(?:i|em)\s*>/iu' => '*',
-			'/<\s*(?:i|em)[^>]*>/iu' => '*',
+			'/<\s*(?:i|em)(?=[\s\/>])[^>]*>/iu' => '*',
 			'/<\s*hr[^>]*>/iu' => "\n---\n",
 			'/<\s*li[^>]*>/iu' => "\n- ",
 			'/<\s*\/\s*li\s*>/iu' => '',

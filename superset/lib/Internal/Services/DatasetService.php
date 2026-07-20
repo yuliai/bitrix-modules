@@ -643,13 +643,20 @@ final class DatasetService extends AbstractSupersetContext
 
 	private function prepareResultDataset(array $supersetDataset): array
 	{
+		$tableName = (string)($supersetDataset['table_name'] ?? '');
+		$editUrl = new Uri($this->connector->buildRequestUrl('/tablemodelview/list/'));
+		$editUrl->addParams([
+			'filters' => "(table_name:'{$tableName}')",
+		]);
+
 		return [
 			'id' => (int)($supersetDataset['id'] ?? 0),
-			'table_name' => $supersetDataset['table_name'] ?? '',
+			'table_name' => $tableName,
 			'description' => $supersetDataset['description'] ?? '',
 			'owners' => $supersetDataset['owners'] ?? [],
 			'columns' => is_array($supersetDataset['columns'] ?? null) ? $supersetDataset['columns'] : [],
 			'metrics' => is_array($supersetDataset['metrics'] ?? null) ? $supersetDataset['metrics'] : [],
+			'edit_url' => $editUrl->getLocator(),
 		];
 	}
 

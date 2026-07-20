@@ -25,6 +25,11 @@ final class LocalUserRepository
 
 	public function findByClientId(Server $server, string $clientId): ?User
 	{
+		if ($clientId === '')
+		{
+			return null;
+		}
+
 		return $this->findOne($server, [
 			'=CLIENT_ID' => $clientId,
 		]);

@@ -7,6 +7,7 @@ use Bitrix\BIConnector\ExternalSource\Type;
 use Bitrix\BIConnector\ExternalSource\FieldType;
 use Bitrix\BIConnector\ExternalSource\Validation\ImportDataValidator;
 use Bitrix\BIConnector\ExternalSource\Validation\Rules\RulesProvider;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Engine\Controller;
@@ -22,7 +23,6 @@ use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\UI\FileUploader;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
 use Bitrix\BIConnector\Integration\UI\FileUploaderController\DatasetUploaderController;
 
 class Dataset extends Controller
@@ -1104,7 +1104,7 @@ class Dataset extends Controller
 
 		$editUrl = $getDatasetUrlResult->getData()['url'];
 
-		$loginUrl = (new SupersetController(Integrator::getInstance()))->getLoginUrl();
+		$loginUrl = (new SupersetController())->getLoginUrl();
 		if ($loginUrl)
 		{
 			$url = new Uri($loginUrl);
@@ -1125,7 +1125,7 @@ class Dataset extends Controller
 			return null;
 		}
 
-		$integrator = Integrator::getInstance();
+		$integrator = IntegratorFactory::getInstance();
 		$response = $integrator->getDatasetCreateUrl($tableName);
 		if ($response->hasErrors())
 		{
@@ -1141,7 +1141,7 @@ class Dataset extends Controller
 			return null;
 		}
 
-		$loginUrl = (new SupersetController($integrator))->getLoginUrl();
+		$loginUrl = (new SupersetController())->getLoginUrl();
 		if ($loginUrl)
 		{
 			$url = new Uri($loginUrl);

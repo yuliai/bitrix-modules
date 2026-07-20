@@ -18,12 +18,16 @@ final class MarkdownStripper
 		'/!\[[^\]]*\]\([^)]*\)\{[^}]*\}/u',
 		// Plain images `![alt](url)`.
 		'/!\[[^\]]*\]\([^)]*\)/u',
+		// Compact asset tokens `[[image|video|file fileId=N ...]]`.
+		'/\[\[(?:image|video|file) fileId=\d+[^\]\n]*\]\]/u',
 		// Table separator rows, with optional alignment (`:---`, `---:`, `:---:`).
 		'/^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+\s*\|?\s*$/mu',
 		// Table data rows: strip leading/trailing pipe. Inner pipes are collapsed in the post-pass.
 		'/^\s*\|(.+)\|\s*$/mu',
 		// Callout fences `:::info` / `:::tip` / closing `:::`.
 		'/^:::\s*\w*\s*$/mu',
+		// Mention token `@{type:id}` — strip entirely (label not available at this layer).
+		'/@\{[a-z]+:\d+\}/u',
 		// Strikethrough `~~text~~` — keep text.
 		'/~~([^~]+)~~/u',
 		// Existing patterns.
@@ -42,23 +46,25 @@ final class MarkdownStripper
 	 * @var string[]
 	 */
 	private const REPLACEMENTS = [
-		'',
-		'',
-		'',
-		'',
-		'',
-		'$1',
-		'',
-		'$1',
-		'',
-		'$1',
-		'$1',
-		'',
-		'',
-		'$1',
-		'',
-		'',
-		'$1',
+		'',          // HTML comments
+		'',          // fenced code fences
+		'',          // enriched asset
+		'',          // plain images
+		'',          // compact asset tokens
+		'',          // table separator
+		'$1',        // table data row
+		'',          // callout fences
+		'',   // mention token: strip entirely
+		'$1',        // strikethrough
+		'',          // headings
+		'$1',        // bold / italic (*)
+		'$1',        // inline code
+		'',          // bullet lists
+		'',          // ordered lists
+		'$1',        // links
+		'',          // blockquote
+		'',          // horizontal rule
+		'$1',        // bold / italic (_)
 	];
 
 	public function strip(string $md): string

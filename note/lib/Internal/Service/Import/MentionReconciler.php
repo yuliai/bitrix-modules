@@ -88,7 +88,7 @@ class MentionReconciler
 				elseif ($replacement['targetCollectionId'] !== null)
 				{
 					$externalLink = "{$baseUrl}/collection/{$externalId}";
-					$internalLink = "/note/collection/{$replacement['targetCollectionId']}/";
+					$internalLink = "/note/workspace/{$replacement['targetCollectionId']}/";
 				}
 				else
 				{

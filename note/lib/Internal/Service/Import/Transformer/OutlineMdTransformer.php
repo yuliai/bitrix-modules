@@ -38,9 +38,6 @@ class OutlineMdTransformer extends ImportMdTransformer
 			$markdown,
 		) ?? $markdown;
 
-		// Remove standalone \ on lines (Outline hard-break artifacts): "> \" → ">", "\" → ""
-		$result = preg_replace('/^[ \t]*((?:>[ \t]*)*)\\\\[ \t]*$/m', '$1', $result);
-
 		return $result;
 	}
 }

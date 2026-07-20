@@ -11,7 +11,6 @@ use Bitrix\BIConnector\Integration\Superset\Integrator\Request\Middleware;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboard;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Registrar;
-use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\SupersetStatusOptionContainer;
 use Bitrix\Main\Application;
@@ -24,7 +23,7 @@ use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Json;
 
-class Integrator
+class ProxyIntegrator implements IntegratorInterface
 {
 	private const PROXY_ACTION_REGISTER_PORTAL = '/portal/register';
 	private const PROXY_ACTION_VERIFY_PORTAL = '/portal/verify';
@@ -52,13 +51,9 @@ class Integrator
 	private const PROXY_ACTION_USER_DEACTIVATE = '/user/deactivate';
 	private const PROXY_ACTION_USER_SET_EMPTY_ROLE = '/user/setEmptyRole';
 	private const PROXY_ACTION_USER_SYNC_PROFILE = '/user/syncProfile';
-	private const PROXY_ACTION_LIST_CHART = '/chart/list';
 	private const PROXY_ACTION_UPDATE_DASHBOARD = '/dashboard/update';
-	private const PROXY_ACTION_IMPORT_DATASET = '/dataset/import';
 	private const PROXY_ACTION_CREATE_EMPTY_DASHBOARD = '/dashboard/createEmpty';
 	private const PROXY_ACTION_SET_DASHBOARD_OWNER = '/dashboard/setOwner';
-	private const PROXY_ACTION_CHANGE_DASHBOARD_OWNER = '/dashboard/changeOwner';
-	private const PROXY_ACTION_LIST_DATASET = '/dataset/list';
 	private const PROXY_ACTION_GET_DATASET = '/dataset/get';
 	private const PROXY_ACTION_GET_DATASET_BY_NAME = '/dataset/getByName';
 	private const PROXY_ACTION_CREATE_DATASET = '/dataset/create';
@@ -135,14 +130,7 @@ class Integrator
 	// region Service methods
 
 	/**
-	 * Register new portal on proxy-server. On success - got unique portal ID for authentication in proxy.
-	 *
-	 * On request save unique ID from response to config by Client middleware,
-	 * after that portal make verify request to proxy-server, for verify this portal ID
-	 *
-	 * @see self::verifyPortal()
-	 *
-	 * @return IntegratorResponse<string>
+	 * @inheritDoc
 	 */
 	public function registerPortal(): IntegratorResponse
 	{
@@ -163,21 +151,14 @@ class Integrator
 
 		if ($response->hasErrors() && $isRebind)
 		{
-			\Bitrix\Main\Config\Option::set('biconnector', '~superset_rebind_required', 'Y');
+			Option::set('biconnector', '~superset_rebind_required', 'Y');
 		}
 
 		return $response->setData(['portalId' => $clientId, 'rebind' => $isRebind]);
 	}
 
 	/**
-	 * Verify portal ID on proxy-server, created by <b>registerPortal</b> action.
-	 *
-	 * On request proxy-server make verify request to verify.php endpoint and return verify result in this method
-	 *
-	 * Method for portal ID verify
-	 * @see install/public/bitrix/biconstructor/verify.php
-	 *
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function verifyPortal(): IntegratorResponse
 	{
@@ -195,11 +176,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with list of dashboards info on successful request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param array $ids External ids of dashboards.
-	 * @return IntegratorResponse<Dto\DashboardList>
+	 * @inheritDoc
 	 */
 	public function getDashboardList(array $ids): IntegratorResponse
 	{
@@ -225,51 +202,40 @@ class Integrator
 				->perform()
 		;
 
-		if ($response->hasErrors())
-		{
-			return $response;
-		}
-
-		$resultData = $response->getData();
-
-		$innerDashboards = $resultData['dashboards'] ?? [];
-		$commonCount = $resultData['common_count'] ?? 0;
-		$dashboards = [];
-
-		foreach ($innerDashboards as $dashboardData)
-		{
-			$jsonMetadata = $this->decode($dashboardData['json_metadata']) ?? [];
-			$dateModify = null;
-			if (isset($dashboardData['timestamp_modify']))
-			{
-				$dateModify = DateTime::createFromTimestamp((int)$dashboardData['timestamp_modify']);
-			}
-
-			$dashboards[] = new Dto\Dashboard(
-				id: $dashboardData['id'],
-				title: $dashboardData['title'],
-				url: $dashboardData['url'] ?? '',
-				editUrl: $dashboardData['edit_url'] ?? '',
-				isEditable: $dashboardData['is_editable'] ?? false,
-				published: $dashboardData['published'] ?? true,
-				nativeFilterConfig: $jsonMetadata['native_filter_configuration'] ?? [],
-				dateModify: $dateModify,
-			);
-		}
-
-		$dashboardList = new Dto\DashboardList(
-			dashboards: $dashboards,
-			commonCount: $commonCount,
-		);
-
-		return $response->setData($dashboardList);
+		return $this->parseDashboardListResponse($response);
 	}
 
 	/**
-	 * Returns response with dashboard with requested id.
+	 * Returns filtered list of dashboards from Superset.
 	 *
-	 * @param int $dashboardId
-	 * @return IntegratorResponse<Dto\Dashboard>
+	 * @param array $filter Proxy filter params. Allowed keys: ids, neqIds.
+	 * @return IntegratorResponse<Dto\DashboardList>
+	 */
+	public function getDashboardListByFilter(array $filter = []): IntegratorResponse
+	{
+		$requestFilter = [];
+		if (isset($filter['ids']) && is_array($filter['ids']))
+		{
+			$requestFilter['ids'] = $filter['ids'];
+		}
+
+		if (isset($filter['neqIds']) && is_array($filter['neqIds']))
+		{
+			$requestFilter['neqIds'] = $filter['neqIds'];
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_DASHBOARD)
+				->setParams($requestFilter)
+				->perform()
+		;
+
+		return $this->parseDashboardListResponse($response);
+	}
+
+	/**
+	 * @inheritDoc
 	 */
 	public function getDashboardById(int $dashboardId): IntegratorResponse
 	{
@@ -314,13 +280,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with dashboard credentials to embed on successful request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param int $dashboardId
-	 * @param array $rlsRules Optional RLS rules to include in guest token
-	 *        Format: [['dataset' => datasetId, 'clause' => 'SQL WHERE clause'], ...]
-	 * @return IntegratorResponse<Dto\DashboardEmbeddedCredentials>
+	 * @inheritDoc
 	 */
 	public function getDashboardEmbeddedCredentials(int $dashboardId, array $rlsRules = [], int $expSeconds = 0): IntegratorResponse
 	{
@@ -364,10 +324,7 @@ class Integrator
 	}
 
 	/**
-	 * Updates supersetUser
-	 *
-	 * @param User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function updateUser(Dto\User $user): IntegratorResponse
 	{
@@ -386,10 +343,7 @@ class Integrator
 	}
 
 	/**
-	 * Activates superset user
-	 *
-	 * @param User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function activateUser(Dto\User $user): IntegratorResponse
 	{
@@ -402,10 +356,7 @@ class Integrator
 	}
 
 	/**
-	 * Deactivates superset user
-	 *
-	 * @param User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function deactivateUser(Dto\User $user): IntegratorResponse
 	{
@@ -418,10 +369,7 @@ class Integrator
 	}
 
 	/**
-	 * Sets empty role for superset user
-	 *
-	 * @param User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function setEmptyRole(Dto\User $user): IntegratorResponse
 	{
@@ -434,12 +382,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with ID of copied dashboard on success request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param int $dashboardId
-	 * @param string $name
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function copyDashboard(int $dashboardId, string $name): IntegratorResponse
 	{
@@ -459,12 +402,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns stream with file of exported dashboard on success request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param int $dashboardId
-	 * @param array $dashboardSettings
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function exportDashboard(int $dashboardId, array $dashboardSettings = []): IntegratorResponse
 	{
@@ -553,12 +491,7 @@ class Integrator
 	}
 
 	/**
-	 * Uses external ids of dashboards.
-	 * Returns response with result of deleting dashboards.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param array $dashboardIds External ids of dashboards.
-	 * @return IntegratorResponse<int>
+	 * @inheritDoc
 	 */
 	public function deleteDashboard(array $dashboardIds, bool $deleteRelatedEntities = false): IntegratorResponse
 	{
@@ -572,11 +505,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with result of start superset.
-	 * If status code is OK/IN_PROGRESS - superset was started.
-	 *
-	 * @param string $biconnectorToken
-	 * @return IntegratorResponse<Array<string,string>>
+	 * @inheritDoc
 	 */
 	public function startSuperset(string $biconnectorToken = ''): IntegratorResponse
 	{
@@ -616,13 +545,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with result of freeze superset.
-	 * $params['reason'] - reason of freezing superset.
-	 * If the reason is "TARIFF" - instanse won't activate automatically.
-	 * Use unfreezeSuperset method with same reason to unfreeze instance.
-	 *
-	 * @param array $params
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function freezeSuperset(array $params = []): IntegratorResponse
 	{
@@ -641,12 +564,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with result of unfreeze superset.
-	 * $params['reason'] - reason of previous freezing superset.
-	 * If the reason is "TARIFF" - instance will be activated if it was freezed only with TARIFF reason.
-	 *
-	 * @param array $params
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function unfreezeSuperset(array $params = []): IntegratorResponse
 	{
@@ -665,11 +583,7 @@ class Integrator
 	}
 
 	/**
-	 * Suspends superset instance.
-	 * Used for PENDING_DELETE scenario.
-	 *
-	 * @param array $params
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function suspendSuperset(array $params = []): IntegratorResponse
 	{
@@ -688,11 +602,7 @@ class Integrator
 	}
 
 	/**
-	 * Resumes a previously suspended superset instance.
-	 * Used for cancelPendingDelete scenario.
-	 *
-	 * @param array $params
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function resumeSuperset(array $params = []): IntegratorResponse
 	{
@@ -711,10 +621,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with result of delete superset.
-	 * If status code is OK/IN_PROGRESS - superset was deleted.
-	 *
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function deleteSuperset(): IntegratorResponse
 	{
@@ -726,11 +633,7 @@ class Integrator
 	}
 
 	/**
-	 * Change bi token for getting data from apache superset
-	 * If response is OK - the token was changed successfully.
-	 *
-	 * @param string $biconnectorToken
-	 * @return IntegratorResponse<Dto\Dashboard>
+	 * @inheritDoc
 	 */
 	public function changeBiconnectorToken(string $biconnectorToken): IntegratorResponse
 	{
@@ -743,10 +646,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with result of clear cache superset.
-	 * If status code is OK - superset cache was clean.
-	 *
-	 * @return IntegratorResponse<null>
+	 * @inheritDoc
 	 */
 	public function clearCache(): IntegratorResponse
 	{
@@ -774,10 +674,7 @@ class Integrator
 	}
 
 	/**
-	 * Creates user in Superset
-	 *
-	 * @param Dto\User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function createUser(Dto\User $user): IntegratorResponse
 	{
@@ -800,9 +697,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets login url with jwt
-	 *
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getLoginUrl(): IntegratorResponse
 	{
@@ -810,12 +705,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with dashboard import result.
-	 * If response is OK - dashboard was imported successfully.
-	 *
-	 * @param string $filePath
-	 * @param string $appCode
-	 * @return IntegratorResponse<Dto\Dashboard>
+	 * @inheritDoc
 	 */
 	public function importDashboard(
 		string $filePath,
@@ -844,32 +734,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with dataset import result.
-	 * If response is OK - dataset was imported successfully.
-	 *
-	 * @param string $filePath
-	 * @return IntegratorResponse<Dto\Dashboard>
-	 */
-	public function importDataset(string $filePath): IntegratorResponse
-	{
-		return
-			$this
-				->createDefaultRequest(self::PROXY_ACTION_IMPORT_DATASET)
-				->setParams([
-					'filePath' => $filePath,
-					'currency' => CultureFormatter::getPortalCurrencySymbol(),
-				])
-				->setMultipart(true)
-				->perform()
-		;
-	}
-
-	/**
-	 * Returns response with created dashboard result.
-	 * If response is OK - dashboard was created successfully.
-	 *
-	 * @param array $fields
-	 * @return IntegratorResponse<Dto\Dashboard>
+	 * @inheritDoc
 	 */
 	public function createEmptyDashboard(array $fields): IntegratorResponse
 	{
@@ -884,11 +749,7 @@ class Integrator
 	}
 
 	/**
-	 * Sets owner for dashboard
-	 *
-	 * @param int $dashboardId
-	 * @param Dto\User $user
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function setDashboardOwner(int $dashboardId, Dto\User $user): IntegratorResponse
 	{
@@ -902,11 +763,7 @@ class Integrator
 	}
 
 	/**
-	 * Sync roles, owners and so on
-	 *
-	 * @param Dto\User $user
-	 * @param array $data
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function syncProfile(Dto\User $user, array $data): IntegratorResponse
 	{
@@ -936,11 +793,7 @@ class Integrator
 
 
 	/**
-	 * Update dashboard fields, that allowed in proxy white-list
-	 *
-	 * @param int $dashboardId external id of edited dashboard
-	 * @param array $editedFields fields for edit in superset. Format: *field_name_in_superset* -> *new_value*
-	 * @return IntegratorResponse<Array<string|string>> return array of fields that changed
+	 * @inheritDoc
 	 */
 	public function updateDashboard(int $dashboardId, array $editedFields): IntegratorResponse
 	{
@@ -988,113 +841,7 @@ class Integrator
 	}
 
 	/**
-	 *
-	 * @deprecated
-	 *
-	 * Changes dashboard owners
-	 *
-	 * @param int $dashboardId
-	 * @param Dto\User $userFrom
-	 * @param Dto\User $userTo
-	 * @return IntegratorResponse
-	 */
-	public function changeDashboardOwner(int $dashboardId, Dto\User $userFrom, Dto\User $userTo): IntegratorResponse
-	{
-		$parameters = [
-			'id' => $dashboardId,
-			'userFrom' => $userFrom->clientId,
-			'userTo' => $userTo->clientId,
-		];
-
-		return
-			$this
-				->createDefaultRequest(self::PROXY_ACTION_CHANGE_DASHBOARD_OWNER)
-				->setParams($parameters)
-				->perform()
-		;
-	}
-
-	/**
-	 * Returns response with list of dataset info on successful request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param array $ids External ids of dashboards.
-	 * @return IntegratorResponse
-	 */
-	public function getChartList(array $ids): IntegratorResponse
-	{
-		if (empty($ids))
-		{
-			return new IntegratorResponse(
-				status: IntegratorResponse::STATUS_OK,
-				data: []
-			);
-		}
-
-		$requestParams = [
-			'ids' => $ids,
-		];
-
-		$response =
-			$this
-				->createDefaultRequest(self::PROXY_ACTION_LIST_CHART)
-				->setParams($requestParams)
-				->perform()
-		;
-
-		if ($response->hasErrors())
-		{
-			return $response;
-		}
-
-		$resultData = $response->getData();
-
-		return $response->setData($resultData['charts']);
-	}
-
-	/**
-	 * Returns response with list of dataset info on successful request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param array $ids External ids of dashboards.
-	 * @return IntegratorResponse
-	 */
-	public function getDatasetList(array $ids): IntegratorResponse
-	{
-		if (empty($ids))
-		{
-			return new IntegratorResponse(
-				status: IntegratorResponse::STATUS_OK,
-				data: []
-			);
-		}
-
-		$requestParams = [
-			'ids' => $ids,
-		];
-
-		$response =
-			$this
-				->createDefaultRequest(self::PROXY_ACTION_LIST_DATASET)
-				->setParams($requestParams)
-				->perform()
-		;
-
-		if ($response->hasErrors())
-		{
-			return $response;
-		}
-
-		$resultData = $response->getData();
-
-		return $response->setData($resultData['datasets']);
-	}
-
-	/**
-	 * Returns response with dataset info on successful request.
-	 *
-	 * @param int $id
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDatasetById(int $id): IntegratorResponse
 	{
@@ -1111,10 +858,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with dataset info on successful request by name.
-	 *
-	 * @param string $name
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDatasetByName(string $name): IntegratorResponse
 	{
@@ -1131,10 +875,7 @@ class Integrator
 	}
 
 	/**
-	 * Adds dataset
-	 *
-	 * @param array $fields
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function createDataset(array $fields): IntegratorResponse
 	{
@@ -1153,10 +894,7 @@ class Integrator
 	}
 
 	/**
-	 * Updates dataset
-	 *
-	 * @param array $fields
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function updateDataset(int $id, array $fields): IntegratorResponse
 	{
@@ -1186,10 +924,7 @@ class Integrator
 	}
 
 	/**
-	 * Deletes dataset
-	 *
-	 * @param int $id
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function deleteDataset(int $id): IntegratorResponse
 	{
@@ -1208,10 +943,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets dataset url for creating chart
-	 *
-	 * @param int $id
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDatasetUrl(int $id): IntegratorResponse
 	{
@@ -1228,11 +960,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets dataset create url
-	 *
-	 * @param string $datasetName
-	 * @param bool $isVirtual
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDatasetCreateUrl(string $datasetName, bool $isVirtual = false): IntegratorResponse
 	{
@@ -1250,11 +978,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets unused elements - dataset which are not used in charts and charts which are not used in dashboards.
-	 *
-	 * @param array $params ORM params - page, pageSize, filter, order.
-	 *
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getUnusedElements(array $params): IntegratorResponse
 	{
@@ -1276,9 +1000,7 @@ class Integrator
 	}
 
 	/**
-	 * @param array $elements Array of elements: [elementId: int, elementType: chart|dataset].
-	 *
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function deleteUnusedElements(array $elements): IntegratorResponse
 	{
@@ -1295,11 +1017,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets dataset list by dashboard id - datasets which are used in dashboard.
-	 *
-	 * @param int $dashboardId
-	 *
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDashboardDatasets(int $dashboardId): IntegratorResponse
 	{
@@ -1316,11 +1034,7 @@ class Integrator
 	}
 
 	/**
-	 * Returns response with list of dataset info by table names on successful request.
-	 * If response code is not OK - returns empty data.
-	 *
-	 * @param string $tableName
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDatasetListByTableName(string $tableName): IntegratorResponse
 	{
@@ -1354,10 +1068,7 @@ class Integrator
 	}
 
 	/**
-	 * Gets list of charts and datasets used in dashboards, and shows which dashboards each entity is used in
-	 *
-	 * @param int[] $dashboardIds
-	 * @return IntegratorResponse
+	 * @inheritDoc
 	 */
 	public function getDashboardReusedObjects(array $dashboardIds): IntegratorResponse
 	{
@@ -1370,11 +1081,7 @@ class Integrator
 	}
 
 	/**
-	 * Without `$chartIds` returns the dashboard skeleton (structure, stats,
-	 * dimensions, available filters). With `$chartIds` switches to drill-down:
-	 * only those charts come back, each with raw `query_result` + `column_meta`.
-	 *
-	 * @param int[] $chartIds
+	 * @inheritDoc
 	 */
 	public function getDashboardOverview(
 		int $dashboardId,
@@ -1382,6 +1089,9 @@ class Integrator
 		array $urlParams = [],
 		int $streamTimeout = 60 * 5,
 		array $chartIds = [],
+		array $sort = [],
+		?int $limit = null,
+		int $offset = 0,
 	): IntegratorResponse
 	{
 		if (!self::isAiToolsFeatureEnabled())
@@ -1401,6 +1111,18 @@ class Integrator
 		if (!empty($chartIds))
 		{
 			$params['chartIds'] = array_values(array_map('intval', $chartIds));
+			if (!empty($sort))
+			{
+				$params['sort'] = $sort;
+			}
+			if ($limit !== null)
+			{
+				$params['limit'] = $limit;
+			}
+			if ($offset > 0)
+			{
+				$params['offset'] = $offset;
+			}
 		}
 
 		return $this
@@ -1491,6 +1213,9 @@ class Integrator
 		;
 	}
 
+	/**
+	 * @inheritDoc
+	 */
 	public function setExpirationDate(?Date $date): IntegratorResponse
 	{
 		$parameters = [
@@ -1507,6 +1232,9 @@ class Integrator
 		;
 	}
 
+	/**
+	 * @inheritDoc
+	 */
 	public function syncMarketDashboards(array $marketDashboardsIdList): IntegratorResponse
 	{
 		$parameters = [
@@ -1540,5 +1268,52 @@ class Integrator
 	private static function normalizeExpirationTimestamp(?Date $date): int
 	{
 		return $date?->getTimestamp() ?? 0;
+	}
+
+	/**
+	 * Parses proxy response with dashboard list into DashboardList DTO.
+	 *
+	 * @return IntegratorResponse<Dto\DashboardList>
+	 */
+	private function parseDashboardListResponse(IntegratorResponse $response): IntegratorResponse
+	{
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		$innerDashboards = $resultData['dashboards'] ?? [];
+		$commonCount = $resultData['common_count'] ?? 0;
+		$dashboards = [];
+
+		foreach ($innerDashboards as $dashboardData)
+		{
+			$jsonMetadata = $this->decode($dashboardData['json_metadata']) ?? [];
+			$dateModify = null;
+			if (isset($dashboardData['timestamp_modify']))
+			{
+				$dateModify = DateTime::createFromTimestamp((int)$dashboardData['timestamp_modify']);
+			}
+
+			$dashboards[] = new Dto\Dashboard(
+				id: $dashboardData['id'],
+				title: $dashboardData['title'],
+				url: $dashboardData['url'] ?? '',
+				editUrl: $dashboardData['edit_url'] ?? '',
+				isEditable: $dashboardData['is_editable'] ?? false,
+				published: $dashboardData['published'] ?? true,
+				nativeFilterConfig: $jsonMetadata['native_filter_configuration'] ?? [],
+				dateModify: $dateModify,
+			);
+		}
+
+		$dashboardList = new Dto\DashboardList(
+			dashboards: $dashboards,
+			commonCount: $commonCount,
+		);
+
+		return $response->setData($dashboardList);
 	}
 }

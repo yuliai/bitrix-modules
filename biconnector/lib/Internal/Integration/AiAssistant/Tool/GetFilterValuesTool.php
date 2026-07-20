@@ -3,7 +3,7 @@
 namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
 use Bitrix\AiAssistant\Exceptions\McpException;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Filter\AppliedFilters;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\UrlParameter\UrlParameters;
 use Bitrix\Main\Loader;
@@ -133,7 +133,7 @@ final class GetFilterValuesTool extends BaseBiTool
 		$filters = new AppliedFilters($userId);
 		if (!empty($callerFilters))
 		{
-			$dashboardDtoResp = Integrator::getInstance()->getDashboardById($externalId);
+			$dashboardDtoResp = IntegratorFactory::getInstance()->getDashboardById($externalId);
 			if ($dashboardDtoResp->hasErrors() || !$dashboardDtoResp->getData())
 			{
 				throw self::unavailableDashboardException(
@@ -162,7 +162,7 @@ final class GetFilterValuesTool extends BaseBiTool
 		}
 		$urlParams = $urlParamsResult->getData()['urlParams'];
 
-		$response = Integrator::getInstance()->getFilterValues(
+		$response = IntegratorFactory::getInstance()->getFilterValues(
 			$externalId,
 			$filterColumn,
 			$supersetFilters,

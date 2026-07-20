@@ -4,7 +4,8 @@ namespace Bitrix\BIConnector\Superset;
 
 use Bitrix\BIConnector\Access\Service\DashboardGroupService;
 use Bitrix\BIConnector\Configuration\Feature;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorInterface;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Model;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardGroupBindingTable;
@@ -35,7 +36,7 @@ final class MarketDashboardManager
 	private const EVENT_ON_AFTER_DASHBOARD_INSTALL = 'onAfterDashboardInstall';
 
 	private static ?MarketDashboardManager $instance = null;
-	private Integrator $integrator;
+	private IntegratorInterface $integrator;
 
 	public static function getInstance(): self
 	{
@@ -44,7 +45,7 @@ final class MarketDashboardManager
 
 	private function __construct()
 	{
-		$this->integrator = Integrator::getInstance();
+		$this->integrator = IntegratorFactory::getInstance();
 	}
 
 	public static function getMarketCollectionUrl(): string

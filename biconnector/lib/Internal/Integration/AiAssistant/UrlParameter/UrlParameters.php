@@ -10,6 +10,8 @@ use Bitrix\Main\Result;
 
 final class UrlParameters
 {
+	private const SCOPE_VALUE_LIMIT = 50;
+
 	public function __construct(private readonly int $userId)
 	{
 	}
@@ -70,9 +72,7 @@ final class UrlParameters
 				$overrideId = (int)$rawOverride;
 				if (!ScopeMap::isParameterValueAllowed($parameter, $this->userId, $overrideId))
 				{
-					$validValues = ScopeMap::listParameterValues($parameter, $this->userId);
-
-					return $result->addError($this->buildInvalidUrlParamError($parameter, $overrideId, $validValues));
+					return $result->addError($this->buildInvalidUrlParamError($parameter, $overrideId));
 				}
 
 				$urlParams[$code] = (string)$overrideId;
@@ -87,14 +87,90 @@ final class UrlParameters
 	}
 
 	/**
-	 * @param array<array{id:int|string, name:string}> $validValues
+	 * Describe the non-global url parameters a dashboard requires, without
+	 * erroring — the preflight counterpart of {@see resolve()}. Globals
+	 * (auto-injected server-side, e.g. current_user) are omitted: the caller
+	 * never supplies them.
+	 *
+	 * On success `getData()['parameters']` holds
+	 * `array<array{paramCode:string, paramTitle:string, availableValues:array, offset:int, hasMore:bool}>`.
+	 * Optional substring search narrows each parameter's availableValues by name;
+	 * `$offset` pages through a long list (page size {@see self::SCOPE_VALUE_LIMIT}).
 	 */
-	private function buildInvalidUrlParamError(
-		Parameter $parameter,
-		int $invalidId,
-		array $validValues,
-	): Error
+	public function describe(int $dashboardId, ?string $search = null, int $offset = 0): Result
 	{
+		$result = new Result();
+
+		$registered = SupersetDashboardUrlParameterTable::getList([
+			'filter' => ['=DASHBOARD_ID' => $dashboardId],
+			'select' => ['CODE'],
+		])->fetchAll();
+
+		$parameters = [];
+		foreach ($registered as $param)
+		{
+			if (!self::isScopeParameterCode($param['CODE']))
+			{
+				continue;
+			}
+			$parameter = Parameter::from($param['CODE']);
+
+			$values = ScopeMap::listParameterValues($parameter, $this->userId, $search, self::SCOPE_VALUE_LIMIT, $offset);
+			$parameters[] = [
+				'paramCode' => $parameter->code(),
+				'paramTitle' => $parameter->title(),
+				'availableValues' => $values,
+				'offset' => $offset,
+				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
+			];
+		}
+
+		return $result->setData(['parameters' => $parameters]);
+	}
+
+	/**
+	 * Which of the given dashboards are parameterized — scoped to a non-global
+	 * entity that must be chosen before the report can load. User-independent
+	 * structural check; the actual values come from {@see describe()}.
+	 *
+	 * @param int[] $dashboardIds
+	 * @return array<int, bool> dashboardId => requiresScope
+	 */
+	public static function requiresScopeBatch(array $dashboardIds): array
+	{
+		$result = array_fill_keys(array_map('intval', $dashboardIds), false);
+		if (empty($result))
+		{
+			return [];
+		}
+
+		$registered = SupersetDashboardUrlParameterTable::getList([
+			'filter' => ['=DASHBOARD_ID' => array_keys($result)],
+			'select' => ['DASHBOARD_ID', 'CODE'],
+		])->fetchAll();
+
+		foreach ($registered as $param)
+		{
+			if (self::isScopeParameterCode($param['CODE']))
+			{
+				$result[(int)$param['DASHBOARD_ID']] = true;
+			}
+		}
+
+		return $result;
+	}
+
+	private static function isScopeParameterCode(string $code): bool
+	{
+		$parameter = Parameter::tryFrom($code);
+
+		return $parameter !== null && !in_array($parameter, ScopeMap::getGlobals(), true);
+	}
+
+	private function buildInvalidUrlParamError(Parameter $parameter, int $invalidId): Error
+	{
+		$values = ScopeMap::listParameterValues($parameter, $this->userId, null, self::SCOPE_VALUE_LIMIT);
+
 		return new Error(
 			'Invalid url parameter `' . $parameter->code() . '` ('
 			. $parameter->title() . '): id ' . $invalidId . ' not found or not accessible.',
@@ -104,18 +180,19 @@ final class UrlParameters
 				'paramCode' => $parameter->code(),
 				'paramTitle' => $parameter->title(),
 				'invalidId' => $invalidId,
-				'availableValues' => $validValues,
-				'total' => count($validValues),
+				'availableValues' => $values,
+				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
 				'instruction' => 'The supplied id does not match any entity accessible to this user. '
 					. 'Show `availableValues` (id + name) to the user, ask which one to use, '
-					. 'then retry with the correct urlParams value.',
+					. 'then retry with the correct urlParams value. If `hasMore` is true, narrow the '
+					. 'list with search_dashboard_parameters({search}).',
 			],
 		);
 	}
 
 	private function buildMissingUrlParamError(Parameter $parameter): Error
 	{
-		$values = ScopeMap::listParameterValues($parameter, $this->userId);
+		$values = ScopeMap::listParameterValues($parameter, $this->userId, null, self::SCOPE_VALUE_LIMIT);
 
 		return new Error(
 			'Missing required url parameter `' . $parameter->code() . '` ('
@@ -126,10 +203,11 @@ final class UrlParameters
 				'paramCode' => $parameter->code(),
 				'paramTitle' => $parameter->title(),
 				'availableValues' => $values,
-				'total' => count($values),
+				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
 				'instruction' => 'This dashboard is parameterized and cannot be loaded without a specific entity. '
 					. 'Show `availableValues` (id + name) to the user, ask which one to analyze, '
-					. 'then retry the tool with urlParams: {"' . $parameter->code() . '": <id>}.',
+					. 'then retry the tool with urlParams: {"' . $parameter->code() . '": <id>}. '
+					. 'If `hasMore` is true, narrow the list with search_dashboard_parameters({search}).',
 			],
 		);
 	}

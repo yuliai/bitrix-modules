@@ -9,7 +9,7 @@ use Bitrix\BIConnector\Access\Service\DashboardGroupService;
 use Bitrix\BIConnector\Public\Command\DashboardChat\DashboardDiscussionChatResult;
 use Bitrix\BIConnector\Public\Command\DashboardChat\GetOrCreateDashboardDiscussionChatCommand;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Model;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardGroupBindingTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardGroupTable;
@@ -98,7 +98,7 @@ class Dashboard extends Controller
 					return null;
 				}
 
-				$superset = new SupersetController(Integrator::getInstance());
+				$superset = new SupersetController();
 				$dashboard = $superset->getDashboardRepository()->getById($dashboardId);
 				if (!$dashboard)
 				{
@@ -121,8 +121,8 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$integrator = Integrator::getInstance();
-		$superset = new SupersetController($integrator);
+		$superset = new SupersetController();
+		$integrator = $superset->getIntegrator();
 		$externalId = $dashboard->getExternalId();
 
 		if ((int)$externalId <= 0)
@@ -253,7 +253,7 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$integrator = Integrator::getInstance();
+		$integrator = IntegratorFactory::getInstance();
 		$externalDashboardId = $dashboard->getExternalId();
 		if ((int)$externalDashboardId <= 0)
 		{
@@ -408,7 +408,7 @@ class Dashboard extends Controller
 		if ($dashboard->isCustomDashboard())
 		{
 			$externalDashboardId = $dashboard->getExternalId();
-			$response = Integrator::getInstance()->deleteDashboard([$externalDashboardId], $dashboard->isMarketDashboard());
+			$response = IntegratorFactory::getInstance()->deleteDashboard([$externalDashboardId], $dashboard->isMarketDashboard());
 			if ($response->hasErrors())
 			{
 				if ($response->getStatus() === IntegratorResponse::STATUS_NOT_FOUND)
@@ -679,7 +679,7 @@ class Dashboard extends Controller
 
 		if ($dashboard->isCustomDashboard())
 		{
-			$response = Integrator::getInstance()->createEmptyDashboard([
+			$response = IntegratorFactory::getInstance()->createEmptyDashboard([
 				'name' => $dashboard->getTitle(),
 			]);
 
@@ -786,7 +786,7 @@ class Dashboard extends Controller
 	 */
 	public function getSupersetEntityLoginUrlAction(string $entityUrl): ?string
 	{
-		$loginUrl = (new SupersetController(Integrator::getInstance()))->getLoginUrl();
+		$loginUrl = (new SupersetController())->getLoginUrl();
 
 		if ($loginUrl)
 		{
@@ -811,7 +811,7 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$loginUrl = (new SupersetController(Integrator::getInstance()))->getLoginUrl();
+		$loginUrl = (new SupersetController())->getLoginUrl();
 
 		if ($loginUrl)
 		{
@@ -836,7 +836,7 @@ class Dashboard extends Controller
 			return;
 		}
 
-		$supersetController = new SupersetController(Integrator::getInstance());
+		$supersetController = new SupersetController();
 		if (!$supersetController->isSupersetEnabled() || SupersetInitializer::isSupersetUnavailable())
 		{
 			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_UNAVAILABLE')));
@@ -1178,7 +1178,7 @@ class Dashboard extends Controller
 		// Extract defaults from dashboard's native filter config in Superset.
 		if ($externalFilterValues === null)
 		{
-			$superset = new SupersetController(Integrator::getInstance());
+			$superset = new SupersetController();
 			$proxyDashboard = $superset->getDashboardRepository()->getById($dashboard->getId(), true);
 			if ($proxyDashboard)
 			{

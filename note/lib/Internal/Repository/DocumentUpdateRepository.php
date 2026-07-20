@@ -8,11 +8,20 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\DocumentUpdateTable;
+use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
 class DocumentUpdateRepository
 {
 	public const ERROR_DOCUMENT_NOT_EDITABLE = 'NOTE_DOCUMENT_NOT_EDITABLE';
+
+	private ?RecycleBinFilter $recycleBinFilter = null;
+
+	private function recycleBinFilter(): RecycleBinFilter
+	{
+		return $this->recycleBinFilter ??= new RecycleBinFilter();
+	}
 
 	public function getByDocumentId(int $documentId): array
 	{
@@ -24,39 +33,41 @@ class DocumentUpdateRepository
 	}
 
 	/**
-	 * Atomic guard: the row is inserted only if the document exists, is not archived and is not in trash.
-	 * On affected_rows=0 the Result carries ERROR_DOCUMENT_NOT_EDITABLE; the caller distinguishes the
-	 * concrete reason (RecycleBinFilter::isInRecycleBin → DocumentInRecycleBinException, otherwise DocumentArchivedException).
+	 * Guard: the row is inserted only if the document exists, is not archived and is not in trash.
+	 * Check-then-insert is not atomic; the tiny race window can only leave an orphan patch row,
+	 * which compact/hard-delete cleanup removes anyway.
 	 */
 	public function add(int $documentId, int $userId, string $patch): Result
 	{
 		$result = new Result();
 
-		$connection = Application::getConnection();
-		$helper = $connection->getSqlHelper();
+		$query = DocumentTable::query()
+			->setSelect(['ID'])
+			->where('ID', $documentId)
+			->where('IS_ARCHIVED', 'N');
+		$this->recycleBinFilter()->applyExclusion($query);
 
-		$documentIdSafe = (int)$documentId;
-		$userIdSafe = (int)$userId;
-		$patchSafe = $helper->forSql($patch);
-
-		// FROM DUAL is MySQL-only; a bare SELECT with WHERE works on both MySQL and PG.
-		$sql = "INSERT INTO b_note_document_updates (DOCUMENT_ID, USER_ID, PATCH, CREATED_AT)"
-			. " SELECT {$documentIdSafe}, {$userIdSafe}, '{$patchSafe}', NOW()"
-			. " WHERE EXISTS (SELECT 1 FROM b_note_document WHERE ID = {$documentIdSafe} AND IS_ARCHIVED = 'N')"
-			. "   AND NOT EXISTS (SELECT 1 FROM b_note_recycle_bin WHERE DOCUMENT_ID = {$documentIdSafe})";
-
-		$connection->queryExecute($sql);
-		$affected = $connection->getAffectedRowsCount();
-
-		if ($affected === 0)
+		if ($query->fetch() === false)
 		{
 			$result->addError(new Error('Document is not editable', self::ERROR_DOCUMENT_NOT_EDITABLE));
 
 			return $result;
 		}
 
-		$lastId = (int)$connection->getInsertedId();
-		$result->setData(['id' => $lastId]);
+		$addResult = DocumentUpdateTable::add([
+			'DOCUMENT_ID' => $documentId,
+			'USER_ID' => $userId,
+			'PATCH' => $patch,
+		]);
+
+		if (!$addResult->isSuccess())
+		{
+			$result->addErrors($addResult->getErrors());
+
+			return $result;
+		}
+
+		$result->setData(['id' => (int)$addResult->getId()]);
 
 		return $result;
 	}

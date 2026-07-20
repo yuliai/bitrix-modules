@@ -55,6 +55,7 @@ class BPWorkflowTemplate extends PresetFilter
 
 		$presetValueCollection = new PresetValueCollection();
 
+		//TODO: use ServiceLocator::getInstance()->get('biconnector.provider.scopeAccessibleValue')
 		$stateQuery = WorkflowStateTable::query();
 		$stateQuery->setSelect([
 			'TID' => 'WORKFLOW_TEMPLATE_ID',

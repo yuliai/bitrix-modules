@@ -158,7 +158,7 @@ abstract class MentionTransformer
 		$colId = $this->lookupCollectionId($externalId);
 		if ($colId !== null)
 		{
-			return "[{$label}](/note/collection/{$colId}/)";
+			return "[{$label}](/note/workspace/{$colId}/)";
 		}
 
 		$normalizedId = $this->normalizeUnresolvedId($externalId);

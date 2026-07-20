@@ -483,11 +483,6 @@ class DashboardDataTransformer
 		{
 			try
 			{
-				if ($this->config->computeStats)
-				{
-					$this->computeStats($chart, $idx);
-				}
-
 				if ($this->config->generateColumnDescriptions)
 				{
 					$this->generateColumnDescriptions($chart, $idx);
@@ -503,61 +498,6 @@ class DashboardDataTransformer
 
 			$data['charts'][$idx] = $chart;
 		}
-	}
-
-	private function computeStats(array &$chart, int $chartIdx): void
-	{
-		$rows = $chart['data'] ?? [];
-		if (empty($rows) || !is_array($rows[0]))
-		{
-			return;
-		}
-
-		$numericCols = $this->getNumericColumns($rows, $chartIdx);
-		$fractionCols = $this->detectFractionColumns($rows, $numericCols);
-		$statsCols = array_diff($numericCols, array_keys($fractionCols));
-
-		$stats = ['record_count' => count($rows)];
-
-		foreach ($statsCols as $colName)
-		{
-			$values = [];
-			foreach ($rows as $row)
-			{
-				$val = $row[$colName] ?? null;
-				if (is_numeric($val))
-				{
-					$values[] = $val;
-				}
-			}
-
-			if (empty($values))
-			{
-				continue;
-			}
-
-			$sum = array_sum($values);
-			$mean = $sum / count($values);
-			$min = min($values);
-			$max = max($values);
-
-			$colStats = [
-				'min' => ($min == (int)$min) ? (int)$min : round($min, $this->config->defaultDecimalPlaces),
-				'max' => ($max == (int)$max) ? (int)$max : round($max, $this->config->defaultDecimalPlaces),
-				'mean' => round($mean, $this->config->defaultDecimalPlaces),
-				'sum' => ($sum == (int)$sum) ? (int)$sum : round($sum, $this->config->defaultDecimalPlaces),
-			];
-
-			$meanRounded = $colStats['mean'];
-			if ($meanRounded == (int)$meanRounded)
-			{
-				$colStats['mean'] = (int)$meanRounded;
-			}
-
-			$stats[$colName] = $colStats;
-		}
-
-		$chart['stats'] = $stats;
 	}
 
 	private function generateColumnDescriptions(array &$chart, int $chartIdx): void
@@ -904,7 +844,7 @@ class DashboardDataTransformer
 
 	private function assemble(array &$data): void
 	{
-		$chartFieldOrder = ['id', 'name', 'chart_type', 'tab_id', 'tab_path', 'description', 'column_descriptions', 'stats', 'columns', 'data', 'row_limit', 'total_rows', 'has_more'];
+		$chartFieldOrder = ['id', 'name', 'chart_type', 'tab_id', 'tab_path', 'description', 'column_descriptions', 'stats', 'columns', 'data', 'offset', 'row_limit', 'total_rows', 'has_more'];
 
 		foreach ($data['charts'] ?? [] as $i => $chart)
 		{

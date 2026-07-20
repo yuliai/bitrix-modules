@@ -203,13 +203,16 @@ final class ChartService extends AbstractSupersetContext
 
 	private function prepareResultChart(array $supersetChart): array
 	{
+		$chartId = (int)($supersetChart['id'] ?? 0);
+
 		return [
-			'id' => (int)($supersetChart['id'] ?? 0),
+			'id' => $chartId,
 			'chart_name' => $supersetChart['slice_name'] ?? '',
 			'viz_type' => $supersetChart['viz_type'] ?? '',
 			'description' => $supersetChart['description'] ?? '',
 			'owners' => $supersetChart['owners'] ?? [],
 			'dataset_id' => (int)($supersetChart['datasource_id'] ?? 0),
+			'edit_url' => $this->connector->buildRequestUrl('/explore/?slice_id=' . $chartId),
 		];
 	}
 

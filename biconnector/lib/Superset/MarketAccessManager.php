@@ -2,9 +2,8 @@
 
 namespace Bitrix\BIConnector\Superset;
 
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
-use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\Date;
@@ -86,7 +85,7 @@ final class MarketAccessManager
 
 	public function updateExpirationDate(?Date $date): bool
 	{
-		$result = Integrator::getInstance()->setExpirationDate($date);
+		$result = IntegratorFactory::getInstance()->setExpirationDate($date);
 
 		return !$result->hasErrors();
 	}
@@ -102,7 +101,7 @@ final class MarketAccessManager
 			$marketDashboardsIdList = [];
 		}
 
-		$integratorResult = Integrator::getInstance()->syncMarketDashboards($marketDashboardsIdList);
+		$integratorResult = IntegratorFactory::getInstance()->syncMarketDashboards($marketDashboardsIdList);
 
 		if ($integratorResult->hasErrors())
 		{

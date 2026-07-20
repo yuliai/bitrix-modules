@@ -9,7 +9,6 @@ class TransformerConfig
 	public bool $transposeDictData = true;
 	public bool $removeEmptyFields = true;
 
-	public bool $computeStats = true;
 	public bool $generateColumnDescriptions = true;
 	public bool $includeMeta = true;
 

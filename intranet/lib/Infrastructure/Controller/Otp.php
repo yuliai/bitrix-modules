@@ -17,6 +17,7 @@ use Bitrix\Intranet\Internal\Integration\Security\PersonalOtp;
 use Bitrix\Intranet\Internal\Integration\Security\RecoveryCodes;
 use Bitrix\Intranet\Internal\Service\Otp\MobilePush;
 use Bitrix\Intranet\Internal\Service\Otp\PersonalMobilePush;
+use Bitrix\Intranet\Internal\Service\Otp\RecoverAccessRequestService;
 use Bitrix\Intranet\Public\Command\Otp\Notification\SendRequestRecoverAccessCommand;
 use Bitrix\Intranet\Public\Command\Otp\SetLegacyOtpAllowedCommand;
 use Bitrix\Intranet\Repository\UserRepository;
@@ -61,6 +62,21 @@ class Otp extends Controller
 				],
 			],
 			'sendRequestRecoverAccess' => [
+				'-prefilters' => [
+					'\Bitrix\Main\Engine\ActionFilter\Authentication',
+				],
+			],
+			'isRequestRecoverAccessSent' => [
+				'-prefilters' => [
+					'\Bitrix\Main\Engine\ActionFilter\Authentication',
+				],
+			],
+			'canSendRequestRecoverAccess' => [
+				'-prefilters' => [
+					'\Bitrix\Main\Engine\ActionFilter\Authentication',
+				],
+			],
+			'getRequestRecoverAccessStatus' => [
 				'-prefilters' => [
 					'\Bitrix\Main\Engine\ActionFilter\Authentication',
 				],
@@ -243,15 +259,68 @@ class Otp extends Controller
 			return;
 		}
 
-		$currentUserId = (int)CurrentUser::get()->getId();
-		if ($currentUserId > 0 && !(new UserPermission($user))->canEdit())
+		if (!$this->canUseRecoverAccessRequest($user))
 		{
-			$this->addError(new Error('No rights'));
-
 			return;
 		}
 
 		(new SendRequestRecoverAccessCommand($user))->run();
+	}
+
+	public function isRequestRecoverAccessSentAction(): ?bool
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return null;
+		}
+
+		$user = $this->getOtpSessionUser();
+		if (!$user || !$this->canUseRecoverAccessRequest($user))
+		{
+			return null;
+		}
+
+		return (new RecoverAccessRequestService())->isSent($user);
+	}
+
+	public function canSendRequestRecoverAccessAction(): ?bool
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return null;
+		}
+
+		$user = $this->getOtpSessionUser();
+		if (!$user || !$this->canUseRecoverAccessRequest($user))
+		{
+			return null;
+		}
+
+		return (new RecoverAccessRequestService())->canSend($user);
+	}
+
+	public function getRequestRecoverAccessStatusAction(): array
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return [];
+		}
+
+		$user = $this->getOtpSessionUser();
+		if (!$user || !$this->canUseRecoverAccessRequest($user))
+		{
+			return [];
+		}
+
+		$recoverAccessRequestService = new RecoverAccessRequestService();
+
+		return $recoverAccessRequestService->getStatus($user);
 	}
 
 	protected function getOtpSessionUser(): ?User
@@ -280,6 +349,19 @@ class Otp extends Controller
 		}
 
 		return $user;
+	}
+
+	private function canUseRecoverAccessRequest(User $user): bool
+	{
+		$currentUserId = (int)CurrentUser::get()->getId();
+		if ($currentUserId > 0 && !(new UserPermission($user))->canEdit())
+		{
+			$this->addError(new Error('No rights'));
+
+			return false;
+		}
+
+		return true;
 	}
 
 	/**

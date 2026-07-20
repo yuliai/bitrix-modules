@@ -2,7 +2,7 @@
 
 namespace Bitrix\BIConnector\Superset\Updater\Versions;
 
-use Bitrix\BIConnector\Integration\Superset\Integrator\Integrator;
+use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Repository\SupersetUserRepository;
@@ -70,7 +70,7 @@ final class Version2 extends BaseVersion
 			->fetchCollection()
 		;
 
-		$integrator = Integrator::getInstance();
+		$integrator = IntegratorFactory::getInstance();
 		foreach ($deprecatedDashboards as $dashboard)
 		{
 			if ($dashboard->getType() === SupersetDashboardTable::DASHBOARD_TYPE_SYSTEM)
