@@ -2,7 +2,6 @@
 
 namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
-use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Filter\AppliedFilters;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\UrlParameter\UrlParameters;
@@ -10,6 +9,14 @@ use Bitrix\Main\Loader;
 
 final class GetDashboardMetaTool extends BaseBiTool
 {
+	private const CHART_FIELDS = [
+		'id', 'name', 'kind', 'viz_label', 'tab_path', 'description', 'stats', 'stats_omitted', 'column_descriptions',
+	];
+
+	private const FILTER_FIELDS = [
+		'name', 'kind', 'column', 'default', 'passthrough', 'allowed_values',
+	];
+
 	public function getName(): string
 	{
 		return 'get_dashboard_meta';
@@ -93,7 +100,7 @@ final class GetDashboardMetaTool extends BaseBiTool
 		$callerFilters = $args['appliedFilters'] ?? [];
 		$urlParamOverrides = is_array($args['urlParams'] ?? null) ? $args['urlParams'] : [];
 
-		$loadResult = $this->loadDashboard($dashboardId, $userId);
+		$loadResult = $this->loadReadyDashboard($dashboardId, $userId);
 		if (!$loadResult->isSuccess())
 		{
 			throw self::toMcpException($loadResult);
@@ -137,7 +144,6 @@ final class GetDashboardMetaTool extends BaseBiTool
 			$externalId,
 			$supersetFilters,
 			$urlParams,
-			self::INTEGRATOR_TIMEOUT_SEC,
 		);
 		if ($response->hasErrors())
 		{
@@ -175,14 +181,23 @@ final class GetDashboardMetaTool extends BaseBiTool
 			];
 		}
 
+		// On big dashboards Superset stats only the first N charts; the rest come
+		// back as metadata with `stats_omitted`. Surface the count so the model
+		// knows to drill into the rest via get_chart_data.
+		if (isset($rawData['meta']['charts_with_stats']))
+		{
+			$meta['charts_with_stats'] = (int)$rawData['meta']['charts_with_stats'];
+			$meta['charts_total'] = (int)($rawData['meta']['charts_total'] ?? 0);
+		}
+
 		$result = [
 			'dashboard' => [
 				'id' => $dashboardId,
 				'title' => (string)$dashboard->getTitle(),
 			],
 			'caller_filters' => $callerFiltersEcho,
-			'charts' => $rawData['charts'] ?? [],
-			'available_filters' => $rawData['available_filters'] ?? [],
+			'charts' => self::pickAllowedFields($rawData['charts'] ?? [], self::CHART_FIELDS),
+			'available_filters' => self::pickAllowedFields($rawData['available_filters'] ?? [], self::FILTER_FIELDS),
 		];
 		if (!empty($meta))
 		{
@@ -192,6 +207,33 @@ final class GetDashboardMetaTool extends BaseBiTool
 		if (!empty($rawData['filter_coverage']))
 		{
 			$result['filter_coverage'] = $rawData['filter_coverage'];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * @param string[] $allowed
+	 */
+	private static function pickAllowedFields(array $items, array $allowed): array
+	{
+		$result = [];
+		foreach ($items as $item)
+		{
+			if (!is_array($item))
+			{
+				continue;
+			}
+
+			$picked = [];
+			foreach ($allowed as $field)
+			{
+				if (array_key_exists($field, $item))
+				{
+					$picked[$field] = $item[$field];
+				}
+			}
+			$result[] = $picked;
 		}
 
 		return $result;

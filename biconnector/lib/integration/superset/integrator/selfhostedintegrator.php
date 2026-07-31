@@ -2,6 +2,7 @@
 
 namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 
+use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\CultureFormatter;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\User;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorEventLogger;
@@ -14,7 +15,6 @@ use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\SelfHostedConnectionService;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable;
 use Bitrix\Main\Engine\CurrentUser;
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\Error;
 use Bitrix\Main\IO;
 use Bitrix\Main\Result;
@@ -48,6 +48,7 @@ use Bitrix\Superset\Public\Commands\User\DeactivateSupersetUserCommand;
 use Bitrix\Superset\Public\Commands\User\SetEmptySupersetUserRoleCommand;
 use Bitrix\Superset\Public\Commands\User\SyncSupersetUserProfileCommand;
 use Bitrix\Superset\Public\Commands\User\UpdateSupersetUserCommand;
+use Bitrix\Superset\Public\Providers\ChartProvider;
 use Bitrix\Superset\Public\Providers\DashboardProvider;
 use Bitrix\Superset\Public\Providers\DatasetProvider;
 use Bitrix\Superset\Public\Providers\UnusedElementsProvider;
@@ -351,14 +352,14 @@ class SelfHostedIntegrator implements IntegratorInterface
 	 */
 	public function getDashboardEmbeddedCredentials(int $dashboardId, array $rlsRules = [], int $expSeconds = 0): IntegratorResponse
 	{
-		$handler = function () use ($dashboardId, $rlsRules, $expSeconds): IntegratorResponse {
+		$handler = function (IntegratorRequest $request) use ($dashboardId, $rlsRules, $expSeconds): IntegratorResponse {
 			$server = $this->getServer();
 			if ($server === null)
 			{
 				return $this->buildServerNotConfiguredResponse();
 			}
 
-			$externalId = $this->getCurrentUserExternalId($server);
+			$externalId = $this->resolveRequestUserExternalId($request, $server);
 			if ($externalId === null)
 			{
 				return $this->buildErrorResponse(
@@ -854,6 +855,41 @@ class SelfHostedIntegrator implements IntegratorInterface
 		;
 	}
 
+	/**
+	 * @inheritDoc
+	 */
+	public function getChartList(array $ids): IntegratorResponse
+	{
+		if (empty($ids))
+		{
+			return $this->buildDataResponse([]);
+		}
+
+		$handler = function () use ($ids): IntegratorResponse {
+			$server = $this->getServer();
+			if ($server === null)
+			{
+				return $this->buildServerNotConfiguredResponse();
+			}
+
+			$result = (new ChartProvider($server))->list($ids);
+			if (!$result->isSuccess())
+			{
+				return $this->buildErrorResponse($result);
+			}
+
+			$data = $result->getData();
+
+			return $this->buildDataResponse($data['charts'] ?? []);
+		};
+
+		return $this
+			->createDefaultRequest('selfhosted/chart/list')
+			->setHandler($handler)
+			->perform()
+		;
+	}
+
 	// endregion
 
 	// region User
@@ -1142,6 +1178,41 @@ class SelfHostedIntegrator implements IntegratorInterface
 	// endregion
 
 	// region Dataset
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getDatasetList(array $ids): IntegratorResponse
+	{
+		if (empty($ids))
+		{
+			return $this->buildDataResponse([]);
+		}
+
+		$handler = function () use ($ids): IntegratorResponse {
+			$server = $this->getServer();
+			if ($server === null)
+			{
+				return $this->buildServerNotConfiguredResponse();
+			}
+
+			$result = (new DatasetProvider($server))->list($ids);
+			if (!$result->isSuccess())
+			{
+				return $this->buildErrorResponse($result);
+			}
+
+			$data = $result->getData();
+
+			return $this->buildDataResponse($data['datasets'] ?? []);
+		};
+
+		return $this
+			->createDefaultRequest('selfhosted/dataset/list')
+			->setHandler($handler)
+			->perform()
+		;
+	}
 
 	/**
 	 * @inheritDoc
@@ -1656,6 +1727,27 @@ class SelfHostedIntegrator implements IntegratorInterface
 		return $this->getSupersetUser($server, $bitrixUserId)?->getExternalId();
 	}
 
+	/**
+	 * Resolves the Superset external user id for the request.
+	 *
+	 * Prefers the user already resolved by the UserAccess middleware.
+	 *
+	 * @param IntegratorRequest $request
+	 * @param ServerReferenceDto $server
+	 *
+	 * @return int|null
+	 */
+	private function resolveRequestUserExternalId(IntegratorRequest $request, ServerReferenceDto $server): ?int
+	{
+		$user = $request->getUser();
+		if ($user !== null)
+		{
+			return $this->getSupersetUser($server, $user->id)?->getExternalId();
+		}
+
+		return $this->getCurrentUserExternalId($server);
+	}
+
 	private function getSupersetUser(ServerReferenceDto $server, int $bitrixUserId): ?SupersetUserReferenceDto
 	{
 		$biUser = SupersetUserTable::getList([
@@ -1730,7 +1822,7 @@ class SelfHostedIntegrator implements IntegratorInterface
 
 	private static function isAiToolsFeatureEnabled(): bool
 	{
-		return Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y';
+		return Feature::isBitrixGptBiConstructorEnabled();
 	}
 
 	private static function aiToolsDisabledResponse(): IntegratorResponse

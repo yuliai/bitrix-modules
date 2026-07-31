@@ -35,8 +35,10 @@ final class ScopeAccessibleValueProvider
 	{
 		return match ($code)
 		{
-			Parameter::WorkflowTemplateId => $this->workflowTemplateService->findAccessibleForUser($userId, $search, $limit, $offset),
-			Parameter::TasksFlowsFlowId => $this->tasksFlowService->findAccessibleForUser($userId, $search, $limit, $offset),
+			Parameter::WorkflowTemplateId => $this->workflowTemplateService
+				->findAccessibleForUser($userId, $search, $limit, $offset),
+			Parameter::TasksFlowsFlowId => $this->tasksFlowService
+				->findAccessibleForUser($userId, $search, $limit, $offset),
 			default => [],
 		};
 	}

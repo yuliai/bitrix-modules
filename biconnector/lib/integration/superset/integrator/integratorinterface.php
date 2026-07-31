@@ -219,6 +219,24 @@ interface IntegratorInterface
 	public function updateDashboard(int $dashboardId, array $editedFields): IntegratorResponse;
 
 	/**
+	 * Returns response with list of dataset info on successful request.
+	 * If response code is not OK - returns empty data.
+	 *
+	 * @param array $ids External ids of charts.
+	 * @return IntegratorResponse
+	 */
+	public function getChartList(array $ids): IntegratorResponse;
+
+	/**
+	 * Returns response with list of dataset info on successful request.
+	 * If response code is not OK - returns empty data.
+	 *
+	 * @param array $ids External ids of datasets.
+	 * @return IntegratorResponse
+	 */
+	public function getDatasetList(array $ids): IntegratorResponse;
+
+	/**
 	 * Sets owner for dashboard
 	 *
 	 * @param int $dashboardId

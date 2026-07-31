@@ -66,10 +66,10 @@ class Key extends Controller
 		$res = KeyManager::save(
 			[
 				'APP_ID' => $this->getAppId($server),
-				'CONNECTION' => $fields['CONNECTION'],
+				'CONNECTION' => $fields['CONNECTION'] ?? '',
 				'USER_ID' => $fields['USER_ID'],
 				'ACCESS_KEY' => $fields['ACCESS_KEY'] ?? '',
-				'ACTIVE' => $fields['ACTIVE'] === 'Y',
+				'ACTIVE' => ($fields['ACTIVE'] ?? 'N') === 'Y',
 			]
 		);
 		if ($res instanceof ErrorCollection)
@@ -377,6 +377,10 @@ class Key extends Controller
 	private function getAppId(\CRestServer $server): int
 	{
 		$clientId = $server->getClientId();
+		if ($clientId === null)
+		{
+			return 0;
+		}
 
 		$app = AppTable::getByClientId($clientId);
 

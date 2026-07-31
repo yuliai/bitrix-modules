@@ -6,13 +6,16 @@ namespace Bitrix\Intranet\Infrastructure\Controller;
 
 use Bitrix\Intranet\ActionFilter\AdminUser;
 use Bitrix\Intranet\CurrentUser;
+use Bitrix\Intranet\Entity\Type\Email;
 use Bitrix\Intranet\Entity\Type\Phone;
 use Bitrix\Intranet\Exception\UpdateFailedException;
 use Bitrix\Intranet\Internal\Access\Otp\UserPermission;
 use Bitrix\Intranet\Internal\Exception\SendException;
 use Bitrix\Intranet\Internal\Integration\Main\LogoutService;
 use Bitrix\Intranet\Internal\Integration\Main\OtpSigner;
+use Bitrix\Intranet\Internal\Integration\Main\VerifyEmailService;
 use Bitrix\Intranet\Internal\Integration\Main\VerifyPhoneService;
+use Bitrix\Intranet\Internal\Repository\BackupEmailConfirmationRepository;
 use Bitrix\Intranet\Internal\Integration\Security\PersonalOtp;
 use Bitrix\Intranet\Internal\Integration\Security\RecoveryCodes;
 use Bitrix\Intranet\Internal\Service\Otp\MobilePush;
@@ -52,6 +55,11 @@ class Otp extends Controller
 				],
 			],
 			'sendAuthSms' => [
+				'-prefilters' => [
+					'\Bitrix\Main\Engine\ActionFilter\Authentication',
+				],
+			],
+			'sendAuthEmail' => [
 				'-prefilters' => [
 					'\Bitrix\Main\Engine\ActionFilter\Authentication',
 				],
@@ -126,6 +134,13 @@ class Otp extends Controller
 				'phoneNumber',
 				function ($className, $phoneNumber) {
 					return new Phone($phoneNumber);
+				},
+			),
+			new ExactParameter(
+				Email::class,
+				'email',
+				function ($className, $email) {
+					return new Email($email);
 				},
 			),
 		];
@@ -476,6 +491,48 @@ class Otp extends Controller
 		}
 	}
 
+	public function changeAuthEmailAction(Email $email)
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return false;
+		}
+
+		return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
+	}
+
+	public function sendEmailConfirmationAction(Email $email)
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return [];
+		}
+
+		return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
+	}
+
+	/**
+	 * @throws SystemException|LoaderException
+	 */
+	public function confirmationEmailAction(string $code, string $signedData)
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return false;
+		}
+
+		return $this->forward(PushOtp::class, 'confirmEmail', [
+			'code' => $code,
+			'signedData' => $signedData,
+		]);
+	}
+
 	/**
 	 * @throws SystemException|LoaderException
 	 */
@@ -489,6 +546,21 @@ class Otp extends Controller
 		}
 
 		return $this->forward(PushOtp::class, 'sendSms');
+	}
+
+	/**
+	 * @throws SystemException|LoaderException
+	 */
+	public function sendAuthEmailAction(): ?array
+	{
+		if (!Loader::includeModule('security'))
+		{
+			$this->addError(new Error('Module Security is not installed'));
+
+			return [];
+		}
+
+		return $this->forward(PushOtp::class, 'sendEmail');
 	}
 
 	/**

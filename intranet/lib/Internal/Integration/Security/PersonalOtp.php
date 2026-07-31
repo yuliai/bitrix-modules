@@ -181,10 +181,16 @@ class PersonalOtp
 			'pullConfig' =>  $config['pullConfig'] ?? [],
 			'ttl' => 600,
 			'intent' => $intent,
+			'email' => $this->getBackupEmail(),
 			'phoneNumber' => $phoneAuthNumber,
 			'isPhoneNumberConfirmed' => $phoneConfirmed,
 			'signedUserId' => (new OtpSigner())->signUserId($this->user->getId()),
 		];
+	}
+
+	public function getBackupEmail(): ?string
+	{
+		return $this->getOtpByUser()->getEmail();
 	}
 
 	public function getDeeplink(string $intent, int $ttl = 600): string

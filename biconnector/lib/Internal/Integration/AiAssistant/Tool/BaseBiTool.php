@@ -23,12 +23,11 @@ use Bitrix\Main\Result;
 
 abstract class BaseBiTool extends ToolContract
 {
-	protected const INTEGRATOR_TIMEOUT_SEC = 50;
 	private const UNAVAILABLE_DASHBOARD_MESSAGE = 'Dashboard is temporarily unavailable. Try again in a moment, or pick another report.';
 
 	private static function isBiAvailable(): bool
 	{
-		if (Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') !== 'Y')
+		if (!Feature::isBitrixGptBiConstructorEnabled())
 		{
 			return false;
 		}
@@ -81,21 +80,9 @@ abstract class BaseBiTool extends ToolContract
 		return new AccessController($userId);
 	}
 
-	/**
-	 * Loads a dashboard for read access: existence + status + ACL + sync state.
-	 * On success, `getData()['dashboard']` holds the {@see SupersetDashboard}.
-	 * Real causes (status mismatch / no external_id) go to the AI tools event
-	 * log; the agent only sees a generic "unavailable" message.
-	 */
-	protected function loadDashboard(int $dashboardId, int $userId): Result
+	protected function loadViewableDashboard(int $dashboardId, int $userId): Result
 	{
 		$result = new Result();
-
-		$instanceStatus = SupersetInitializer::getSupersetStatus();
-		if ($instanceStatus !== SupersetInitializer::SUPERSET_STATUS_READY)
-		{
-			return $this->handleInstanceNotReady($instanceStatus, $dashboardId, $userId);
-		}
 
 		$dashboard = SupersetDashboardTable::getById($dashboardId)->fetchObject();
 		if (!$dashboard)
@@ -108,6 +95,26 @@ abstract class BaseBiTool extends ToolContract
 		{
 			return $result->addError(new Error('Access denied.', 'access_denied'));
 		}
+
+		return $result->setData(['dashboard' => $dashboard]);
+	}
+
+	protected function loadReadyDashboard(int $dashboardId, int $userId): Result
+	{
+		$result = new Result();
+
+		$instanceStatus = SupersetInitializer::getSupersetStatus();
+		if ($instanceStatus !== SupersetInitializer::SUPERSET_STATUS_READY)
+		{
+			return $this->handleInstanceNotReady($instanceStatus, $dashboardId, $userId);
+		}
+
+		$accessResult = $this->loadViewableDashboard($dashboardId, $userId);
+		if (!$accessResult->isSuccess())
+		{
+			return $accessResult;
+		}
+		$dashboard = $accessResult->getData()['dashboard'];
 
 		$status = $dashboard->getStatus();
 		$installableStatuses = [
@@ -146,11 +153,7 @@ abstract class BaseBiTool extends ToolContract
 				['stage' => 'load_dashboard.status', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
 			);
 
-			$message = self::UNAVAILABLE_DASHBOARD_MESSAGE;
-			if (Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y')
-			{
-				$message .= ' | bi_debug: ' . $detail;
-			}
+			$message = self::appendDebugDetail(self::UNAVAILABLE_DASHBOARD_MESSAGE, $detail);
 
 			return $result->addError(new Error($message, 'dashboard_unavailable'));
 		}
@@ -163,11 +166,7 @@ abstract class BaseBiTool extends ToolContract
 				['stage' => 'load_dashboard.no_external_id', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
 			);
 
-			$message = self::UNAVAILABLE_DASHBOARD_MESSAGE;
-			if (Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y')
-			{
-				$message .= ' | bi_debug: ' . $detail;
-			}
+			$message = self::appendDebugDetail(self::UNAVAILABLE_DASHBOARD_MESSAGE, $detail);
 
 			return $result->addError(new Error($message, 'dashboard_unavailable'));
 		}
@@ -216,11 +215,7 @@ abstract class BaseBiTool extends ToolContract
 			],
 		);
 
-		$message = 'BI is temporarily unavailable. Try again later.';
-		if (Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y')
-		{
-			$message .= ' | bi_debug: ' . $detail;
-		}
+		$message = self::appendDebugDetail('BI is temporarily unavailable. Try again later.', $detail);
 
 		return $result->addError(new Error($message, 'bi_unavailable'));
 	}
@@ -248,19 +243,40 @@ abstract class BaseBiTool extends ToolContract
 	 * Wrap an Integrator failure in a generic agent-facing message + a detailed
 	 * event log entry. Real cause never leaks to the LLM context.
 	 *
+	 * Logged at WARNING, not ERROR: a failure to read data from Superset is not
+	 * something this module can fix (it is a downstream/transient condition — e.g.
+	 * a just-installed report whose charts are not queryable yet), so it must not
+	 * raise error-level noise. Genuine module-side problems (bad dashboard status,
+	 * instance error) are still logged as errors from their own call sites.
+	 *
 	 * @param \Bitrix\Main\Error[] $errors
 	 */
 	protected static function unavailableDashboardException(array $errors, array $context): McpException
 	{
-		AiToolsLogger::logErrors($errors, $context);
+		AiToolsLogger::logWarning($errors, $context);
 
 		$message = self::UNAVAILABLE_DASHBOARD_MESSAGE;
-		if (Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y')
+		if (self::isDebugLogEnabled())
 		{
 			$details = implode('; ', array_map(static fn(Error $e): string => $e->getMessage(), $errors));
 			$message .= ' | bi_debug: ' . $details . ' | ctx: ' . json_encode($context, JSON_UNESCAPED_UNICODE);
 		}
 
 		return new McpException($message);
+	}
+
+	private static function isDebugLogEnabled(): bool
+	{
+		return Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y';
+	}
+
+	private static function appendDebugDetail(string $message, string $detail): string
+	{
+		if (self::isDebugLogEnabled())
+		{
+			$message .= ' | bi_debug: ' . $detail;
+		}
+
+		return $message;
 	}
 }

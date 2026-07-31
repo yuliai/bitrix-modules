@@ -1091,7 +1091,12 @@ class CIntranetEventHandlers
 
 			if (!IsModuleInstalled('bitrix24'))
 			{
-				CIntranetNotify::NewUserMessage($arUser['ID']);
+				$userId = (int)$arUser['ID'];
+				\Bitrix\Main\Application::getInstance()->addBackgroundJob(
+					static function () use ($userId): void {
+						CIntranetNotify::NewUserMessage($userId);
+					}
+				);
 			}
 
 			$processedIdListIblock[] = $arUser['ID'];
@@ -1211,7 +1216,12 @@ class CIntranetEventHandlers
 				&& !IsModuleInstalled('bitrix24')
 			)
 			{
-				CIntranetNotify::NewUserMessage($fields['ID']);
+				$userId = (int)$fields['ID'];
+				\Bitrix\Main\Application::getInstance()->addBackgroundJob(
+					static function () use ($userId): void {
+						CIntranetNotify::NewUserMessage($userId);
+					}
+				);
 			}
 		}
 	}

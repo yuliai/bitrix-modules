@@ -2,6 +2,7 @@
 
 namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 
+use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\CultureFormatter;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\User;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorEventLogger;
@@ -71,6 +72,8 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_SET_SUBSCRIPTION_REQUIRE = '/subscription/require';
 	private const PROXY_ACTION_GET_DASHBOARD_OVERVIEW = '/dashboard/getOverview';
 	private const PROXY_ACTION_GET_FILTER_VALUES = '/dashboard/getFilterValues';
+	private const PROXY_ACTION_LIST_CHART = '/chart/list';
+	private const PROXY_ACTION_LIST_DATASET = '/dataset/list';
 
 	private const PROXY_EXTENDED_STREAM_TIMEOUT = 90;
 	static private self $instance;
@@ -441,12 +444,13 @@ class ProxyIntegrator implements IntegratorInterface
 			return $response;
 		}
 
-		$dashboardName = SupersetDashboardTable::getRow([
+		$dashboardRow = SupersetDashboardTable::getRow([
 			'select' => ['TITLE'],
 			'filter' => [
 				'=EXTERNAL_ID' => $dashboardId,
 			],
-		])['TITLE'];
+		]);
+		$dashboardName = $dashboardRow['TITLE'] ?? 'dashboard';
 		$fileName = $dashboardName . '.zip';
 
 		$filePath = \CTempFile::GetFileName(md5(uniqid('bic', true)));
@@ -843,6 +847,74 @@ class ProxyIntegrator implements IntegratorInterface
 	/**
 	 * @inheritDoc
 	 */
+	public function getChartList(array $ids): IntegratorResponse
+	{
+		if (empty($ids))
+		{
+			return new IntegratorResponse(
+				status: IntegratorResponse::STATUS_OK,
+				data: [],
+			);
+		}
+
+		$requestParams = [
+			'ids' => $ids,
+		];
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_CHART)
+				->setParams($requestParams)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		return $response->setData($resultData['charts'] ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getDatasetList(array $ids): IntegratorResponse
+	{
+		if (empty($ids))
+		{
+			return new IntegratorResponse(
+				status: IntegratorResponse::STATUS_OK,
+				data: [],
+			);
+		}
+
+		$requestParams = [
+			'ids' => $ids,
+		];
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_DATASET)
+				->setParams($requestParams)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		return $response->setData($resultData['datasets'] ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
 	public function getDatasetById(int $id): IntegratorResponse
 	{
 		$requestParams = [
@@ -1183,7 +1255,7 @@ class ProxyIntegrator implements IntegratorInterface
 
 	private static function isAiToolsFeatureEnabled(): bool
 	{
-		return Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y';
+		return Feature::isBitrixGptBiConstructorEnabled();
 	}
 
 	private static function aiToolsDisabledResponse(): IntegratorResponse

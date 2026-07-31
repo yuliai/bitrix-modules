@@ -8,6 +8,10 @@ use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardTagProvide
 use Bitrix\BIConnector\Integration\UI\EntitySelector\UnlinkedSupersetDashboardProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetGroupProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetScopeProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\UsageStatChartProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\UsageStatDashboardProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\UsageStatDatasetProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\UsageStatSourceProvider;
 use Bitrix\Biconnector\Internal\Integration\Im\DashboardDiscussionChatAccessSyncService;
 use Bitrix\Biconnector\Internal\Integration\Im\DashboardDiscussionChatService;
 use Bitrix\Biconnector\Public\Provider\DashboardDetailInfoProvider;
@@ -20,6 +24,10 @@ use Bitrix\BIConnector\Public\Provider\ShareProvider;
 use Bitrix\BIConnector\Public\Provider\ScopeAccessibleValueProvider;
 use Bitrix\Main\Config\Option;
 
+// Parsed by Configuration::load() before the biconnector module is included, so the gate
+// must read the option directly: biconnector classes (Feature) aren't autoloadable here yet,
+// and referencing one breaks extension loading portal-wide. Mirrors
+// Feature::isBitrixGptBiConstructorEnabled().
 $biDashboardsToolSets = Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y'
 	? [BiDashboardsToolSet::class]
 	: [];
@@ -134,6 +142,34 @@ return [
 					'provider' => [
 						'moduleId' => 'biconnector',
 						'className' => SupersetGroupProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-usage-stat-dashboard',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => UsageStatDashboardProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-usage-stat-chart',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => UsageStatChartProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-usage-stat-dataset',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => UsageStatDatasetProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-usage-stat-source',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => UsageStatSourceProvider::class,
 					],
 				],
 			],

@@ -10,7 +10,7 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
 
-final class WorkflowTemplateAccessibilityService
+class WorkflowTemplateAccessibilityService
 {
 	/**
 	 * @param array<string, string> $orderBy ORM order applied in SQL.

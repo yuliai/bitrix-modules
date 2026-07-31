@@ -56,6 +56,12 @@ final class Version2 extends BaseVersion
 		}
 		$adminUserId = (int)$user['USER_ID'];
 		$user = (new SupersetUserRepository())->getById($adminUserId);
+		if ($user === null)
+		{
+			$result->addError(new Main\Error("Admin user {$adminUserId} was not found in Superset."));
+
+			return $result;
+		}
 
 		$deprecatedDashboards = SupersetDashboardTable::getList([
 			'select' => ['*', 'APP'],

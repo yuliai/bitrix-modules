@@ -6,10 +6,15 @@ namespace Bitrix\Intranet\Internal\Integration\Humanresources;
 
 use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Internals\Service\Container as HumanResourcesContainer;
+use Bitrix\HumanResources\Model\NodeTable;
+use Bitrix\HumanResources\Model\NodeMemberRoleTable;
+use Bitrix\HumanResources\Model\NodeMemberTable;
+use Bitrix\HumanResources\Model\RoleTable;
 use Bitrix\HumanResources\Public\Service\Container as HumanResourcesPublicContainer;
 use Bitrix\HumanResources\Type\MemberEntityType;
 use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\Main\Loader;
+use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
@@ -36,8 +41,11 @@ final class UserQueryModifier
 		}
 
 		$this->injectUserNodeSortJoin($query);
+		$this->injectDepartmentPrioritySort($query, $userId);
+		$this->injectRolePrioritySort($query);
+		$this->addUserGroup($query);
 
-		return HumanResourcesContainer::getNodeMemberRepository()->injectUserNodeSort($query, $userId);
+		return $query;
 	}
 
 	public function createEmployeeUserIdQuery(?array $nodeIds = null): ?Query
@@ -163,7 +171,7 @@ final class UserQueryModifier
 
 	private function injectUserNodeSortJoin(Query $query): void
 	{
-		$departmentNodeIdQuery = \Bitrix\HumanResources\Model\NodeTable::query()
+		$departmentNodeIdQuery = NodeTable::query()
 			->setSelect(['ID'])
 			->where('TYPE', NodeEntityType::DEPARTMENT->value)
 		;
@@ -179,6 +187,80 @@ final class UserQueryModifier
 				['join_type' => Join::TYPE_LEFT],
 			),
 		);
+	}
+
+	private function injectDepartmentPrioritySort(Query $query, int $userId): void
+	{
+		$nodeIds = $this->getUserDepartmentNodeIds($userId);
+		if (empty($nodeIds))
+		{
+			return;
+		}
+
+		$query->registerRuntimeField(
+			new ExpressionField(
+				'USER_NODE_DEPT_PRIORITY',
+				'MIN(CASE WHEN %s IN (' . implode(',', $nodeIds) . ') THEN 0 ELSE 1 END)',
+				['USER_NODE_MEMBER.NODE_ID'],
+			),
+		);
+		$query->addOrder('USER_NODE_DEPT_PRIORITY', 'ASC');
+	}
+
+	private function injectRolePrioritySort(Query $query): void
+	{
+		$query->registerRuntimeField(
+			new Reference(
+				'USER_NODE_MEMBER_ROLE_REF',
+				NodeMemberRoleTable::class,
+				Join::on('this.USER_NODE_MEMBER.ID', 'ref.MEMBER_ID'),
+				['join_type' => Join::TYPE_LEFT],
+			),
+		);
+
+		$query->registerRuntimeField(
+			new Reference(
+				'USER_NODE_ROLE_REF',
+				RoleTable::class,
+				Join::on('this.USER_NODE_MEMBER_ROLE_REF.ROLE_ID', 'ref.ID'),
+				['join_type' => Join::TYPE_LEFT],
+			),
+		);
+
+		$query->registerRuntimeField(
+			new ExpressionField(
+				'USER_NODE_ROLE_PRIORITY',
+				'MAX(%s)',
+				['USER_NODE_ROLE_REF.PRIORITY'],
+			),
+		);
+		$query->addOrder('USER_NODE_ROLE_PRIORITY', 'DESC');
+	}
+
+	private function getUserDepartmentNodeIds(int $userId): array
+	{
+		$rows = NodeMemberTable::query()
+			->setSelect(['NODE_ID'])
+			->where('ENTITY_TYPE', MemberEntityType::USER->value)
+			->where('ENTITY_ID', $userId)
+			->where('ACTIVE', 'Y')
+			->where('NODE.TYPE', NodeEntityType::DEPARTMENT->value)
+			->setGroup(['NODE_ID'])
+			->fetchAll()
+		;
+
+		return array_map(
+			static fn(array $row): int => (int)$row['NODE_ID'],
+			$rows,
+		);
+	}
+
+	private function addUserGroup(Query $query): void
+	{
+		if (!in_array('ID', $query->getGroup(), true))
+		{
+			$query->addGroup('ID');
+		}
 	}
 
 	private function getSubQueryCacheKey(?array $nodeIds): string

@@ -64,8 +64,7 @@ final class UrlParameters
 				if (is_string($rawOverride) && !preg_match('/^-?\d+$/', $rawOverride))
 				{
 					return $result->addError(new Error(
-						'Invalid url parameter `' . $parameter->code() . '`: '
-						. '"' . $rawOverride . '" is not a numeric id.',
+						"Invalid url parameter `{$parameter->code()}`: \"{$rawOverride}\" is not a numeric id.",
 						'invalid_url_parameter_format',
 					));
 				}
@@ -115,13 +114,13 @@ final class UrlParameters
 			}
 			$parameter = Parameter::from($param['CODE']);
 
-			$values = ScopeMap::listParameterValues($parameter, $this->userId, $search, self::SCOPE_VALUE_LIMIT, $offset);
+			[$values, $hasMore] = $this->getScopeValues($parameter, $search, $offset);
 			$parameters[] = [
 				'paramCode' => $parameter->code(),
 				'paramTitle' => $parameter->title(),
 				'availableValues' => $values,
 				'offset' => $offset,
-				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
+				'hasMore' => $hasMore,
 			];
 		}
 
@@ -167,13 +166,31 @@ final class UrlParameters
 		return $parameter !== null && !in_array($parameter, ScopeMap::getGlobals(), true);
 	}
 
+	private function getScopeValues(
+		Parameter $parameter,
+		?string $search = null,
+		int $offset = 0
+	): array
+	{
+		$values = ScopeMap::listParameterValues(
+			$parameter,
+			$this->userId,
+			$search,
+			self::SCOPE_VALUE_LIMIT + 1,
+			$offset,
+		);
+
+		$hasMore = count($values) > self::SCOPE_VALUE_LIMIT;
+
+		return [array_slice($values, 0, self::SCOPE_VALUE_LIMIT), $hasMore];
+	}
+
 	private function buildInvalidUrlParamError(Parameter $parameter, int $invalidId): Error
 	{
-		$values = ScopeMap::listParameterValues($parameter, $this->userId, null, self::SCOPE_VALUE_LIMIT);
+		[$values, $hasMore] = $this->getScopeValues($parameter);
 
 		return new Error(
-			'Invalid url parameter `' . $parameter->code() . '` ('
-			. $parameter->title() . '): id ' . $invalidId . ' not found or not accessible.',
+			"Invalid url parameter `{$parameter->code()}` ({$parameter->title()}): id {$invalidId} not found or not accessible.",
 			'invalid_url_parameter',
 			[
 				'error' => 'invalid_url_parameter',
@@ -181,7 +198,7 @@ final class UrlParameters
 				'paramTitle' => $parameter->title(),
 				'invalidId' => $invalidId,
 				'availableValues' => $values,
-				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
+				'hasMore' => $hasMore,
 				'instruction' => 'The supplied id does not match any entity accessible to this user. '
 					. 'Show `availableValues` (id + name) to the user, ask which one to use, '
 					. 'then retry with the correct urlParams value. If `hasMore` is true, narrow the '
@@ -192,18 +209,17 @@ final class UrlParameters
 
 	private function buildMissingUrlParamError(Parameter $parameter): Error
 	{
-		$values = ScopeMap::listParameterValues($parameter, $this->userId, null, self::SCOPE_VALUE_LIMIT);
+		[$values, $hasMore] = $this->getScopeValues($parameter);
 
 		return new Error(
-			'Missing required url parameter `' . $parameter->code() . '` ('
-			. $parameter->title() . ').',
+			"Missing required url parameter `{$parameter->code()}` ({$parameter->title()}).",
 			'missing_url_parameter',
 			[
 				'error' => 'missing_url_parameter',
 				'paramCode' => $parameter->code(),
 				'paramTitle' => $parameter->title(),
 				'availableValues' => $values,
-				'hasMore' => count($values) === self::SCOPE_VALUE_LIMIT,
+				'hasMore' => $hasMore,
 				'instruction' => 'This dashboard is parameterized and cannot be loaded without a specific entity. '
 					. 'Show `availableValues` (id + name) to the user, ask which one to analyze, '
 					. 'then retry the tool with urlParams: {"' . $parameter->code() . '": <id>}. '

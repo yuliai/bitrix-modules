@@ -38,6 +38,7 @@ final class SearchDashboardParametersTool extends BaseBiTool
 				],
 				'search' => [
 					'type' => 'string',
+					'maxLength' => 200,
 					'description' => 'Optional case-insensitive substring to narrow each parameter\'s '
 						. 'availableValues by name. Use when the user named the entity (e.g. a specific '
 						. 'flow or template) or the full list would be too long. Omit to get the full list.',
@@ -63,7 +64,7 @@ final class SearchDashboardParametersTool extends BaseBiTool
 		$search = isset($args['search']) ? (string)$args['search'] : null;
 		$offset = isset($args['offset']) ? max(0, (int)$args['offset']) : 0;
 
-		$loadResult = $this->loadDashboard($dashboardId, $userId);
+		$loadResult = $this->loadViewableDashboard($dashboardId, $userId);
 		if (!$loadResult->isSuccess())
 		{
 			throw self::toMcpException($loadResult);

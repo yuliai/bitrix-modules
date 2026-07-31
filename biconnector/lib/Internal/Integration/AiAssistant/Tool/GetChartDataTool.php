@@ -14,7 +14,13 @@ final class GetChartDataTool extends BaseBiTool
 {
 	private const ROW_LIMIT_DEFAULT = 20;
 	private const ROW_LIMIT_MAX = 300;
-	private const MAX_CHARTS_PER_CALL = 3;
+	private const MAX_CHARTS_PER_CALL = 5;
+
+	private const CHART_FIELDS = [
+		'id', 'name', 'kind', 'viz_label', 'tab_path', 'description',
+		'column_descriptions', 'stats', 'slice_stable',
+		'columns', 'data', 'offset', 'row_limit', 'total_rows', 'has_more',
+	];
 
 	public function getName(): string
 	{
@@ -154,7 +160,7 @@ final class GetChartDataTool extends BaseBiTool
 
 		$dashboardId = (int)$args['dashboardId'];
 
-		$loadResult = $this->loadDashboard($dashboardId, $userId);
+		$loadResult = $this->loadReadyDashboard($dashboardId, $userId);
 		if (!$loadResult->isSuccess())
 		{
 			throw self::toMcpException($loadResult);
@@ -254,11 +260,10 @@ final class GetChartDataTool extends BaseBiTool
 			$externalId,
 			$supersetFilters,
 			$urlParams,
-			self::INTEGRATOR_TIMEOUT_SEC,
-			$requestedChartIds,
-			$sort,
-			$rowLimit,
-			$offset,
+			chartIds: $requestedChartIds,
+			sort: $sort,
+			limit: $rowLimit,
+			offset: $offset,
 		);
 		if ($response->hasErrors())
 		{
@@ -312,13 +317,16 @@ final class GetChartDataTool extends BaseBiTool
 
 			if (isset($chart['error']) && is_string($chart['error']) && $chart['error'] !== '')
 			{
-				$chartName = $chart['name'] ?? $chart['slice_name'] ?? '';
-				throw new McpException(sprintf(
-					'Chart %d%s: %s',
-					$chartId,
-					$chartName !== '' ? ' ("' . $chartName . '")' : '',
-					$chart['error'],
-				));
+				throw self::unavailableDashboardException(
+					[new \Bitrix\Main\Error($chart['error'])],
+					[
+						'stage' => 'get_chart_data.chart_error',
+						'dashboard_id' => $dashboardId,
+						'user_id' => $userId,
+						'chart_id' => $chartId,
+						'chart_name' => $chart['name'] ?? $chart['slice_name'] ?? '',
+					],
+				);
 			}
 
 			$matchedCharts[] = $chart;
@@ -353,6 +361,7 @@ final class GetChartDataTool extends BaseBiTool
 		$config = new TransformerConfig();
 		$config->appliedFilters = $humanFilters;
 		$config->preserveChartIds = true;
+		$config->chartFields = self::CHART_FIELDS;
 
 		$transformer = new DashboardDataTransformer($config);
 		$result = $transformer->transform($filteredData);

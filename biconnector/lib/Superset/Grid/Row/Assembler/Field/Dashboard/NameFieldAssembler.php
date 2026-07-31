@@ -119,7 +119,7 @@ class NameFieldAssembler extends DetailLinkFieldAssembler
 				. 'openFrom=grid'
 			;
 
-			if (!MarketAccessManager::getInstance()->isDashboardAvailableByType($value['TYPE']))
+			if (!MarketAccessManager::getInstance()->isDashboardAvailableByType($value['TYPE'] ?? ''))
 			{
 				$link = "
 					<div style='display: flex; align-items: center;'>

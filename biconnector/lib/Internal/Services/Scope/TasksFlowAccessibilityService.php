@@ -6,7 +6,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Tasks\Flow\Provider\FlowProvider;
 use Bitrix\Tasks\Flow\Provider\Query\ExpandedFlowQuery;
 
-final class TasksFlowAccessibilityService
+class TasksFlowAccessibilityService
 {
 	/**
 	 * @param array<string, string> $orderBy ORM order applied in SQL.

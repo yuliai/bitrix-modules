@@ -33,6 +33,7 @@ use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Result;
 use Bitrix\Main\Error;
+use Bitrix\Main\Event;
 use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Rest\AppTable;
 
@@ -54,6 +55,7 @@ final class SupersetInitializer
 	public const ENABLE_MODE_RESET = 'reset';
 
 	public const ERROR_DELETE_INSTANCE_OPTION = 'error_superset_delete_instance';
+	public const EVENT_ON_AFTER_SUPERSET_STATUS_CHANGE = 'onAfterSupersetStatusChange';
 
 	private const SUPERSET_CLEAN_TIMESTAMP_OPTION = 'superset_clean_timestamp';
 	private const SUPERSET_CLEAN_TIMEOUT_OPTION = 'superset_clean_timeout';
@@ -262,6 +264,8 @@ final class SupersetInitializer
 
 	public static function setSupersetStatus(string $status): void
 	{
+		$oldStatus = self::getSupersetStatus();
+
 		SupersetInitializerLogger::logInfo('Superset status changed to ' . $status);
 		if (!isset(self::$statusContainer))
 		{
@@ -269,6 +273,18 @@ final class SupersetInitializer
 		}
 
 		self::$statusContainer->set($status);
+
+		if ($oldStatus !== $status)
+		{
+			(new Event(
+				'biconnector',
+				self::EVENT_ON_AFTER_SUPERSET_STATUS_CHANGE,
+				[
+					'oldStatus' => $oldStatus,
+					'status' => $status,
+				]
+			))->send();
+		}
 	}
 
 	public static function getSupersetStatus(): string
@@ -320,6 +336,19 @@ final class SupersetInitializer
 				self::onLimitExceeded(...$response->getErrors());
 				$status = self::SUPERSET_STATUS_LIMIT_EXCEEDED;
 			}
+			elseif (self::isInstanceUnavailableStartupStatus($responseStatus))
+			{
+				// A deactivated/unreachable instance can't finish startup yet: the proxy reports it as a
+				// frozen instance (DEACTIVATED_INSTANCE) or a gateway error (502/503/504, sometimes as an
+				// unparsable Bad Gateway page). Keep LOAD — the portal is waiting for reactivation —
+				// instead of flipping to ERROR and re-registering. Mirrors the data-path FROZEN→LOAD
+				// mapping done by StatusArbiter.
+				SupersetInitializerLogger::logInfo(
+					'Superset instance unavailable on startup, keep waiting',
+					['response_status' => $responseStatus],
+				);
+				$status = self::SUPERSET_STATUS_LOAD;
+			}
 			else
 			{
 				self::onUnsuccessfulSupersetStartup(...$response->getErrors());
@@ -334,6 +363,20 @@ final class SupersetInitializer
 		}
 
 		return $status;
+	}
+
+	/**
+	 * Startup response statuses that mean "instance is not reachable yet" rather than a genuine failure:
+	 * a deactivated (frozen) instance or a gateway-level error. Such a startup must keep the portal in
+	 * LOAD (waiting for reactivation), not flip it to ERROR.
+	 */
+	private static function isInstanceUnavailableStartupStatus(int $responseStatus): bool
+	{
+		return $responseStatus === IntegratorResponse::STATUS_FROZEN // 555 - deactivated instance
+			|| $responseStatus === 502 // Bad Gateway
+			|| $responseStatus === 503 // Service Unavailable
+			|| $responseStatus === 504 // Gateway Timeout
+		;
 	}
 
 	public static function isSupersetReady(): bool

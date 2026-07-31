@@ -2,13 +2,17 @@
 
 use Bitrix\Disk\Document\OnlyOffice\Bitrix24Scenario;
 use Bitrix\Disk\Document\OnlyOffice\ExporterBitrix24Scenario;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Promo\IncreaseLimitRequestMessageResolver;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Promo\Interface\IncreaseLimitRequestMessageResolverInterface;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Promo\NullIncreaseLimitRequestMessageResolver;
 use Bitrix\Disk\QuickAccess;
 use Bitrix\Disk\QuickAccess\Config\ConfigInterface;
 use Bitrix\Disk\QuickAccess\FileInfo\ProviderFactory;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Extension;
 
-\Bitrix\Main\Loader::registerAutoLoadClasses(
+Loader::registerAutoLoadClasses(
 	"disk",
 	array(
 		"disk" => "install/index.php",
@@ -181,5 +185,16 @@ ServiceLocator::getInstance()->addInstanceLazy('disk.fileDataParameterService', 
 			$userTokenManager,
 			$quickAccessReadinessChecker,
 		);
+	},
+]);
+
+ServiceLocator::getInstance()->addInstanceLazy(IncreaseLimitRequestMessageResolverInterface::class, [
+	'constructor' => static function () {
+		if (!Loader::includeModule('humanresources') || !Loader::includeModule('im'))
+		{
+			return ServiceLocator::getInstance()->get(NullIncreaseLimitRequestMessageResolver::class);
+		}
+
+		return ServiceLocator::getInstance()->get(IncreaseLimitRequestMessageResolver::class);
 	},
 ]);
