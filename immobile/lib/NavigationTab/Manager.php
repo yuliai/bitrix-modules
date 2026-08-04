@@ -32,6 +32,7 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Query\Filter\Helper;
 use Bitrix\Im\V2\Integration\AI\EngineManager;
+use Bitrix\Im\V2\Integration\AI\SuggestProvider;
 
 class Manager
 {
@@ -389,6 +390,7 @@ class Manager
 				'IMOL_CHAT_ANSWER_F' => Localize::get(Localize::FILE_LIB_CHAT, "IMOL_CHAT_ANSWER_F"),
 				'AI_ASSISTANT' => $this->getAiAssistantStatusMessages(),
 				'NAVIGATION_TAB_TITLES' => $this->getNavigationTabTitles(),
+				'COPILOT_SUGGESTS' => $this->getCopilotSuggests(),
 			],
 			'IS_CLOUD' => $isCloud,
 			'HAS_ACTIVE_CLOUD_STORAGE_BUCKET' => $hasActiveBucket,
@@ -426,6 +428,7 @@ class Manager
 			'COPILOT_DATA' => $copilot,
 			'COPILOT_AVAILABLE_ENGINES' => $this->getAvailableEngines(),
 			'COPILOT_BOT_NAME' => $this->getCopilotBotName(),
+			'COPILOT_AGENT_NAME' => $this->getCopilotAgentName(),
 		];
 	}
 
@@ -584,6 +587,16 @@ class Manager
 		return StatusMessageProvider::get(Platform::MOBILE);
 	}
 
+	private function getCopilotSuggests(): array
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return [];
+		}
+
+		return SuggestProvider::getList();
+	}
+
 	private function getCopilotData(): ?array
 	{
 		$copilotId = \Bitrix\Im\V2\Integration\AI\AIHelper::getCopilotBotId();
@@ -615,5 +628,15 @@ class Manager
 		}
 
 		return CopilotNameResolver::getInstance()->getName();
+	}
+
+	private function getCopilotAgentName(): string
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return '';
+		}
+
+		return CopilotNameResolver::getInstance()->getAgentName();
 	}
 }

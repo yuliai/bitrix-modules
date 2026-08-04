@@ -336,14 +336,15 @@
                         "node": {
                             "type": "simple",
                             "title": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_TITLE_2###",
-                            "colorIndex": 2,
+                            "colorIndex": 8,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "SETTINGS",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": -1
                         }
                     }
                 },
@@ -381,9 +382,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "AI_ROBOT",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -423,9 +425,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CALL_BACK",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -465,9 +468,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CALL_BACK",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -507,9 +511,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CALL_BACK",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -549,9 +554,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CALL_BACK",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -599,9 +605,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "PHONE_OUT",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -649,9 +656,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "PHONE_OUT",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -699,9 +707,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "PHONE_OUT",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -749,9 +758,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "PHONE_OUT",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -762,6 +772,7 @@
                     "Properties": {
                         "BookingMessageId": "{=A1173_1746_8725_3959:BookingMessageId}",
                         "CallResult": "{=A4046_4344_6041_7435:Result}",
+                        "CallResultCode": "{=A4046_4344_6041_7435:ResultCode}",
                         "Title": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_TITLE_9###",
                         "EditorComment": ""
                     },
@@ -799,9 +810,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -812,6 +824,7 @@
                     "Properties": {
                         "BookingMessageId": "{=A1434_4869_8745_7569:BookingMessageId}",
                         "CallResult": "{=A6541_4383_8073_5722:Result}",
+                        "CallResultCode": "{=A6541_4383_8073_5722:ResultCode}",
                         "Title": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_TITLE_9###",
                         "EditorComment": ""
                     },
@@ -849,9 +862,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -862,6 +876,7 @@
                     "Properties": {
                         "BookingMessageId": "{=A6461_2711_9056_1649:BookingMessageId}",
                         "CallResult": "{=A2157_6333_3481_4770:Result}",
+                        "CallResultCode": "{=A2157_6333_3481_4770:ResultCode}",
                         "Title": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_TITLE_9###",
                         "EditorComment": ""
                     },
@@ -899,9 +914,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -912,6 +928,7 @@
                     "Properties": {
                         "BookingMessageId": "{=A7591_6910_3837_5969:BookingMessageId}",
                         "CallResult": "{=A3921_1088_5120_7721:Result}",
+                        "CallResultCode": "{=A3921_1088_5120_7721:ResultCode}",
                         "Title": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_TITLE_9###",
                         "EditorComment": ""
                     },
@@ -949,9 +966,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "",
-                            "updated": 1777388585395,
-                            "published": 1777388585395,
-                            "shouldShowAuxPorts": false
+                            "updated": 1780064897722,
+                            "published": 1780064897722,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 }

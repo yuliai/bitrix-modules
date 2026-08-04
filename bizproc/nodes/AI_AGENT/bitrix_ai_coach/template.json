@@ -107,11 +107,6 @@
                         1770978412313
                     ],
                     [
-                        "A9692_4897_2126_2020:o0",
-                        "A9433_3697_1811_2293:i0",
-                        1770978412313
-                    ],
-                    [
                         "A9433_3697_1811_2293:o0",
                         "A9833_6990_1088_4471:i0",
                         1770978412313
@@ -165,6 +160,36 @@
                         "A4306_9994_2013_8543:o0",
                         "A2636_8739_1696_8052:i0",
                         1770978412313
+                    ],
+                    [
+                        "A4769_8071_8996_8194:o0",
+                        "A7174_1517_6335_9991:i0",
+                        1778847017050
+                    ],
+                    [
+                        "A7174_1517_6335_9991:o1",
+                        "A9433_3697_1811_2293:i0",
+                        1778847026233
+                    ],
+                    [
+                        "A7464_6478_5578_9056:o0",
+                        "A5729_2840_7945_3020:i0",
+                        1778847413905
+                    ],
+                    [
+                        "A5729_2840_7945_3020:o1",
+                        "A1096_4690_2822_9024:i0",
+                        1778847480522
+                    ],
+                    [
+                        "A5729_2840_7945_3020:o1",
+                        "A3337_2356_9644_8538:i0",
+                        1778848685345
+                    ],
+                    [
+                        "A1096_4690_2822_9024:o1",
+                        "A3840_3496_6346_9703:i0",
+                        1778848691828
                     ]
                 ]
             },
@@ -188,8 +213,8 @@
                         "id": "A4769_8071_8996_8194",
                         "type": "trigger",
                         "position": {
-                            "x": -95,
-                            "y": 231
+                            "x": -257,
+                            "y": 443
                         },
                         "dimensions": {
                             "width": 200,
@@ -199,7 +224,8 @@
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -207,9 +233,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_2###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -224,7 +254,7 @@
                             "{=A4769_8071_8996_8194:SenderId}"
                         ],
                         "chatId": null,
-                        "message": "{=A9692_4897_2126_2020:message}",
+                        "message": "{=A6421_3735_9929_4202:message}",
                         "asError": "N",
                         "aiWarning": "Y",
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
@@ -235,8 +265,8 @@
                         "id": "A9833_6990_1088_4471",
                         "type": "simple",
                         "position": {
-                            "x": 491,
-                            "y": 239
+                            "x": 979,
+                            "y": 229
                         },
                         "dimensions": {
                             "width": 200,
@@ -246,12 +276,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -259,9 +291,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -276,8 +312,8 @@
                         "id": "A4372_1460_5476_9814",
                         "type": "trigger",
                         "position": {
-                            "x": 105,
-                            "y": -59
+                            "x": -256,
+                            "y": -88
                         },
                         "dimensions": {
                             "width": 200,
@@ -287,7 +323,8 @@
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -295,9 +332,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_4###",
                             "colorIndex": 0,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "AI_ROBOT",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -318,8 +359,8 @@
                         "id": "A9598_6102_8882_8646",
                         "type": "simple",
                         "position": {
-                            "x": 610,
-                            "y": -66
+                            "x": 632,
+                            "y": -196
                         },
                         "dimensions": {
                             "width": 200,
@@ -329,12 +370,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -342,9 +385,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_6###",
                             "colorIndex": 1,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "MESSENGER",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -365,8 +412,8 @@
                         "id": "A5647_8130_8558_3635",
                         "type": "simple",
                         "position": {
-                            "x": 610,
-                            "y": 17
+                            "x": 630,
+                            "y": -87
                         },
                         "dimensions": {
                             "width": 200,
@@ -376,12 +423,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -389,9 +438,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_6###",
                             "colorIndex": 1,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "MESSENGER",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -418,8 +471,8 @@
                         "id": "A5722_9997_9025_4029",
                         "type": "simple",
                         "position": {
-                            "x": 1018,
-                            "y": -3
+                            "x": 1150,
+                            "y": -195
                         },
                         "dimensions": {
                             "width": 200,
@@ -429,12 +482,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -442,9 +497,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -456,7 +515,7 @@
                         "BotId": null,
                         "BotCode": "{=Workflow:TemplateId}-feedback-interviewer",
                         "SenderIds": [
-                            "group_hrr1"
+                            "group_ua"
                         ],
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_2###",
                         "EditorComment": ""
@@ -467,8 +526,8 @@
                         "id": "A9654_3504_4807_2932",
                         "type": "trigger",
                         "position": {
-                            "x": -98,
-                            "y": 563
+                            "x": -257,
+                            "y": 926
                         },
                         "dimensions": {
                             "width": 200,
@@ -478,7 +537,8 @@
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -486,9 +546,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_2###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -502,7 +566,10 @@
                         "recipient": [
                             "{=A9654_3504_4807_2932:SenderId}"
                         ],
-                        "message": "{=A1535_5119_7045_4611:message}",
+                        "chatId": null,
+                        "message": "{=A5313_1512_1381_4864:message}",
+                        "asError": null,
+                        "aiWarning": null,
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                         "EditorComment": ""
                     },
@@ -511,8 +578,8 @@
                         "id": "A6125_8815_9480_4420",
                         "type": "simple",
                         "position": {
-                            "x": 793,
-                            "y": 580
+                            "x": 1767,
+                            "y": 737
                         },
                         "dimensions": {
                             "width": 200,
@@ -522,12 +589,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -535,9 +604,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -546,32 +619,32 @@
                     "Type": "WriteDataStorageActivity",
                     "Activated": "Y",
                     "Properties": {
-                        "FieldValue": {
-                            "title": "{=A9692_4897_2126_2020:topic}",
-                            "questions": "{=A9692_4897_2126_2020:questions}",
-                            "author": "{=A4769_8071_8996_8194:SenderId}"
-                        },
                         "Author": "{=A2087_9399_5384_5330:Value > bbcodetouser}",
-                        "StorageId": null,
+                        "StorageId": "storage_{=Workflow:TemplateId}",
                         "StorageCode": "storage_{=Workflow:TemplateId}",
                         "RewriteMode": "newItem",
                         "IsExpanded": "Y",
-                        "Fields": {
-                            "title": {
-                                "Value": "{=A9692_4897_2126_2020:topic}",
-                                "FieldName": "title"
-                            },
-                            "questions": {
-                                "Value": "{=A9692_4897_2126_2020:questions}",
-                                "FieldName": "questions"
-                            },
-                            "author": {
-                                "Value": "{=A4769_8071_8996_8194:SenderId}",
-                                "FieldName": "author"
-                            }
-                        },
                         "DynamicFilterFields": {
                             "items": []
+                        },
+                        "Fields": {
+                            "title": {
+                                "FieldName": "title",
+                                "Value": "{=A6421_3735_9929_4202:topic}"
+                            },
+                            "questions": {
+                                "FieldName": "questions",
+                                "Value": "{=A6421_3735_9929_4202:questions}"
+                            },
+                            "author": {
+                                "FieldName": "author",
+                                "Value": "{=A4769_8071_8996_8194:SenderId}"
+                            }
+                        },
+                        "FieldValue": {
+                            "title": "{=A6421_3735_9929_4202:topic}",
+                            "questions": "{=A6421_3735_9929_4202:questions}",
+                            "author": "{=A4769_8071_8996_8194:SenderId}"
                         },
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_9###",
                         "EditorComment": ""
@@ -581,8 +654,8 @@
                         "id": "A8947_9497_6913_6578",
                         "type": "simple",
                         "position": {
-                            "x": 1340,
-                            "y": 461
+                            "x": 1864,
+                            "y": 446
                         },
                         "dimensions": {
                             "width": 200,
@@ -592,12 +665,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -605,9 +680,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_9###",
                             "colorIndex": 5,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "PLUS_M",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -633,8 +712,8 @@
                         "id": "A5846_8478_5020_2228",
                         "type": "simple",
                         "position": {
-                            "x": 1632,
-                            "y": 461
+                            "x": 2330,
+                            "y": 533
                         },
                         "dimensions": {
                             "width": 200,
@@ -644,12 +723,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -657,9 +738,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -720,8 +805,8 @@
                         "id": "A4120_8802_2523_2854",
                         "type": "simple",
                         "position": {
-                            "x": -86,
-                            "y": 655
+                            "x": 182,
+                            "y": 926
                         },
                         "dimensions": {
                             "width": 200,
@@ -731,12 +816,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -744,9 +831,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_11###",
                             "colorIndex": 5,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "DATA_READING",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -758,6 +849,7 @@
                         "StorageId": 0,
                         "StorageCode": "storage_{=Workflow:TemplateId}",
                         "DeleteMode": "multiple",
+                        "IsExpanded": "Y",
                         "DynamicFilterFields": {
                             "items": [
                                 [
@@ -779,8 +871,8 @@
                         "id": "A8762_2315_5201_1662",
                         "type": "simple",
                         "position": {
-                            "x": 1309,
-                            "y": 810
+                            "x": 2566,
+                            "y": 924
                         },
                         "dimensions": {
                             "width": 200,
@@ -790,12 +882,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -803,9 +897,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_12###",
                             "colorIndex": 5,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "TRASHCAN",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -831,8 +929,8 @@
                         "id": "A9312_1858_2156_7551",
                         "type": "simple",
                         "position": {
-                            "x": 1182,
-                            "y": 660
+                            "x": 2116,
+                            "y": 920
                         },
                         "dimensions": {
                             "width": 200,
@@ -842,12 +940,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -855,9 +955,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -935,8 +1039,8 @@
                         "id": "A8369_8149_6365_5481",
                         "type": "simple",
                         "position": {
-                            "x": 170,
-                            "y": 73
+                            "x": 182,
+                            "y": -86
                         },
                         "dimensions": {
                             "width": 200,
@@ -946,22 +1050,28 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
                             "type": "simple",
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_13###",
-                            "colorIndex": 2,
+                            "colorIndex": 8,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "SETTINGS",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": -1
                         }
                     }
                 },
@@ -974,14 +1084,14 @@
                         "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A9692_4897_2126_2020",
+                                "object": "A6421_3735_9929_4202",
                                 "field": "input_data_is_known",
                                 "operator": ">",
                                 "value": "0",
                                 "joiner": 0
                             },
                             {
-                                "object": "A9692_4897_2126_2020",
+                                "object": "A6421_3735_9929_4202",
                                 "field": "questions_is_approved",
                                 "operator": ">",
                                 "value": "0",
@@ -994,8 +1104,8 @@
                         "id": "A3246_1874_7458_8230",
                         "type": "complex",
                         "position": {
-                            "x": 713,
-                            "y": 308
+                            "x": 989,
+                            "y": 362
                         },
                         "dimensions": {
                             "width": 200,
@@ -1005,17 +1115,20 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "true",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "false",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1023,9 +1136,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1038,7 +1155,7 @@
                         "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A1535_5119_7045_4611",
+                                "object": "A5313_1512_1381_4864",
                                 "field": "is_test_complete",
                                 "operator": ">",
                                 "value": "0",
@@ -1051,8 +1168,8 @@
                         "id": "A7586_4625_6752_3529",
                         "type": "complex",
                         "position": {
-                            "x": 872,
-                            "y": 768
+                            "x": 1774,
+                            "y": 857
                         },
                         "dimensions": {
                             "width": 200,
@@ -1062,17 +1179,20 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "true",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "false",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1080,149 +1200,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
-                        }
-                    }
-                },
-                {
-                    "Name": "A9692_4897_2126_2020",
-                    "Type": "AiAssistantAgentActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
-                        "query": "{=A4769_8071_8996_8194:Message}",
-                        "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_1###",
-                        "returnType": "json",
-                        "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[\/USER][\/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
-                        "jsonPath": {
-                            "message": {
-                                "Id": "message",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:message",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "number_of_questions": {
-                                "Id": "number_of_questions",
-                                "Type": "json",
-                                "BaseType": "int",
-                                "Name": "JSON:number_of_questions",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "topic": {
-                                "Id": "topic",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:topic",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "tested_users_bbcodes": {
-                                "Id": "tested_users_bbcodes",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:tested_users_bbcodes",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "questions_is_approved": {
-                                "Id": "questions_is_approved",
-                                "Type": "json",
-                                "BaseType": "bool",
-                                "Name": "JSON:questions_is_approved",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "input_data_is_known": {
-                                "Id": "input_data_is_known",
-                                "Type": "json",
-                                "BaseType": "bool",
-                                "Name": "JSON:input_data_is_known",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "questions": {
-                                "Id": "questions",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:questions",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            }
-                        },
-                        "usePseudonymizer": "Y",
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A9692_4897_2126_2020",
-                        "type": "simple",
-                        "position": {
-                            "x": -81,
-                            "y": 412
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 48
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input"
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output"
-                            },
-                            {
-                                "id": "a0",
-                                "title": "",
-                                "type": "aux"
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1232,7 +1216,7 @@
                     "Activated": "Y",
                     "Properties": {
                         "Variable": "tested_users_bbcodes",
-                        "Object": "A9692_4897_2126_2020",
+                        "Object": "A6421_3735_9929_4202",
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_16###",
                         "EditorComment": ""
                     },
@@ -1241,8 +1225,8 @@
                         "id": "A2087_9399_5384_5330",
                         "type": "complex",
                         "position": {
-                            "x": 1064,
-                            "y": 221
+                            "x": 1568,
+                            "y": 266
                         },
                         "dimensions": {
                             "width": 200,
@@ -1252,22 +1236,26 @@
                             {
                                 "id": "i0",
                                 "title": "in",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "i1",
                                 "title": "->>",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "out",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "->>",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1275,97 +1263,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_16###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "REPEAT",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
-                        }
-                    }
-                },
-                {
-                    "Name": "A1535_5119_7045_4611",
-                    "Type": "AiAssistantAgentActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
-                        "query": "{=A9654_3504_4807_2932:Message}",
-                        "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_2###",
-                        "returnType": "json",
-                        "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    },\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"is_test_complete\",\n    \"results_of_test\"\n  ]\n}",
-                        "jsonPath": {
-                            "message": {
-                                "Id": "message",
-                                "Type": "json",
-                                "Name": "JSON:message",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "is_test_complete": {
-                                "Id": "is_test_complete",
-                                "Type": "json",
-                                "Name": "JSON:is_test_complete",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "results_of_test": {
-                                "Id": "results_of_test",
-                                "Type": "json",
-                                "Name": "JSON:results_of_test",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            }
-                        },
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A1535_5119_7045_4611",
-                        "type": "simple",
-                        "position": {
-                            "x": 233,
-                            "y": 596
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 48
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input"
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output"
-                            },
-                            {
-                                "id": "a0",
-                                "title": "",
-                                "type": "aux"
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1387,11 +1291,11 @@
                                 "Type": "string"
                             },
                             "questions": {
-                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_10###",
                                 "Type": "string"
                             },
                             "author": {
-                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_11###",
                                 "Type": "user"
                             }
                         },
@@ -1401,7 +1305,7 @@
                                 "storageId": 0,
                                 "code": "title",
                                 "sort": 500,
-                                "name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                "name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_6###",
                                 "description": "",
                                 "type": "string",
                                 "multiple": false,
@@ -1441,8 +1345,8 @@
                         "id": "A4306_9994_2013_8543",
                         "type": "simple",
                         "position": {
-                            "x": 614,
-                            "y": 98
+                            "x": 634,
+                            "y": 20
                         },
                         "dimensions": {
                             "width": 200,
@@ -1452,12 +1356,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1465,9 +1371,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_17###",
                             "colorIndex": 5,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "DATABASE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1477,24 +1387,24 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A9692_4897_2126_2020",
+                                "object": "A6421_3735_9929_4202",
                                 "field": "message",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 0
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
                         "id": "A9433_3697_1811_2293",
                         "type": "complex",
                         "position": {
-                            "x": 193,
-                            "y": 232
+                            "x": 608,
+                            "y": 382
                         },
                         "dimensions": {
                             "width": 200,
@@ -1504,17 +1414,20 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "true",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "false",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1522,9 +1435,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1548,8 +1465,8 @@
                         "id": "A1689_5301_1167_3785",
                         "type": "simple",
                         "position": {
-                            "x": 246,
-                            "y": 431
+                            "x": 986,
+                            "y": 608
                         },
                         "dimensions": {
                             "width": 302.5625,
@@ -1559,12 +1476,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1572,9 +1491,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1598,8 +1521,8 @@
                         "id": "A8569_7164_3775_5606",
                         "type": "simple",
                         "position": {
-                            "x": 747,
-                            "y": 946
+                            "x": 1776,
+                            "y": 1136
                         },
                         "dimensions": {
                             "width": 302.5625,
@@ -1609,12 +1532,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1622,9 +1547,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1634,24 +1563,24 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A1535_5119_7045_4611",
+                                "object": "A5313_1512_1381_4864",
                                 "field": "message",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 0
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
                         "id": "A1096_4690_2822_9024",
                         "type": "complex",
                         "position": {
-                            "x": 442,
-                            "y": 703
+                            "x": 1404,
+                            "y": 861
                         },
                         "dimensions": {
                             "width": 200,
@@ -1661,17 +1590,20 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "true",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "false",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1679,9 +1611,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1705,8 +1641,8 @@
                         "id": "A8489_1316_1178_9993",
                         "type": "simple",
                         "position": {
-                            "x": 310,
-                            "y": 942
+                            "x": 991,
+                            "y": 1238
                         },
                         "dimensions": {
                             "width": 302.5625,
@@ -1716,12 +1652,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1729,9 +1667,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###",
                             "colorIndex": 2,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1757,8 +1699,8 @@
                         "id": "A7464_6478_5578_9056",
                         "type": "complex",
                         "position": {
-                            "x": 66,
-                            "y": 763
+                            "x": 597,
+                            "y": 864
                         },
                         "dimensions": {
                             "width": 200,
@@ -1768,17 +1710,20 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "true",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             },
                             {
                                 "id": "o1",
                                 "title": "false",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1786,9 +1731,13 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
                             "colorIndex": 3,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1811,8 +1760,8 @@
                         "id": "A2636_8739_1696_8052",
                         "type": "simple",
                         "position": {
-                            "x": 886,
-                            "y": 99
+                            "x": 1153,
+                            "y": 20
                         },
                         "dimensions": {
                             "width": 200,
@@ -1822,12 +1771,14 @@
                             {
                                 "id": "i0",
                                 "title": "",
-                                "type": "input"
+                                "type": "input",
+                                "isActive": true
                             },
                             {
                                 "id": "o0",
                                 "title": "",
-                                "type": "output"
+                                "type": "output",
+                                "isActive": true
                             }
                         ],
                         "node": {
@@ -1835,9 +1786,901 @@
                             "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_12###",
                             "colorIndex": 5,
                             "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
                             "icon": "TRASHCAN",
-                            "updated": 1771522438361,
-                            "published": 1771522438361
+                            "updated": 1778849384029,
+                            "published": 1778849384029,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A7174_1517_6335_9991",
+                    "Type": "AiAssistantAgentComplexActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A5251_9766_7478_1420",
+                                        "constructions": [
+                                            {
+                                                "id": "A1790_1817_2276_1205",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A6421_3735_9929_4202",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
+                                                            "query": "{=A4769_8071_8996_8194:Message}",
+                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_1###",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[\/USER][\/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
+                                                            "jsonPath": {
+                                                                "message": {
+                                                                    "Id": "message",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:message",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "number_of_questions": {
+                                                                    "Id": "number_of_questions",
+                                                                    "Type": "json",
+                                                                    "BaseType": "int",
+                                                                    "Name": "JSON:number_of_questions",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "topic": {
+                                                                    "Id": "topic",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:topic",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "tested_users_bbcodes": {
+                                                                    "Id": "tested_users_bbcodes",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:tested_users_bbcodes",
+                                                                    "Description": null,
+                                                                    "Multiple": true,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "questions_is_approved": {
+                                                                    "Id": "questions_is_approved",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:questions_is_approved",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "input_data_is_known": {
+                                                                    "Id": "input_data_is_known",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:input_data_is_known",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "questions": {
+                                                                    "Id": "questions",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:questions",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                                            "EditorComment": ""
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "message",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:message",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "number_of_questions",
+                                                                "Type": "json",
+                                                                "BaseType": "int",
+                                                                "Name": "JSON:number_of_questions",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "topic",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:topic",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "tested_users_bbcodes",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:tested_users_bbcodes",
+                                                                "Description": "",
+                                                                "Multiple": true,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "questions_is_approved",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:questions_is_approved",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "input_data_is_known",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:input_data_is_known",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "questions",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:questions",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": null,
+                                                    "auxPortTitle": null
+                                                }
+                                            },
+                                            {
+                                                "id": "A1423_4748_6456_2357",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "isFilled": true
+                            }
+                        },
+                        "EditorComment": "",
+                        "InputNames": [
+                            "A6421_3735_9929_4202:i0"
+                        ],
+                        "OutputNames": {
+                            "A6421_3735_9929_4202:o0": 1
+                        },
+                        "Links": []
+                    },
+                    "Document": null,
+                    "Children": [
+                        {
+                            "Name": "A6421_3735_9929_4202",
+                            "Type": "AiAssistantAgentActivity",
+                            "Activated": "Y",
+                            "Properties": {
+                                "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
+                                "query": "{=A4769_8071_8996_8194:Message}",
+                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_1###",
+                                "returnType": "json",
+                                "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[\/USER][\/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
+                                "jsonPath": {
+                                    "message": {
+                                        "Id": "message",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:message",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "number_of_questions": {
+                                        "Id": "number_of_questions",
+                                        "Type": "json",
+                                        "BaseType": "int",
+                                        "Name": "JSON:number_of_questions",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "topic": {
+                                        "Id": "topic",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:topic",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "tested_users_bbcodes": {
+                                        "Id": "tested_users_bbcodes",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:tested_users_bbcodes",
+                                        "Description": null,
+                                        "Multiple": true,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "questions_is_approved": {
+                                        "Id": "questions_is_approved",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:questions_is_approved",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "input_data_is_known": {
+                                        "Id": "input_data_is_known",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:input_data_is_known",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "questions": {
+                                        "Id": "questions",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:questions",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    }
+                                },
+                                "usePseudonymizer": "Y",
+                                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                "EditorComment": ""
+                            },
+                            "ReturnProperties": [
+                                {
+                                    "Id": "aiResult",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "errorMessage",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "toolsUsed",
+                                    "Type": "bool",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "message",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:message",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "number_of_questions",
+                                    "Type": "json",
+                                    "BaseType": "int",
+                                    "Name": "JSON:number_of_questions",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "topic",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:topic",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "tested_users_bbcodes",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:tested_users_bbcodes",
+                                    "Description": "",
+                                    "Multiple": true,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "questions_is_approved",
+                                    "Type": "json",
+                                    "BaseType": "bool",
+                                    "Name": "JSON:questions_is_approved",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "input_data_is_known",
+                                    "Type": "json",
+                                    "BaseType": "bool",
+                                    "Name": "JSON:input_data_is_known",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "questions",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:questions",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                }
+                            ],
+                            "Document": null
+                        }
+                    ],
+                    "Node": {
+                        "id": "A7174_1517_6335_9991",
+                        "type": "complex",
+                        "dimensions": {
+                            "width": 260.0000080309417,
+                            "height": 291.008778622276
+                        },
+                        "position": {
+                            "x": 191,
+                            "y": 382
+                        },
+                        "ports": [
+                            {
+                                "id": "o1",
+                                "title": "E1",
+                                "type": "output",
+                                "position": "right"
+                            },
+                            {
+                                "id": "i0",
+                                "title": "G1",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "a0",
+                                "title": "T1",
+                                "type": "aux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "colorIndex": 0,
+                            "icon": "AI_ROBOT",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                            "type": "complex",
+                            "shouldShowAuxPorts": true,
+                            "updated": 1778849384029,
+                            "published": 1778849384029
+                        }
+                    }
+                },
+                {
+                    "Name": "A5729_2840_7945_3020",
+                    "Type": "AiAssistantAgentComplexActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A9143_9558_6751_2834",
+                                        "constructions": [
+                                            {
+                                                "id": "A7485_6607_8030_8670",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A5313_1512_1381_4864",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
+                                                            "query": "{=A9654_3504_4807_2932:Message}",
+                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_2###",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    },\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"is_test_complete\",\n    \"results_of_test\"\n  ]\n}",
+                                                            "jsonPath": {
+                                                                "message": {
+                                                                    "Id": "message",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:message",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "is_test_complete": {
+                                                                    "Id": "is_test_complete",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:is_test_complete",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "results_of_test": {
+                                                                    "Id": "results_of_test",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:results_of_test",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                                            "EditorComment": ""
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "message",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:message",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "is_test_complete",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:is_test_complete",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "results_of_test",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:results_of_test",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": null,
+                                                    "auxPortTitle": null
+                                                }
+                                            },
+                                            {
+                                                "id": "A9738_6307_6797_9101",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "isFilled": true
+                            }
+                        },
+                        "EditorComment": "",
+                        "InputNames": [
+                            "A5313_1512_1381_4864:i0"
+                        ],
+                        "OutputNames": {
+                            "A5313_1512_1381_4864:o0": 1
+                        },
+                        "Links": []
+                    },
+                    "Document": null,
+                    "Children": [
+                        {
+                            "Name": "A5313_1512_1381_4864",
+                            "Type": "AiAssistantAgentActivity",
+                            "Activated": "Y",
+                            "Properties": {
+                                "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
+                                "query": "{=A9654_3504_4807_2932:Message}",
+                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_2###",
+                                "returnType": "json",
+                                "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    },\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"is_test_complete\",\n    \"results_of_test\"\n  ]\n}",
+                                "jsonPath": {
+                                    "message": {
+                                        "Id": "message",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:message",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "is_test_complete": {
+                                        "Id": "is_test_complete",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:is_test_complete",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "results_of_test": {
+                                        "Id": "results_of_test",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:results_of_test",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    }
+                                },
+                                "usePseudonymizer": "Y",
+                                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                "EditorComment": ""
+                            },
+                            "ReturnProperties": [
+                                {
+                                    "Id": "aiResult",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "errorMessage",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "toolsUsed",
+                                    "Type": "bool",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "message",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:message",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "is_test_complete",
+                                    "Type": "json",
+                                    "BaseType": "bool",
+                                    "Name": "JSON:is_test_complete",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "results_of_test",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:results_of_test",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                }
+                            ],
+                            "Document": null
+                        }
+                    ],
+                    "Node": {
+                        "id": "A5729_2840_7945_3020",
+                        "type": "complex",
+                        "dimensions": {
+                            "width": 260.0000080309417,
+                            "height": 291.00875854492193
+                        },
+                        "position": {
+                            "x": 993,
+                            "y": 861
+                        },
+                        "ports": [
+                            {
+                                "id": "o1",
+                                "title": "E1",
+                                "type": "output",
+                                "position": "right"
+                            },
+                            {
+                                "id": "i0",
+                                "title": "G1",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "a0",
+                                "title": "T1",
+                                "type": "aux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "colorIndex": 0,
+                            "icon": "AI_ROBOT",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                            "type": "complex",
+                            "shouldShowAuxPorts": true,
+                            "updated": 1778849384029,
+                            "published": 1778849384029
                         }
                     }
                 }

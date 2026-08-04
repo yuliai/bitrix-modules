@@ -74,7 +74,10 @@ class Add extends AbstractCommand
 		}
 
 		MessageService::saveLastSelectedDialogId($this->checkInDto->userId, $this->checkInDto->dialogIds ?? []);
-		if ($this->checkInDto->entityType === CheckInType::MANUAL->value)
+		if (
+			$this->checkInDto->entityType === CheckInType::MANUAL->value
+			&& !$this->checkInDto->skipWorkDayStart
+		)
 		{
 			WorkDayService::startWorkDay();
 		}

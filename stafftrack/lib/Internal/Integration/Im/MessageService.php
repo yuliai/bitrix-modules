@@ -111,7 +111,7 @@ class MessageService
 			'PARAMS' => [
 				'COMPONENT_ID' => self::BANNER_COMPONENT_ID,
 				'COMPONENT_PARAMS' => [
-					'TOOL_ID' => 'checkIn',
+					'TOOL_ID' => 'checkInV2',
 				],
 			],
 		]);

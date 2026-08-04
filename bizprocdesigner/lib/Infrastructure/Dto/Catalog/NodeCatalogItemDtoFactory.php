@@ -29,6 +29,7 @@ class NodeCatalogItemDtoFactory
 			icon: $description->getIcon(),
 			iconPath: self::getIconPath($description),
 			colorIndex: $description->getColorIndex(),
+			contentBlockColor: $description->getContentBlockColor(),
 			properties: $description->get('PROPERTIES'),
 			returnProperties: self::makeReturnProperties($description->getClass()),
 			defaultSettings: $defaultSettings->toArray(),
@@ -81,7 +82,7 @@ class NodeCatalogItemDtoFactory
 				],
 			],
 			ActivityNodeType::COMPLEX->value => [
-				'width' => 230,
+				'width' => 260,
 				'height' => 46,
 				'ports' => [
 					'input' => [

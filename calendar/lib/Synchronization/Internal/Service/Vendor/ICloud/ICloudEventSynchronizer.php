@@ -7,10 +7,12 @@ namespace Bitrix\Calendar\Synchronization\Internal\Service\Vendor\ICloud;
 // TODO: Remove API from sync when we switch to the new one
 use Bitrix\Calendar\Core\Base\Date;
 use Bitrix\Calendar\Core\Event\Event;
+use Bitrix\Calendar\Core\Section\Section;
 use Bitrix\Calendar\Integration\Dav\ConnectionProvider;
 use Bitrix\Calendar\Internal\Repository\EventRepository;
 use Bitrix\Calendar\Sync\Connection\Connection;
 use Bitrix\Calendar\Sync\Dictionary;
+use Bitrix\Calendar\Sync\Icloud\Helper;
 use Bitrix\Calendar\Synchronization\Internal\Entity\EventConnection;
 use Bitrix\Calendar\Synchronization\Internal\Entity\SectionConnection;
 use Bitrix\Calendar\Synchronization\Internal\Exception\ApiException;
@@ -249,6 +251,11 @@ class ICloudEventSynchronizer extends AbstractICloudSynchronizer implements Even
 		$connection = $this->getUserConnection($ownerId);
 
 		if (!$connection)
+		{
+			return;
+		}
+
+		if (!$this->shouldProcessSection($event->getSection()))
 		{
 			return;
 		}
@@ -598,6 +605,11 @@ class ICloudEventSynchronizer extends AbstractICloudSynchronizer implements Even
 			return;
 		}
 
+		if (!$this->shouldProcessSection($event->getSection()))
+		{
+			return;
+		}
+
 		$sectionConnection = $this->getSectionConnection(
 			(int)$event->getSection()->getId(),
 			(int)$connection->getId(),
@@ -896,6 +908,11 @@ class ICloudEventSynchronizer extends AbstractICloudSynchronizer implements Even
 		$connection = $this->getUserConnection($ownerId);
 
 		if (!$connection)
+		{
+			return;
+		}
+
+		if (!$this->shouldProcessSection($masterEvent->getSection()))
 		{
 			return;
 		}
@@ -1231,5 +1248,10 @@ class ICloudEventSynchronizer extends AbstractICloudSynchronizer implements Even
 				$e,
 			);
 		}
+	}
+
+	private function shouldProcessSection(Section $section): bool
+	{
+		return $section->isLocal() || $section->getExternalType() === AbstractICloudSynchronizer::VENDOR_CODE;
 	}
 }

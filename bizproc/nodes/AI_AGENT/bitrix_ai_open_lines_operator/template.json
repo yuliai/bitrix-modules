@@ -244,6 +244,51 @@
                         "A4275_9254_8732_9841:o0",
                         "A7625_2522_1592_5215:i0",
                         1777364551213
+                    ],
+                    [
+                        "A3993_2016_5652_8303:o0",
+                        "A9773_2239_5683_8891:i0",
+                        1779094462281
+                    ],
+                    [
+                        "A9773_2239_5683_8891:a0",
+                        "A2647_8803_8956_7295:t0",
+                        1779094644975
+                    ],
+                    [
+                        "A9773_2239_5683_8891:a0",
+                        "A3491_2253_3760_8398:t0",
+                        1779094646584
+                    ],
+                    [
+                        "A9773_2239_5683_8891:o1",
+                        "A6074_4680_7551_6078:i0",
+                        1779094725071
+                    ],
+                    [
+                        "A9773_2239_5683_8891:o1",
+                        "A4234_1992_7243_1050:i0",
+                        1779094726930
+                    ],
+                    [
+                        "A9737_8333_9516_6774:o1",
+                        "A4744_1841_8479_7943:i0",
+                        1779094752012
+                    ],
+                    [
+                        "A4744_1841_8479_7943:a0",
+                        "A7844_2005_8999_4844:t0",
+                        1779094804100
+                    ],
+                    [
+                        "A4744_1841_8479_7943:o1",
+                        "A8899_7388_9990_2918:i0",
+                        1779094807991
+                    ],
+                    [
+                        "A4744_1841_8479_7943:o1",
+                        "A1717_4389_2310_9731:i0",
+                        1779094809658
                     ]
                 ]
             },
@@ -283,9 +328,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "AI_ROBOT",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -421,7 +467,7 @@
                                     },
                                     {
                                         "itemType": "description",
-                                        "text": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TEXT_4###"
+                                        "text": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TEXT_4_MSGVER_1###"
                                     }
                                 ]
                             }
@@ -458,14 +504,15 @@
                         "node": {
                             "type": "services",
                             "title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_4###",
-                            "colorIndex": 2,
+                            "colorIndex": 8,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "SETTINGS",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": -1
                         }
                     }
                 },
@@ -518,9 +565,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "MESSENGER",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -581,9 +629,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -638,9 +687,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "NOTIFICATION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -695,9 +745,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "NOTIFICATION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -739,9 +790,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "MESSAGE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -802,9 +854,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -852,181 +905,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONTACT",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
-                        }
-                    }
-                },
-                {
-                    "Name": "A7880_1290_5057_9327",
-                    "Type": "AiAssistantAgentActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
-                        "query": "{=A1478_6007_9088_2472:message}",
-                        "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_1###",
-                        "returnType": "json",
-                        "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
-                        "jsonPath": {
-                            "message": {
-                                "Id": "message",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:message",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "isEndSession": {
-                                "Id": "isEndSession",
-                                "Type": "json",
-                                "BaseType": "bool",
-                                "Name": "JSON:isEndSession",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            }
-                        },
-                        "usePseudonymizer": "Y",
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A7880_1290_5057_9327",
-                        "type": "simple",
-                        "position": {
-                            "x": 1776,
-                            "y": 693
-                        },
-                        "dimensions": {
-                            "width": 300,
-                            "height": 58
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            },
-                            {
-                                "id": "a0",
-                                "title": "",
-                                "type": "aux",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": true
-                        }
-                    }
-                },
-                {
-                    "Name": "A2418_4544_9300_6662",
-                    "Type": "AiAssistantAgentActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
-                        "query": "{=A1478_6007_9088_2472:message}",
-                        "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_2###",
-                        "returnType": "json",
-                        "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
-                        "jsonPath": {
-                            "message": {
-                                "Id": "message",
-                                "Type": "json",
-                                "BaseType": "string",
-                                "Name": "JSON:message",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            },
-                            "isEndSession": {
-                                "Id": "isEndSession",
-                                "Type": "json",
-                                "BaseType": "bool",
-                                "Name": "JSON:isEndSession",
-                                "Description": null,
-                                "Multiple": false,
-                                "Required": false,
-                                "Options": null,
-                                "Settings": null,
-                                "Default": null
-                            }
-                        },
-                        "usePseudonymizer": "Y",
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A2418_4544_9300_6662",
-                        "type": "simple",
-                        "position": {
-                            "x": 1775,
-                            "y": 1202
-                        },
-                        "dimensions": {
-                            "width": 300,
-                            "height": 58
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            },
-                            {
-                                "id": "a0",
-                                "title": "",
-                                "type": "aux",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": true
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1067,9 +949,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "DATABASE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1093,8 +976,8 @@
                         "id": "A3491_2253_3760_8398",
                         "type": "tool",
                         "position": {
-                            "x": 1925,
-                            "y": 918
+                            "x": 1926,
+                            "y": 919
                         },
                         "dimensions": {
                             "width": 300,
@@ -1116,9 +999,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": null,
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1136,8 +1020,8 @@
                         "id": "A7844_2005_8999_4844",
                         "type": "tool",
                         "position": {
-                            "x": 1776,
-                            "y": 1383
+                            "x": 1588,
+                            "y": 1469
                         },
                         "dimensions": {
                             "width": 300,
@@ -1159,9 +1043,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "DATABASE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1171,16 +1056,16 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_6###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A7880_1290_5057_9327",
+                                "object": "A7393_2345_8280_4391",
                                 "field": "message",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 0
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
@@ -1222,9 +1107,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1234,23 +1120,23 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_6###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A7880_1290_5057_9327",
+                                "object": "A7393_2345_8280_4391",
                                 "field": "isEndSession",
                                 "operator": "=",
                                 "value": "{{=true()}}",
                                 "joiner": 0
                             },
                             {
-                                "object": "A7880_1290_5057_9327",
+                                "object": "A7393_2345_8280_4391",
                                 "field": "errorMessage",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 1
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
@@ -1292,9 +1178,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1304,24 +1191,24 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_6###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A2418_4544_9300_6662",
+                                "object": "A2191_4846_7189_5330",
                                 "field": "message",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 0
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
                         "id": "A8899_7388_9990_2918",
                         "type": "operators",
                         "position": {
-                            "x": 2418,
-                            "y": 1098
+                            "x": 2419,
+                            "y": 1096
                         },
                         "dimensions": {
                             "width": 200,
@@ -1355,9 +1242,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1367,23 +1255,23 @@
                     "Activated": "Y",
                     "Properties": {
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_6###",
+                        "EditorComment": "",
                         "mixedcondition": [
                             {
-                                "object": "A2418_4544_9300_6662",
+                                "object": "A2191_4846_7189_5330",
                                 "field": "isEndSession",
                                 "operator": "=",
                                 "value": "{{=true()}}",
                                 "joiner": 0
                             },
                             {
-                                "object": "A2418_4544_9300_6662",
+                                "object": "A2191_4846_7189_5330",
                                 "field": "errorMessage",
                                 "operator": "!empty",
                                 "value": "",
                                 "joiner": 1
                             }
-                        ],
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
@@ -1391,7 +1279,7 @@
                         "type": "operators",
                         "position": {
                             "x": 2423,
-                            "y": 1332
+                            "y": 1331
                         },
                         "dimensions": {
                             "width": 200,
@@ -1425,9 +1313,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1439,7 +1328,7 @@
                         "botId": "{=A1478_6007_9088_2472:actualBotId}",
                         "botCode": "",
                         "chatId": "{=A1478_6007_9088_2472:chatId}",
-                        "message": "{=A7880_1290_5057_9327:message}",
+                        "message": "{=A7393_2345_8280_4391:message}",
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_12###",
                         "EditorComment": ""
                     },
@@ -1448,8 +1337,8 @@
                         "id": "A3748_4561_5610_6545",
                         "type": "simple",
                         "position": {
-                            "x": 2665,
-                            "y": 628
+                            "x": 2656,
+                            "y": 621
                         },
                         "dimensions": {
                             "width": 300,
@@ -1477,9 +1366,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1497,8 +1387,8 @@
                         "id": "A6645_9763_1561_1276",
                         "type": "simple",
                         "position": {
-                            "x": 2645,
-                            "y": 886
+                            "x": 2654,
+                            "y": 883
                         },
                         "dimensions": {
                             "width": 300,
@@ -1526,9 +1416,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "OPEN_CHANNELS_CROSS",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1540,7 +1431,7 @@
                         "botId": "{=A1478_6007_9088_2472:actualBotId}",
                         "botCode": "",
                         "chatId": "{=A1478_6007_9088_2472:chatId}",
-                        "message": "{=A2418_4544_9300_6662:message}",
+                        "message": "{=A2191_4846_7189_5330:message}",
                         "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_12###",
                         "EditorComment": ""
                     },
@@ -1549,8 +1440,8 @@
                         "id": "A9859_8630_2259_3484",
                         "type": "simple",
                         "position": {
-                            "x": 2650,
-                            "y": 1143
+                            "x": 2660,
+                            "y": 1140
                         },
                         "dimensions": {
                             "width": 300,
@@ -1578,9 +1469,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1598,8 +1490,8 @@
                         "id": "A7448_2832_3337_5058",
                         "type": "simple",
                         "position": {
-                            "x": 2662,
-                            "y": 1377
+                            "x": 2663,
+                            "y": 1375
                         },
                         "dimensions": {
                             "width": 300,
@@ -1627,9 +1519,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "OPEN_CHANNELS_CROSS",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1690,9 +1583,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1753,9 +1647,10 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
                         }
                     }
                 },
@@ -1805,9 +1700,612 @@
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "GO_TO_MESSAGE",
-                            "updated": 1777480524318,
-                            "published": 1777480524318,
-                            "shouldShowAuxPorts": false
+                            "updated": 1779095122436,
+                            "published": 1779095122436,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A9773_2239_5683_8891",
+                    "Type": "AiAssistantAgentComplexActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A4494_1760_6302_1988",
+                                        "constructions": [
+                                            {
+                                                "id": "A7624_2832_9619_1298",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A7393_2345_8280_4391",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
+                                                            "query": "{=A1478_6007_9088_2472:message}",
+                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_1###",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
+                                                            "jsonPath": {
+                                                                "message": {
+                                                                    "Id": "message",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:message",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "isEndSession": {
+                                                                    "Id": "isEndSession",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:isEndSession",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                                                            "EditorComment": ""
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_9###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_10###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_11###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "message",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:message",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "isEndSession",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:isEndSession",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": "a0",
+                                                    "auxPortTitle": "T1"
+                                                }
+                                            },
+                                            {
+                                                "id": "A2195_5792_4674_9294",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "isFilled": true
+                            }
+                        },
+                        "EditorComment": "",
+                        "InputNames": [
+                            "A7393_2345_8280_4391:i0"
+                        ],
+                        "OutputNames": {
+                            "A7393_2345_8280_4391:o0": 1
+                        },
+                        "Links": []
+                    },
+                    "Document": null,
+                    "Children": [
+                        {
+                            "Name": "A7393_2345_8280_4391",
+                            "Type": "AiAssistantAgentActivity",
+                            "Activated": "Y",
+                            "Properties": {
+                                "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
+                                "query": "{=A1478_6007_9088_2472:message}",
+                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_1###",
+                                "returnType": "json",
+                                "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
+                                "jsonPath": {
+                                    "message": {
+                                        "Id": "message",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:message",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "isEndSession": {
+                                        "Id": "isEndSession",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:isEndSession",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    }
+                                },
+                                "usePseudonymizer": "Y",
+                                "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                                "EditorComment": "",
+                                "auxPort": "a0"
+                            },
+                            "ReturnProperties": [
+                                {
+                                    "Id": "aiResult",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_9###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "errorMessage",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_10###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "toolsUsed",
+                                    "Type": "bool",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_11###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "message",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:message",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "isEndSession",
+                                    "Type": "json",
+                                    "BaseType": "bool",
+                                    "Name": "JSON:isEndSession",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                }
+                            ],
+                            "Document": null
+                        }
+                    ],
+                    "Node": {
+                        "id": "A9773_2239_5683_8891",
+                        "type": "complex",
+                        "dimensions": {
+                            "width": 260,
+                            "height": 291
+                        },
+                        "position": {
+                            "x": 1818,
+                            "y": 552
+                        },
+                        "ports": [
+                            {
+                                "id": "o1",
+                                "title": "E1",
+                                "type": "output",
+                                "position": "right"
+                            },
+                            {
+                                "id": "i0",
+                                "title": "G1",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "a0",
+                                "title": "T1",
+                                "type": "aux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "colorIndex": 0,
+                            "icon": "AI_ROBOT",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                            "type": "complex",
+                            "shouldShowAuxPorts": true,
+                            "updated": 1779095122436,
+                            "published": 1779095122436
+                        }
+                    }
+                },
+                {
+                    "Name": "A4744_1841_8479_7943",
+                    "Type": "AiAssistantAgentComplexActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A3763_2596_9733_6954",
+                                        "constructions": [
+                                            {
+                                                "id": "A9449_2156_8465_1599",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A2191_4846_7189_5330",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
+                                                            "query": "{=A1478_6007_9088_2472:message}",
+                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_2###",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
+                                                            "jsonPath": {
+                                                                "message": {
+                                                                    "Id": "message",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:message",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "isEndSession": {
+                                                                    "Id": "isEndSession",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:isEndSession",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                                                            "EditorComment": ""
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_9###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_10###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_11###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "message",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:message",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "isEndSession",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:isEndSession",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": "a0",
+                                                    "auxPortTitle": "T1"
+                                                }
+                                            },
+                                            {
+                                                "id": "A6285_7503_4221_7374",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "isFilled": true
+                            }
+                        },
+                        "EditorComment": "",
+                        "InputNames": [
+                            "A2191_4846_7189_5330:i0"
+                        ],
+                        "OutputNames": {
+                            "A2191_4846_7189_5330:o0": 1
+                        },
+                        "Links": []
+                    },
+                    "Document": null,
+                    "Children": [
+                        {
+                            "Name": "A2191_4846_7189_5330",
+                            "Type": "AiAssistantAgentActivity",
+                            "Activated": "Y",
+                            "Properties": {
+                                "mcpUser": "{=A1478_6007_9088_2472:fromUserId}",
+                                "query": "{=A1478_6007_9088_2472:message}",
+                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_SYSTEMPROMPT_2###",
+                                "returnType": "json",
+                                "jsonSchema": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_JSONSCHEMA_1###",
+                                "jsonPath": {
+                                    "message": {
+                                        "Id": "message",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:message",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "isEndSession": {
+                                        "Id": "isEndSession",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:isEndSession",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    }
+                                },
+                                "usePseudonymizer": "Y",
+                                "Title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                                "EditorComment": "",
+                                "auxPort": "a0"
+                            },
+                            "ReturnProperties": [
+                                {
+                                    "Id": "aiResult",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_9###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "errorMessage",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_10###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "toolsUsed",
+                                    "Type": "bool",
+                                    "BaseType": null,
+                                    "Name": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_NAME_11###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "message",
+                                    "Type": "json",
+                                    "BaseType": "string",
+                                    "Name": "JSON:message",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "isEndSession",
+                                    "Type": "json",
+                                    "BaseType": "bool",
+                                    "Name": "JSON:isEndSession",
+                                    "Description": "",
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": "",
+                                    "Settings": null,
+                                    "Default": null
+                                }
+                            ],
+                            "Document": null
+                        }
+                    ],
+                    "Node": {
+                        "id": "A4744_1841_8479_7943",
+                        "type": "complex",
+                        "dimensions": {
+                            "width": 259.9999745686851,
+                            "height": 290.99998474121116
+                        },
+                        "position": {
+                            "x": 1798,
+                            "y": 1098
+                        },
+                        "ports": [
+                            {
+                                "id": "o1",
+                                "title": "E1",
+                                "type": "output",
+                                "position": "right"
+                            },
+                            {
+                                "id": "i0",
+                                "title": "G1",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "a0",
+                                "title": "T1",
+                                "type": "aux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "colorIndex": 0,
+                            "icon": "AI_ROBOT",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_TITLE_10###",
+                            "type": "complex",
+                            "shouldShowAuxPorts": true,
+                            "updated": 1779095122436,
+                            "published": 1779095122436
                         }
                     }
                 }
