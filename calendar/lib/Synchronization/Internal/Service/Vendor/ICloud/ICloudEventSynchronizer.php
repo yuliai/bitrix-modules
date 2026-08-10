@@ -163,9 +163,22 @@ class ICloudEventSynchronizer extends AbstractICloudSynchronizer implements Even
 			);
 		}
 
+		// A partial vendor response (truncated final multiget) is NOT an authoritative snapshot of the
+		// delta: advancing the sync token here would move the CalDAV sync-collection window past hrefs
+		// that were reported changed but never delivered by the multiget, dropping their update/tombstone
+		// permanently. Keep the stored token so the next scheduled pass re-queries the same delta and
+		// converges once the multiget is complete. Unlike Google pagination (where pageToken MUST advance
+		// or the page repeats forever), the iCloud multiget is an atomic completeness check, so not
+		// advancing is safe and cannot get stuck on a healthy delta.
+		if (!$events->isPartial)
+		{
+			$sectionConnection
+				->setSyncToken($events->nextSyncToken)
+				->setVersionId($events->etag)
+			;
+		}
+
 		$sectionConnection
-			->setSyncToken($events->nextSyncToken)
-			->setVersionId($events->etag)
 			->setLastSyncStatus(Dictionary::SYNC_SECTION_ACTION['success'])
 			->setLastSyncDate(new Date())
 		;

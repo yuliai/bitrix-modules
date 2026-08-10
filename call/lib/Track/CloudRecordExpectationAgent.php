@@ -10,7 +10,7 @@ use Bitrix\Call\CallChatMessage;
 use Bitrix\Call\Logger\Logger;
 use Bitrix\Call\Integration\AI\CallAISettings;
 use Bitrix\Call\Track\Downloader\DownloadAgent;
-use Bitrix\Call\Analytics\FollowUpAnalytics;
+use Bitrix\Call\Analytics\CloudRecordAnalytics;
 use Bitrix\Call\Call\Registry;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Message\Send\SendingConfig;
@@ -63,12 +63,7 @@ class CloudRecordExpectationAgent
 			return '';
 		}
 
-		(new FollowUpAnalytics($call))
-			->sendTelemetry(
-				source: null,
-				status: 'success',
-				event: 'cloud_record_expectation_run'
-			);
+		self::sendTelemetry($call, 'success', 'run');
 
 		// Check safety timeout
 		$elapsed = time() - $startTime;
@@ -76,13 +71,7 @@ class CloudRecordExpectationAgent
 		{
 			$log && $logger->error("CloudRecordExpectationAgent: Max wait time exceeded. CallId: {$callId}");
 
-			(new FollowUpAnalytics($call))
-				->sendTelemetry(
-					source: null,
-					status: 'error',
-					errorCode: 'max_wait_time_exceeded',
-					event: 'cloud_record_expectation_timeout'
-					);
+			self::sendTelemetry($call, 'error', 'timeout', 'max_wait_time_exceeded');
 
 			self::sendErrorToChat($callId);
 			return '';
@@ -95,12 +84,7 @@ class CloudRecordExpectationAgent
 		{
 			$log && $logger->error("CloudRecordExpectationAgent: Record tracks not found. CallId: {$callId}");
 
-			(new FollowUpAnalytics($call))
-				->sendTelemetry(
-					source: null,
-					status: 'success',
-					event: 'cloud_record_expectation_record_not_found'
-				);
+			self::sendTelemetry($call, 'error', 'record_not_found', 'record_not_found');
 
 			self::sendErrorToChat($callId);
 			return '';
@@ -121,12 +105,7 @@ class CloudRecordExpectationAgent
 		{
 			$log && $logger->info("CloudRecordExpectationAgent: Some tracks still downloading. Rescheduling. CallId: {$callId}");
 
-			(new FollowUpAnalytics($call))
-				->sendTelemetry(
-					source: null,
-					status: 'success',
-					event: 'cloud_record_expectation_reschedule'
-				);
+			self::sendTelemetry($call, 'success', 'reschedule');
 
 			return self::buildAgentName($callId, $startTime);
 		}
@@ -134,12 +113,7 @@ class CloudRecordExpectationAgent
 		// All tracks processed or failed — cleanup
 		$log && $logger->info("CloudRecordExpectationAgent: All tracks processed. CallId: {$callId}");
 
-		(new FollowUpAnalytics($call))
-			->sendTelemetry(
-				source: null,
-				status: 'success',
-				event: 'cloud_record_expectation_completed'
-			);
+		self::sendTelemetry($call, 'success', 'completed');
 
 		return '';
 	}
@@ -168,12 +142,7 @@ class CloudRecordExpectationAgent
 		$call = Registry::getCallWithId($callId);
 		if ($call)
 		{
-			(new FollowUpAnalytics($call))
-				->sendTelemetry(
-					source: null,
-					status: 'success',
-					event: 'cloud_record_expectation_scheduled'
-				);
+			self::sendTelemetry($call, 'success', 'scheduled');
 		}
 
 		\CAgent::AddAgent(
@@ -278,13 +247,7 @@ class CloudRecordExpectationAgent
 			return;
 		}
 
-		(new FollowUpAnalytics($call))
-			->sendTelemetry(
-				source: null,
-				status: 'error',
-				errorCode: 'recording_download_failed',
-				event: 'cloud_record_expectation_failed'
-			);
+		self::sendTelemetry($call, 'error', 'failed', 'recording_download_failed');
 
 		$errorText = Loc::getMessage('CALL_RECORDING_DOWNLOAD_ERROR', ['#CALL_ID#' => $callId]);
 		$message = CallChatMessage::makeCloudRecordErrorMessage($call, $chat, $errorText);
@@ -328,13 +291,7 @@ class CloudRecordExpectationAgent
 			$call = Registry::getCallWithId($callId);
 			if ($call)
 			{
-				(new FollowUpAnalytics($call))
-					->sendTelemetry(
-						source: null,
-						status: 'error',
-						errorCode: 'track_download_stuck',
-						event: 'cloud_record_expectation_track_failed'
-					);
+				self::sendTelemetry($call, 'error', 'track_failed', 'track_download_stuck');
 			}
 
 			return 'failed';
@@ -353,5 +310,20 @@ class CloudRecordExpectationAgent
 		TrackService::getInstance()->processCloudTrack($record);
 
 		return 'processed';
+	}
+
+	private static function sendTelemetry(
+		?\Bitrix\Call\Call $call,
+		string $status,
+		string $event,
+		?string $errorCode = null
+	): void
+	{
+		(new CloudRecordAnalytics($call))->sendTelemetry(
+			source: null,
+			status: $status,
+			event: 'cloud_record_expectation_' . $event,
+			errorCode: $errorCode
+		);
 	}
 }

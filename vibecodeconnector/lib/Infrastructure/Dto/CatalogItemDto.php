@@ -32,6 +32,7 @@ final class CatalogItemDto
 		public readonly bool $isPinned,
 		public readonly bool $isMine,
 		public readonly bool $isHidden = false,
+		public readonly bool $isNew = false,
 	) {}
 
 	/**
@@ -58,6 +59,7 @@ final class CatalogItemDto
 			'isPinned' => $this->isPinned,
 			'isMine' => $this->isMine,
 			'isHidden' => $this->isHidden,
+			'isNew' => $this->isNew,
 		];
 	}
 

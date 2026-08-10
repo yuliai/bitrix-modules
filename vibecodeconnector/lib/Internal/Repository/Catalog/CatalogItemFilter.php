@@ -6,6 +6,7 @@ namespace Bitrix\Vibecodeconnector\Internal\Repository\Catalog;
 
 use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemAccessType;
+use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemType;
 
 final class CatalogItemFilter
 {
@@ -18,6 +19,7 @@ final class CatalogItemFilter
 	private ?CatalogItemAccessType $accessTypeNot = null;
 	/** @var CatalogItemAccessType[]|null */
 	private ?array $accessTypeIn = null;
+	private ?CatalogItemType $type = null;
 	private ?string $query = null;
 	private ?int $accessibleToUserId = null;
 	/** @var string[]|null */
@@ -28,6 +30,7 @@ final class CatalogItemFilter
 	private bool $includeDeactivated = false;
 	private ?string $pairingIss = null;
 	private ?bool $hiddenState = null;
+	private ?bool $notOpenedByUser = null;
 	private ?ConditionTree $where = null;
 
 	public function id(?int $id): self
@@ -85,6 +88,13 @@ final class CatalogItemFilter
 		return $this;
 	}
 
+	public function type(?CatalogItemType $type): self
+	{
+		$this->type = $type;
+
+		return $this;
+	}
+
 	public function query(?string $query): self
 	{
 		$trimmed = $query !== null ? trim($query) : null;
@@ -138,6 +148,18 @@ final class CatalogItemFilter
 	public function getHiddenState(): ?bool
 	{
 		return $this->hiddenState;
+	}
+
+	public function notOpenedByUser(?bool $notOpenedByUser): self
+	{
+		$this->notOpenedByUser = $notOpenedByUser;
+
+		return $this;
+	}
+
+	public function getNotOpenedByUser(): ?bool
+	{
+		return $this->notOpenedByUser;
 	}
 
 	public function where(?ConditionTree $where): self
@@ -210,6 +232,11 @@ final class CatalogItemFilter
 	public function getAccessTypeIn(): ?array
 	{
 		return $this->accessTypeIn;
+	}
+
+	public function getType(): ?CatalogItemType
+	{
+		return $this->type;
 	}
 
 	public function getQuery(): ?string

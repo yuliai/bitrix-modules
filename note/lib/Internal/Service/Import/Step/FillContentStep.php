@@ -8,6 +8,9 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\ImportMapRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsStats;
 use Bitrix\Note\Internal\Service\Document\DocumentService;
 use Bitrix\Note\Internal\Service\Import\ImportLogger;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
@@ -144,12 +147,27 @@ class FillContentStep implements StepInterface
 						'EXTERNAL_ID' => $unresolvedId,
 					];
 				}
+
+				// Exactly one create_document marker per imported source page (success outcome).
+				// Emitted last in try so a throw earlier routes solely to catch (no double marker).
+				AnalyticsService::documentCreated(
+					true,
+					AnalyticsStats::buildDocumentImportStats((string)$option['sourceType']),
+					AnalyticsDictionary::TYPE_IMPORT,
+				);
 			}
 			catch (\Throwable $e)
 			{
 				$docTitle = $doc['title'] ?? ($doc['id'] ?? '');
 				ImportLogger::logError("fillContent error [{$docTitle}]: " . $e->getMessage());
 				ImportLogger::addErrorDetail($option, $docTitle, ImportLogger::resolveErrorReason($e));
+
+				// Error outcome for the same source page (still exactly one marker per page).
+				AnalyticsService::documentCreated(
+					false,
+					AnalyticsStats::buildDocumentImportStats((string)$option['sourceType']),
+					AnalyticsDictionary::TYPE_IMPORT,
+				);
 			}
 		}
 

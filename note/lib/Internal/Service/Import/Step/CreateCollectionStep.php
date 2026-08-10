@@ -6,6 +6,9 @@ namespace Bitrix\Note\Internal\Service\Import\Step;
 
 use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Repository\ImportMapRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsStats;
 use Bitrix\Note\Internal\Service\Collection\CollectionService;
 use Bitrix\Note\Internal\Service\Import\CollectionAccessTransfer;
 use Bitrix\Note\Internal\Service\Import\ImportLogger;
@@ -78,6 +81,13 @@ class CreateCollectionStep implements StepInterface
 				$collectionUrlId,
 			);
 			ImportLogger::logInfo("createCollection: created {$option['resultCollectionId']} ({$collectionName})");
+
+			// Per-collection import marker; importer is the sole moderator of the fresh collection.
+			AnalyticsService::collectionCreated(
+				true,
+				AnalyticsStats::buildCollectionStats(1, 0, 0, (string)$option['sourceType']),
+				AnalyticsDictionary::TYPE_IMPORT,
+			);
 		}
 
 		// Reproduce the source base's access on the new collection (best-effort;

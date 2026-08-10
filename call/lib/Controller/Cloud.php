@@ -2,7 +2,7 @@
 
 namespace Bitrix\Call\Controller;
 
-use Bitrix\Call\Analytics\FollowUpAnalytics;
+use Bitrix\Call\Analytics\CloudRecordAnalytics;
 use Bitrix\Call\Integration\AI\CallAISettings;
 use Bitrix\Call\Logger\Logger;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
@@ -16,6 +16,7 @@ use Bitrix\Call\Track\CloudRecordExpectationAgent;
 use Bitrix\Call\DTO\CloudRecordingRequest;
 use Bitrix\Call\DTO\CloudRecordingErrorRequest;
 use Bitrix\Call\DTO\FileInfo;
+use Bitrix\Call\Controller\Filter\UniqueRequestFilter;
 use Bitrix\Call\NotifyService;
 use Bitrix\Call\CallChatMessage;
 use Bitrix\Call\Call\Registry;
@@ -27,8 +28,10 @@ use Bitrix\Im\V2\Chat;
 /**
  * @internal
  */
-class Cloud extends BaseReceiver
+class Cloud extends BaseReceiver implements IdempotentReplayable
 {
+	use IdempotentReplayableTrait;
+
 	public function getAutoWiredParameters(): array
 	{
 		return array_merge([
@@ -49,6 +52,30 @@ class Cloud extends BaseReceiver
 				}
 			),
 		], parent::getAutoWiredParameters());
+	}
+
+	/**
+	 * @return array[]
+	 */
+	public function configureActions(): array
+	{
+		return [
+			'recordingPrepare' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(),
+				],
+			],
+			'recordingReady' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(),
+				],
+			],
+			'recordingError' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(),
+				],
+			],
+		];
 	}
 
 	/**
@@ -133,7 +160,7 @@ class Cloud extends BaseReceiver
 			return null;
 		}
 
-		(new FollowUpAnalytics($call))
+		(new CloudRecordAnalytics($call))
 			->sendTelemetry(
 				source: null,
 				status: 'success',
@@ -146,21 +173,22 @@ class Cloud extends BaseReceiver
 		if (!$recordTrack)
 		{
 			$log && $logger->error("Cloud::recordingReadyAction: failed to create record track");
-			(new FollowUpAnalytics($call))
+			(new CloudRecordAnalytics($call))
 				->sendTelemetry(
 					source: null,
-					status: 'success',
+					status: 'error',
+					errorCode: 'track_not_created',
 					event: 'cloud_record_track_not_created'
 				);
 			return null;
 		}
 
 		$log && $logger->info("Cloud::recordingReadyAction: record track created: {$recordTrack->getId()}");
-		(new FollowUpAnalytics($call))
+		(new CloudRecordAnalytics($call))
 			->sendTelemetry(
-				source: null,
+				source: $recordTrack,
 				status: 'success',
-				event: 'cloud_record_track_created_' . $recordTrack->getId()
+				event: 'cloud_record_track_created'
 			);
 
 		$previewTrack = null;
@@ -176,11 +204,11 @@ class Cloud extends BaseReceiver
 		if ($previewTrack)
 		{
 			$log && $logger->info("Cloud::recordingReadyAction: preview track created: {$previewTrack->getId()}");
-			(new FollowUpAnalytics($call))
+			(new CloudRecordAnalytics($call))
 				->sendTelemetry(
-					source: null,
+					source: $previewTrack,
 					status: 'success',
-					event: 'cloud_record_preview_track_created_' . $previewTrack->getId()
+					event: 'cloud_record_track_created'
 				);
 		}
 
@@ -190,11 +218,11 @@ class Cloud extends BaseReceiver
 		if ($previewTrack && !$previewTrack->getDownloaded())
 		{
 			$log && $logger->info("Cloud::recordingReadyAction: start to download preview track");
-			(new FollowUpAnalytics($call))
+			(new CloudRecordAnalytics($call))
 				->sendTelemetry(
-					source: null,
+					source: $previewTrack,
 					status: 'success',
-					event: 'cloud_record_start_download_preview_track_' . $previewTrack->getId()
+					event: 'cloud_record_start_download_track'
 				);
 
 			$result &= $this->downloadTrack($previewTrack);
@@ -204,11 +232,11 @@ class Cloud extends BaseReceiver
 		if (!$recordTrack->getDownloaded())
 		{
 			$log && $logger->info("Cloud::recordingReadyAction: start to download record track");
-			(new FollowUpAnalytics($call))
+			(new CloudRecordAnalytics($call))
 				->sendTelemetry(
-					source: null,
+					source: $recordTrack,
 					status: 'success',
-					event: 'cloud_record_start_download_track_' . $recordTrack->getId()
+					event: 'cloud_record_start_download_track'
 				);
 
 			$result &= $this->downloadTrack($recordTrack);

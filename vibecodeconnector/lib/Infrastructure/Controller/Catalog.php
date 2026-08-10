@@ -128,6 +128,22 @@ final class Catalog extends Controller
 		return ['isEmpty' => $isEmpty];
 	}
 
+	public function getNewAppsCountAction(
+		CurrentUser $currentUser,
+		?int $previewUserId = null,
+	): array
+	{
+		$userId = $this->resolveListUserId($currentUser, $previewUserId);
+		$count = 0;
+
+		if ($userId > 0)
+		{
+			$count = $this->catalog->countNewAppsForUser($userId, useCache: false);
+		}
+
+		return ['count' => $count];
+	}
+
 	public function myListAction(
 		CurrentUser $currentUser,
 		?string $q = null,
@@ -136,6 +152,7 @@ final class Catalog extends Controller
 		?PageNavigation $pageNavigation = null,
 	): array
 	{
+		$selfId = (int)$currentUser->getId();
 		$userId = $this->resolveListUserId($currentUser, $previewUserId);
 		$offset = $this->resolvePaginationOffset($pageNavigation);
 		$limit = $this->resolvePaginationLimit($pageNavigation);
@@ -147,6 +164,11 @@ final class Catalog extends Controller
 			CatalogListState::fromRequest($state),
 		);
 		[$collection, $hasNext] = $this->slicePaginationCollection($collection, $limit);
+
+		if ($userId === $selfId && $userId > 0)
+		{
+			$this->catalog->markCatalogOpenedForUser($userId);
+		}
 
 		return [
 			'items' => $this->mapper->toArrayList($collection),
@@ -347,6 +369,7 @@ final class Catalog extends Controller
 		}
 
 		$this->lastOpenedRepository->recordOpen($userId, $catalogItemId);
+		$this->catalog->forgetNewAppsCount($userId);
 
 		return AjaxJson::createSuccess(['ok' => true]);
 	}

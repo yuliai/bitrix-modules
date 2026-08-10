@@ -8,6 +8,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
@@ -16,6 +17,7 @@ use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItem;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemAccessType;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemCollection;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemForUserCollection;
+use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemType;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\AccessTable;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\CatalogItemTable;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\HiddenTable;
@@ -213,6 +215,16 @@ final class CatalogItemRepository
 			{
 				$query->whereNull('USER_HIDDEN.HIDDEN_AT');
 			}
+
+			$notOpenedByUser = $filter->getNotOpenedByUser();
+			if ($notOpenedByUser === true)
+			{
+				$query->whereNull('USER_LAST_OPENED.OPENED_AT');
+			}
+			elseif ($notOpenedByUser === false)
+			{
+				$query->whereNotNull('USER_LAST_OPENED.OPENED_AT');
+			}
 		}
 
 		if ($filter->getId() !== null)
@@ -252,6 +264,11 @@ final class CatalogItemRepository
 				'ACCESS_TYPE',
 				array_map(static fn(CatalogItemAccessType $t) => $t->value, $accessTypeIn),
 			);
+		}
+
+		if ($filter->getType() !== null)
+		{
+			$query->where('TYPE', $filter->getType()->value);
 		}
 
 		$accessibleUserId = $filter->getAccessibleToUserId();
@@ -353,6 +370,123 @@ final class CatalogItemRepository
 		return AccessTable::query()
 			->setSelect(['CATALOG_ITEM_ID'])
 			->whereIn('ACCESS_CODE', $userCodes);
+	}
+
+	/**
+	 * @param string[] $userCodes
+	 * @param int[]|null $restrictToIds
+	 * @return int[]
+	 */
+	public function getNewAppItemIds(int $userId, array $userCodes, DateTime $baseline, ?array $restrictToIds = null): array
+	{
+		if ($restrictToIds !== null && $restrictToIds === [])
+		{
+			return [];
+		}
+
+		$query = $this->newAppItemsQuery($userId, $userCodes, $baseline)->setSelect(['ID']);
+		if ($restrictToIds !== null)
+		{
+			$query->whereIn('ID', $restrictToIds);
+		}
+
+		return array_map(static fn(array $row): int => (int)$row['ID'], $query->fetchAll());
+	}
+
+	/**
+	 * @param string[] $userCodes
+	 */
+	public function getNewAppCount(int $userId, array $userCodes, DateTime $baseline): int
+	{
+		return (int)$this->newAppItemsQuery($userId, $userCodes, $baseline)
+			->queryCountTotal()
+		;
+	}
+
+	/**
+	 * @param string[] $userCodes
+	 */
+	private function newAppItemsQuery(int $userId, array $userCodes, DateTime $baseline): Query
+	{
+		$filter = (new CatalogItemFilter())
+			->accessibleToUser($userId, $userCodes)
+			->type(CatalogItemType::Application)
+			->ownerUserNotId($userId)
+			->notOpenedByUser(true)
+			->hiddenState(false)
+		;
+		$filter->userContext($userId);
+
+		return $this->buildFilterQuery($filter)->where($this->noveltyCondition($userCodes, $baseline));
+	}
+
+	/**
+	 * "New for the user" predicate: created after the baseline, or an ACL grant
+	 * received after it. Reused by the count/id queries and by the paginated
+	 * New-state list so the criterion has a single source of truth.
+	 *
+	 * @param string[] $userCodes
+	 */
+	private function noveltyCondition(array $userCodes, DateTime $baseline): ConditionTree
+	{
+		$novelty = Query::filter()
+			->logic('or')
+			->where('CREATED_AT', '>', $baseline)
+		;
+		if ($userCodes !== [])
+		{
+			$novelty->where(
+				Query::filter()
+					->where('ACCESS_TYPE', CatalogItemAccessType::ACL->value)
+					->whereIn('ID', $this->itemIdsGrantedAfter($userCodes, $baseline))
+			);
+		}
+
+		return $novelty;
+	}
+
+	/**
+	 * Paginated list of the user's new apps, with the novelty predicate folded
+	 * into the list query so no full ID set is materialized before pagination.
+	 *
+	 * @param string[] $userCodes
+	 */
+	public function getNewAppListForUser(
+		int $userId,
+		array $userCodes,
+		DateTime $baseline,
+		CatalogItemFilter $filter,
+		?CatalogItemSort $sort = null,
+		?CatalogItemPager $pager = null,
+	): CatalogItemForUserCollection {
+		$filter->userContext($userId);
+
+		$query = $this->buildListQuery(
+			$filter,
+			$sort,
+			$pager,
+			['*', 'IS_PINNED', 'IS_OWNED_BY_USER', 'IS_LAST_OPENED', 'IS_HIDDEN'],
+		);
+		$query->where($this->noveltyCondition($userCodes, $baseline));
+
+		$views = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$views[] = $this->mapper->fromRowForUser($row);
+		}
+
+		return new CatalogItemForUserCollection(...$views);
+	}
+
+	/**
+	 * @param string[] $userCodes
+	 */
+	private function itemIdsGrantedAfter(array $userCodes, DateTime $baseline): Query
+	{
+		return AccessTable::query()
+			->setSelect(['CATALOG_ITEM_ID'])
+			->whereIn('ACCESS_CODE', $userCodes)
+			->where('GRANTED_AT', '>', $baseline);
 	}
 
 	/**

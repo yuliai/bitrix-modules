@@ -22,6 +22,10 @@ class WikiImportLinkProvider
 {
 	private const SOURCE_TYPE = 'wiki';
 
+	// Tags the post-import redirect target so note's welcome_points analytics can attribute the
+	// entry to the wiki tool (c_section=project, c_element=horizontal_menu) without wiki changes.
+	private const WELCOME_SOURCE = 'wiki';
+
 	private ImportMapRepository $mapRepository;
 
 	public function __construct(?ImportMapRepository $mapRepository = null)
@@ -74,12 +78,12 @@ class WikiImportLinkProvider
 
 	public function getCollectionUrl(int $collectionId): string
 	{
-		return '/note/workspace/' . $collectionId . '/';
+		return '/note/workspace/' . $collectionId . '/?source=' . self::WELCOME_SOURCE;
 	}
 
 	public function getDocumentUrl(int $documentId): string
 	{
-		return '/note/document/' . $documentId . '/';
+		return '/note/document/' . $documentId . '/?source=' . self::WELCOME_SOURCE;
 	}
 
 	private function buildCollectionId(int $iblockId, ?int $groupId): ?string

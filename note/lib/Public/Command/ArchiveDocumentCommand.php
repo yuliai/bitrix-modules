@@ -7,6 +7,8 @@ namespace Bitrix\Note\Public\Command;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
@@ -18,6 +20,9 @@ class ArchiveDocumentCommand extends AbstractCommand
 	private readonly SearchIndexService $searchIndexService;
 	private readonly PushNotificationService $pushService;
 	private readonly bool $notifyInitiator;
+	private readonly string $analyticsType;
+	// Failure is signalled via data['success']=false, so track the real archive outcome here.
+	private bool $succeeded = false;
 
 	public function __construct(
 		int $id,
@@ -27,8 +32,10 @@ class ArchiveDocumentCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		// REST writes are out-of-band: notify the initiator's own sessions instead of skipping them.
 		bool $notifyInitiator = false,
+		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 	)
 	{
+		$this->analyticsType = $analyticsType;
 		$this->id = $id;
 		$this->userId = $userId;
 		$this->repository = $repository ?? new DocumentRepository();
@@ -63,7 +70,14 @@ class ArchiveDocumentCommand extends AbstractCommand
 
 		$this->emitDocumentArchive((int)$document->getCollectionId(), $subtreeIds);
 
+		$this->succeeded = true;
+
 		return $this->createResult(['success' => true, 'archivedIds' => $subtreeIds]);
+	}
+
+	protected function afterRun(): void
+	{
+		AnalyticsService::documentArchived($this->succeeded, $this->analyticsType);
 	}
 
 	private function emitDocumentArchive(int $collectionId, array $archivedIds): void

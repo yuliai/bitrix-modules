@@ -24,7 +24,7 @@ use Bitrix\Call\Analytics\FollowUpAnalytics;
 
 final class CallAIService
 {
-	private const DELAY_WAIT_FOR_RESULT = 43200; // 12 hours
+	private const DELAY_WAIT_FOR_RESULT = 21600; // 6 hours
 	private const FINISH_TASK_DEPTH_DAYS = 60;
 
 	private static ?CallAIService $service = null;
@@ -388,7 +388,7 @@ final class CallAIService
 			foreach ($taskToLaunch as $taskSenseType)
 			{
 				$outcome = $outcomeCollectionCopy?->getOutcomeByType($taskSenseType->value);
-				if (!$outcome)
+				if ($outcome instanceof Outcome)
 				{
 					// Check Task
 					$task = AITask::getTaskForCall($callId, $taskSenseType);

@@ -9,6 +9,8 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\RecycleBin\MoveToRecycleBinService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
@@ -23,6 +25,9 @@ class DeleteDocumentCommand extends AbstractCommand
 	private readonly SearchIndexService $searchIndexService;
 	private readonly PushNotificationService $pushService;
 	private readonly bool $notifyInitiator;
+	private readonly string $analyticsType;
+	// Failure is signalled via data['success']=false, so track the real delete outcome here.
+	private bool $succeeded = false;
 
 	public function __construct(
 		int $id,
@@ -34,8 +39,10 @@ class DeleteDocumentCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		// REST writes are out-of-band: notify the initiator's own sessions instead of skipping them.
 		bool $notifyInitiator = false,
+		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 	)
 	{
+		$this->analyticsType = $analyticsType;
 		$this->id = $id;
 		$this->userId = $userId;
 		$this->repository = $repository ?? new DocumentRepository();
@@ -82,7 +89,14 @@ class DeleteDocumentCommand extends AbstractCommand
 
 		$this->emitDocumentDelete((int)$document->getCollectionId(), $trashedIds);
 
+		$this->succeeded = true;
+
 		return $this->createResult(['success' => true, 'trashedIds' => $trashedIds]);
+	}
+
+	protected function afterRun(): void
+	{
+		AnalyticsService::documentDeleted($this->succeeded, $this->analyticsType);
 	}
 
 	private function emitDocumentDelete(int $collectionId, array $trashedIds): void

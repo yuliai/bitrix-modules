@@ -9,6 +9,7 @@ enum CatalogListState: string
 	case Active = 'active';
 	case Hidden = 'hidden';
 	case All = 'all';
+	case New = 'new';
 
 	public static function fromRequest(?string $value): self
 	{
@@ -19,7 +20,7 @@ enum CatalogListState: string
 	{
 		return match ($this)
 		{
-			self::Active => false,
+			self::Active, self::New => false,
 			self::Hidden => true,
 			self::All => null,
 		};

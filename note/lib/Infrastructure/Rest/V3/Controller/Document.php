@@ -22,6 +22,8 @@ use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Exceptions\ParentDocumentMismatchException;
 use Bitrix\Note\Internal\Model\Document as DocumentEntity;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Public\Command\ArchiveDocumentCommand;
 use Bitrix\Note\Public\Command\CreateDocumentCommand;
 use Bitrix\Note\Public\Command\DeleteDocumentCommand;
@@ -58,8 +60,12 @@ class Document extends RestController
 	public function getAction(GetRequest $request): GetResponse
 	{
 		$id = (int)$request->id;
+		$document = $this->readDocument($id);
 
-		return new GetResponse($this->getDtoMapper()->mapOne($this->readDocument($id)));
+		// view_document for the REST read; readDocument throws on missing/forbidden, so this fires only on success.
+		AnalyticsService::documentViewed(true, AnalyticsDictionary::TYPE_REST);
+
+		return new GetResponse($this->getDtoMapper()->mapOne($document));
 	}
 
 	public function addAction(AddRequest $request): GetResponse
@@ -102,6 +108,7 @@ class Document extends RestController
 				$this->getCurrentUserId(),
 				$contentFormat,
 				notifyInitiator: true,
+				analyticsType: AnalyticsDictionary::TYPE_REST,
 			))->run();
 		}
 		catch (CommandException $e)
@@ -172,6 +179,9 @@ class Document extends RestController
 				$this->mapDocumentDomainException($e->getPrevious() ?? $e, $id);
 			}
 
+			// Single edit_text label covers title, content or both; only reached on success.
+			AnalyticsService::documentUpdated(AnalyticsDictionary::CHANGE_TYPE_EDIT_TEXT, true, AnalyticsDictionary::TYPE_REST);
+
 			return new GetResponse($this->getDtoMapper()->mapOne($this->readDocument($id)));
 		}
 
@@ -188,6 +198,8 @@ class Document extends RestController
 		{
 			$this->mapDocumentDomainException($e->getPrevious() ?? $e, $id);
 		}
+
+		AnalyticsService::documentUpdated(AnalyticsDictionary::CHANGE_TYPE_EDIT_TEXT, true, AnalyticsDictionary::TYPE_REST);
 
 		return new GetResponse($this->getDtoMapper()->mapOne($this->readDocument($id)));
 	}
@@ -209,7 +221,7 @@ class Document extends RestController
 			throw new AccessDeniedException();
 		}
 
-		$result = (new ArchiveDocumentCommand($request->id, $this->getCurrentUserId(), notifyInitiator: true))->run();
+		$result = (new ArchiveDocumentCommand($request->id, $this->getCurrentUserId(), notifyInitiator: true, analyticsType: AnalyticsDictionary::TYPE_REST))->run();
 		if (($result->getData()['success'] ?? false) !== true)
 		{
 			throw new EntityNotFoundException($request->id);
@@ -238,7 +250,7 @@ class Document extends RestController
 			throw new AccessDeniedException();
 		}
 
-		$result = (new DeleteDocumentCommand($id, $this->getCurrentUserId(), notifyInitiator: true))->run();
+		$result = (new DeleteDocumentCommand($id, $this->getCurrentUserId(), notifyInitiator: true, analyticsType: AnalyticsDictionary::TYPE_REST))->run();
 		if (($result->getData()['success'] ?? false) !== true)
 		{
 			throw new EntityNotFoundException($id);

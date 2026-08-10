@@ -16,6 +16,8 @@ use Bitrix\Note\Internal\Exceptions\AccessDeniedException as DomainAccessDeniedE
 use Bitrix\Note\Internal\Exceptions\FileTooLargeException as DomainFileTooLargeException;
 use Bitrix\Note\Internal\Exceptions\FileTypeNotAllowedException as DomainFileTypeNotAllowedException;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
 use Bitrix\Note\Public\Provider\DocumentProvider;
 use Bitrix\Note\Public\Service\AccessService;
@@ -102,6 +104,11 @@ class File extends RestController
 			$fileId,
 			$this->getCurrentUserId(),
 		);
+
+		// Analytics size unit is megabytes with 2 decimals — same formula as the bk path
+		// (EditorUploaderController::onUploadComplete). Best-effort: core swallows failures.
+		$sizeMb = round(strlen($binary) / (1024 * 1024), 2);
+		AnalyticsService::fileAdded($sizeMb, true, AnalyticsDictionary::TYPE_REST);
 
 		return new GetResponse($this->buildFileDto($fileId, $request->documentId));
 	}

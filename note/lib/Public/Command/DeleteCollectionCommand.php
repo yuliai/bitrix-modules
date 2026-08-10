@@ -9,6 +9,8 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Import\CollectionImportLockService;
 use Bitrix\Note\Internal\Service\RecycleBin\MoveToRecycleBinService;
@@ -24,6 +26,9 @@ class DeleteCollectionCommand extends AbstractCommand
 	private readonly CollectionImportLockService $importLockService;
 	private readonly PushNotificationService $pushService;
 	private readonly RecycleBinRepository $recycleBinRepository;
+	private readonly string $analyticsType;
+	// Failure is signalled via data['success']=false, so $result->isSuccess() is unreliable here.
+	private bool $succeeded = false;
 
 	public function __construct(
 		int $id,
@@ -34,8 +39,10 @@ class DeleteCollectionCommand extends AbstractCommand
 		?CollectionImportLockService $importLockService = null,
 		?PushNotificationService $pushService = null,
 		?RecycleBinRepository $recycleBinRepository = null,
+		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 	)
 	{
+		$this->analyticsType = $analyticsType;
 		$this->id = $id;
 		$this->userId = $userId;
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
@@ -88,10 +95,17 @@ class DeleteCollectionCommand extends AbstractCommand
 
 		$this->emitCollectionDelete($this->id, $trashedIds);
 
+		$this->succeeded = true;
+
 		return $this->createResult([
 			'success' => true,
 			'trashedIds' => $trashedIds,
 		]);
+	}
+
+	protected function afterRun(): void
+	{
+		AnalyticsService::collectionDeleted($this->succeeded, $this->analyticsType);
 	}
 
 	private function emitCollectionDelete(int $collectionId, array $trashedDocumentIds): void

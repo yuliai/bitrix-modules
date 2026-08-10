@@ -6,6 +6,7 @@ use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Entity\File\FileItem;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Message\Params;
 use Bitrix\Call\Call;
@@ -16,6 +17,7 @@ use Bitrix\Call\Integration\AI\Outcome\Insights;
 use Bitrix\Call\Integration\AI\Outcome\Overview;
 use Bitrix\Call\Integration\AI\Outcome\Evaluation;
 use Bitrix\Call\Integration\AI\Outcome\OutcomeCollection;
+use Bitrix\Call\Integration\AI\Outcome\Transcription;
 use Bitrix\Call\Integration\Im\CallFollowupBot;
 
 /**
@@ -293,34 +295,59 @@ class ChatMessage extends CallChatMessage
 		$insights = $outcomeCollection->getOutcomeByType(SenseType::INSIGHTS->value)?->getSenseContent();
 		if ($insights)
 		{
-			if (!empty($insights->insights) || !empty($insights->speakerAnalysis))
+			$insightTexts = [];
+			if ($insights->getVersion() > 1)
+			{
+				$transcription = $outcomeCollection->getOutcomeByType(SenseType::TRANSCRIBE->value)?->getSenseContent();
+				$speakerList = $transcription instanceof Transcription
+					? $transcription->prepareSpeakersList()
+					: [];
+
+				$joinedUserIds = [];
+				foreach ($call->getCallUsers() as $userId => $callUser)
+				{
+					if ($callUser->getFirstJoined())
+					{
+						$joinedUserIds[$userId] = true;
+					}
+				}
+
+				foreach ($insights->speakerAnalysis as $analysis)
+				{
+					if (
+						!$analysis->userId
+						|| !isset($speakerList[$analysis->userId])
+						|| !isset($joinedUserIds[$analysis->userId])
+						|| empty($analysis->detailedInsight)
+					)
+					{
+						continue;
+					}
+					$insightTexts[] = $analysis->detailedInsight;
+				}
+			}
+			else
+			{
+				foreach ($insights->insights as $insight)
+				{
+					if (!empty($insight->detailedInsight))
+					{
+						$insightTexts[] = $insight->detailedInsight;
+					}
+				}
+			}
+
+			if (!empty($insightTexts))
 			{
 				$attach->AddDelimiter($delimiter);
 				$attach->AddUser([
 					'NAME' => static::getMessage('CALL_NOTIFY_COPILOT_INSIGHTS'),
 					'AVATAR' => $hostUrl.'/bitrix/js/call/images/copilot-message-insights.svg',
 				]);
-				if ($insights->getVersion() > 1)
+				foreach ($insightTexts as $text)
 				{
-					foreach ($insights->speakerAnalysis as $analysis)
-					{
-						if (!empty($analysis->detailedInsight))
-						{
-							$attach->AddMessage($analysis->detailedInsight . '[br][br]');
-							$attach->AddDelimiter($spacer);
-						}
-					}
-				}
-				else
-				{
-					foreach ($insights->insights as $insight)
-					{
-						if (!empty($insight->detailedInsight))
-						{
-							$attach->AddMessage($insight->detailedInsight . '[br][br]');
-							$attach->AddDelimiter($spacer);
-						}
-					}
+					$attach->AddMessage($text . '[br][br]');
+					$attach->AddDelimiter($spacer);
 				}
 			}
 		}
@@ -504,13 +531,13 @@ class ChatMessage extends CallChatMessage
 		$messages = [];
 		foreach ($trackCollection as $track)
 		{
-			$messageText = $messageText0 . "\n[DISK={$track->getDiskFileId()}]";
-
 			$message = new Message();
-			$message->setContextUser($call->getActionUserId() ?: $call->getInitiatorId());
-			$message->setAuthorId($call->getActionUserId() ?: $call->getInitiatorId());
-			$message->setMessage($messageText);
-			$message->uploadFileFromText();
+			$message->setMessage($messageText0);
+			$message->markAsSystem(true);
+
+			$file = new FileItem($track->getDiskFileId(), $chat->getId());
+			$message->addFile($file);
+
 			$message->getParams()->get(Params::COMPONENT_PARAMS)->setValue([
 				'MESSAGE_TYPE' => NotifyService::MESSAGE_TYPE_AUDIO_RECORD,
 				'CALL_ID' => $callId,

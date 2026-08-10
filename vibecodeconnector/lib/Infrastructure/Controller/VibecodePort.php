@@ -13,6 +13,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main;
 use Bitrix\Vibecodeconnector\Infrastructure\Controller\ActionFilter\CheckIncomingJwt;
 use Bitrix\Vibecodeconnector\Internal\Exception\ProvisioningFailedException;
+use Bitrix\Vibecodeconnector\Internal\Integration\Rest\MarketSubscriptionGate;
 use Bitrix\Vibecodeconnector\Internal\Integration\Socialservices\NetworkService;
 use Bitrix\Vibecodeconnector\Internal\Service\DeveloperKeyService;
 use Bitrix\Vibecodeconnector\Internal\Service\Provisioning\ApiKey;
@@ -23,16 +24,23 @@ final class VibecodePort extends Controller implements IncomingServerAware
 {
 	private NetworkService $networkService;
 	private ?string $incomingServerIss = null;
+	private MarketSubscriptionGate $subscriptionGate;
 
 	public function init(): void
 	{
 		parent::init();
 		$this->networkService = new NetworkService();
+		$this->subscriptionGate = new MarketSubscriptionGate();
 	}
 
 	public function setIncomingServerIss(?string $iss): void
 	{
 		$this->incomingServerIss = $iss;
+	}
+
+	public function setSubscriptionGate(MarketSubscriptionGate $gate): void
+	{
+		$this->subscriptionGate = $gate;
 	}
 
 	protected function getDefaultPreFilters()
@@ -114,7 +122,7 @@ final class VibecodePort extends Controller implements IncomingServerAware
 	{
 		try
 		{
-			$webhookUrl = (new ApiKey\Issuer(EntryPoint::vibecode($this->incomingServerIss)))->issue($userId, $scopes, $title);
+			$webhookUrl = (new ApiKey\Issuer(EntryPoint::vibecode($this->incomingServerIss), subscriptionGate: $this->subscriptionGate))->issue($userId, $scopes, $title);
 
 			return Response\AjaxJson::createSuccess(['webhookUrl' => $webhookUrl]);
 		}
@@ -161,7 +169,7 @@ final class VibecodePort extends Controller implements IncomingServerAware
 	{
 		try
 		{
-			$app = (new ApplicationKey\Issuer(EntryPoint::vibecode($this->incomingServerIss)))->issue(
+			$app = (new ApplicationKey\Issuer(EntryPoint::vibecode($this->incomingServerIss), subscriptionGate: $this->subscriptionGate))->issue(
 				$userId,
 				$handlerUrl,
 				$scopes,
@@ -228,7 +236,7 @@ final class VibecodePort extends Controller implements IncomingServerAware
 				return Response\AjaxJson::createError($this->errorCollection);
 			}
 
-			$webhookUrl = (new ApiKey\Issuer(EntryPoint::vibecode($this->incomingServerIss)))->issue($userId, $scopes, $title);
+			$webhookUrl = (new ApiKey\Issuer(EntryPoint::vibecode($this->incomingServerIss), subscriptionGate: $this->subscriptionGate))->issue($userId, $scopes, $title);
 
 			return Response\AjaxJson::createSuccess(['webhookUrl' => $webhookUrl]);
 		}
@@ -288,7 +296,7 @@ final class VibecodePort extends Controller implements IncomingServerAware
 				return Response\AjaxJson::createError($this->errorCollection);
 			}
 
-			$app = (new ApplicationKey\Issuer(EntryPoint::vibecode($this->incomingServerIss)))->issue(
+			$app = (new ApplicationKey\Issuer(EntryPoint::vibecode($this->incomingServerIss), subscriptionGate: $this->subscriptionGate))->issue(
 				$userId,
 				$handlerUrl,
 				$scopes,

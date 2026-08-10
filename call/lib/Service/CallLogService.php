@@ -456,7 +456,7 @@ class CallLogService
 		$startDate = $call->getStartDate();
 		$endDate = $call->getEndDate();
 
-		if (!$startDate instanceof \DateTime || !$endDate instanceof \DateTime)
+		if (!$startDate instanceof DateTime || !$endDate instanceof DateTime)
 		{
 			return 0;
 		}

@@ -8,6 +8,8 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
@@ -19,6 +21,9 @@ class ArchiveCollectionCommand extends AbstractCommand
 	private readonly DocumentRepository $documentRepository;
 	private readonly SearchIndexService $searchIndexService;
 	private readonly PushNotificationService $pushService;
+	private readonly string $analyticsType;
+	// Failure is signalled via data['success']=false, so track the real archive outcome here.
+	private bool $succeeded = false;
 
 	public function __construct(
 		int $collectionId,
@@ -27,8 +32,10 @@ class ArchiveCollectionCommand extends AbstractCommand
 		?DocumentRepository $documentRepository = null,
 		?SearchIndexService $searchIndexService = null,
 		?PushNotificationService $pushService = null,
+		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 	)
 	{
+		$this->analyticsType = $analyticsType;
 		$this->collectionId = $collectionId;
 		$this->userId = $userId;
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
@@ -71,10 +78,17 @@ class ArchiveCollectionCommand extends AbstractCommand
 			$this->emitCollectionArchive($this->collectionId, $documentIds);
 		}
 
+		$this->succeeded = $collectionArchived;
+
 		return $this->createResult([
 			'success' => $collectionArchived,
 			'archivedIds' => $documentIds,
 		]);
+	}
+
+	protected function afterRun(): void
+	{
+		AnalyticsService::collectionArchived($this->succeeded, $this->analyticsType);
 	}
 
 	private function emitCollectionArchive(int $collectionId, array $archivedDocumentIds): void

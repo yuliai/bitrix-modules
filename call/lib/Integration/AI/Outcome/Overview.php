@@ -5,7 +5,6 @@ namespace Bitrix\Call\Integration\AI\Outcome;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Call\Integration;
 use Bitrix\Call\Integration\AI\MentionService;
-use Bitrix\Call\Integration\AI\Task\TranscriptionOverview;
 
 /*
 {
@@ -148,18 +147,10 @@ class Overview extends AISenseContent
 	/**
 	 * @return array
 	 */
-	public function toRestFormat(string $mentionFormat = 'bb'): array
+	public function toRestFormat(string $mentionFormat = MentionService::FORMAT_BB): array
 	{
-		$mentionService = MentionService::getInstance();
-		$replaceMentions = function (string $value) use ($mentionService, $mentionFormat)
-		{
-			return match ($mentionFormat)
-			{
-				'html' => $mentionService->replaceBBMentions($value),
-				'none' => $mentionService->removeBBMentions($value),
-				default => $value,//bb
-			};
-		};
+		$mentionService = $this->getMentionService();
+		$replaceMentions = fn (string $value): string => $this->applyMentionFormat($value, $mentionFormat);
 
 		$result = [];
 

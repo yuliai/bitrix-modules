@@ -13,6 +13,9 @@ use Bitrix\Note\Infrastructure\Rest\V3\Structure\CollectionPaginationStructure;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\CollectionUnderImportException;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException as DomainAccessDeniedException;
 use Bitrix\Note\Internal\Model\Collection as CollectionEntity;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsStats;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\ArchiveCollectionRequest;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\ListCollectionsRequest;
 use Bitrix\Note\Public\Command\ArchiveCollectionCommand;
@@ -71,6 +74,9 @@ class Collection extends RestController
 			throw new EntityNotFoundException($id);
 		}
 
+		// view_collection for the REST read; only after the collection is confirmed visible and present.
+		AnalyticsService::collectionViewed(true, AnalyticsDictionary::TYPE_REST);
+
 		return new GetResponse($this->getDtoMapper()->mapOne($collection));
 	}
 
@@ -99,6 +105,13 @@ class Collection extends RestController
 		{
 			throw new EntityNotFoundException(0);
 		}
+
+		// REST creator is always the sole moderator (admin=1); no import context => no importType.
+		AnalyticsService::collectionCreated(
+			true,
+			AnalyticsStats::buildCollectionStats(1, 0, 0),
+			AnalyticsDictionary::TYPE_REST,
+		);
 
 		return new GetResponse($this->getDtoMapper()->mapOne($collection));
 	}
@@ -148,6 +161,7 @@ class Collection extends RestController
 		$result = (new ArchiveCollectionCommand(
 			$request->id,
 			$this->getCurrentUserId(),
+			analyticsType: AnalyticsDictionary::TYPE_REST,
 		))->run();
 
 		if (($result->getData()['success'] ?? false) !== true)
@@ -173,6 +187,7 @@ class Collection extends RestController
 		$result = (new DeleteCollectionCommand(
 			$id,
 			$this->getCurrentUserId(),
+			analyticsType: AnalyticsDictionary::TYPE_REST,
 		))->run();
 
 		$data = $result->getData();

@@ -13,6 +13,8 @@ use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
 use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Public\Command\CompactDocumentCommand;
 use Bitrix\Note\Public\Command\SavePatchCommand;
@@ -146,6 +148,9 @@ class CollaborationSyncController extends Controller
 		{
 			return ['locked' => true];
 		}
+
+		// Content-save reached: label the compact snapshot persist as edit_text.
+		AnalyticsService::documentUpdated(AnalyticsDictionary::CHANGE_TYPE_EDIT_TEXT, $result->isSuccess(), AnalyticsDictionary::TYPE_BK);
 
 		return ['success' => true];
 	}

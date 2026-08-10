@@ -7,6 +7,8 @@ namespace Bitrix\Note\Public\Command;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\DocumentService;
 
@@ -21,6 +23,8 @@ class CreateDocumentCommand extends AbstractCommand
 	private readonly DocumentService $documentService;
 	private readonly PushNotificationService $pushService;
 	private readonly bool $notifyInitiator;
+	private readonly string $analyticsType;
+	private bool $succeeded = false;
 
 	public function __construct(
 		int $collectionId,
@@ -33,8 +37,10 @@ class CreateDocumentCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		// REST writes are out-of-band: notify the initiator's own sessions instead of skipping them.
 		bool $notifyInitiator = false,
+		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 	)
 	{
+		$this->analyticsType = $analyticsType;
 		$this->collectionId = $collectionId;
 		$this->parentId = $parentId;
 		$this->title = $title;
@@ -62,10 +68,18 @@ class CreateDocumentCommand extends AbstractCommand
 			$this->emitDocumentCreate($document);
 		}
 
+		$this->succeeded = $document !== null;
+
 		$result = new Result();
 		$result->setData(['document' => $document]);
 
 		return $result;
+	}
+
+	protected function afterRun(): void
+	{
+		// Plain (non-import) create carries no p1; importType is sent only on the import path.
+		AnalyticsService::documentCreated($this->succeeded, null, $this->analyticsType);
 	}
 
 	private function emitDocumentCreate(\Bitrix\Note\Internal\Model\Document $document): void

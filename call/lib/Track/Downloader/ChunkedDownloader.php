@@ -10,7 +10,7 @@ use Bitrix\Call\Track;
 use Bitrix\Call\Track\TrackError;
 use Bitrix\Call\Logger\Logger;
 use Bitrix\Call\Integration\AI\CallAISettings;
-use Bitrix\Call\Analytics\FollowUpAnalytics;
+use Bitrix\Call\Analytics\TrackAnalytics;
 use Bitrix\Call\Call\Registry;
 
 /**
@@ -285,7 +285,7 @@ class ChunkedDownloader extends AbstractDownloader
 	 */
 	protected function getEventName(Track $track, string $action): string
 	{
-		return "chunked_downloader_{$action}_{$track->getId()}";
+		return "chunked_downloader_{$action}";
 	}
 
 	/**
@@ -303,23 +303,13 @@ class ChunkedDownloader extends AbstractDownloader
 		string $event
 	): void
 	{
-		if (!Loader::includeModule('im'))
-		{
-			return;
-		}
-
 		$call = Registry::getCallWithId($track->getCallId());
 		if (!$call)
 		{
 			return;
 		}
 
-		(new FollowUpAnalytics($call))
-			->sendTelemetry(
-				source: null,
-				status: $status,
-				errorCode: $errorCode,
-				event: $event
-			);
+		(new TrackAnalytics($call))
+			->sendTelemetry(source: $track, status: $status, errorCode: $errorCode, event: $event);
 	}
 }

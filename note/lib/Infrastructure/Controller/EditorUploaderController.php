@@ -12,6 +12,8 @@ use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
+use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
 use Bitrix\Note\Internal\Service\NoteFileUrlService;
 use Bitrix\UI\FileUploader\CommitOptions;
@@ -127,14 +129,20 @@ class EditorUploaderController extends UploaderController
 			return;
 		}
 
+		// Analytics size unit is megabytes with 2 decimals: note files are usually < 1 MB, so
+		// integer MB would floor almost everything to 0 and drop the signal.
+		$sizeMb = round($fileInfo->getSize() / (1024 * 1024), 2);
 		$linkResult = (new DocumentFileLinkRepository())->link($documentId, $fileId, $userId);
 		if (!$linkResult->isSuccess())
 		{
+			AnalyticsService::fileAdded($sizeMb, false, AnalyticsDictionary::TYPE_BK);
 			$this->rollbackUpload($fileId, $documentId, false);
 			$uploadResult->addError(new UploaderError('NOTE_EDITOR_UPLOAD_REJECTED', (string)Loc::getMessage('NOTE_EDITOR_UPLOADER_CONTROLLER_ERROR_LINK_FILE')));
 
 			return;
 		}
+
+		AnalyticsService::fileAdded($sizeMb, true, AnalyticsDictionary::TYPE_BK);
 
 		$showUrl = NoteFileUrlService::createShowUrl($fileId);
 		if ($showUrl === '')

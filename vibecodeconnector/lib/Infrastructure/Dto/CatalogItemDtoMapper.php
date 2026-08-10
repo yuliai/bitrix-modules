@@ -29,6 +29,7 @@ final class CatalogItemDtoMapper
 			isPinned: $item->isPinned,
 			isMine: $item->isMine,
 			isHidden: $item->isHidden,
+			isNew: $item->isNew,
 		);
 	}
 

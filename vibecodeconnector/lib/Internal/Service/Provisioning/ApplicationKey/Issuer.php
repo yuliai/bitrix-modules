@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Service\Provisioning\ApplicationKey;
 
 use Bitrix\Rest\Public\Contract\Application\RestApplicationInterface;
+use Bitrix\Vibecodeconnector\Internal\Integration\Rest\MarketSubscriptionGate;
 use Bitrix\Vibecodeconnector\Internal\Integration\Rest\PersonalApplicationInstaller;
 use Bitrix\Vibecodeconnector\Internal\Service\Provisioning\EntryPoint;
 use Bitrix\Vibecodeconnector\Internal\Service\Provisioning\PermissionSource;
@@ -19,6 +20,7 @@ final class Issuer
 			new PermissionSource\Settings(),
 		),
 		?PersonalApplicationInstaller $installer = null,
+		private readonly MarketSubscriptionGate $subscriptionGate = new MarketSubscriptionGate(),
 	) {
 		$this->installer = $installer ?? new PersonalApplicationInstaller($entryPoint);
 	}
@@ -39,6 +41,8 @@ final class Issuer
 		?string $applicationToken = null,
 	): RestApplicationInterface
 	{
+		$this->subscriptionGate->ensureAvailable();
+
 		return $this->permissionSource->isVibecodeSource()
 			? $this->installer->forceInstall(
 				$userId,

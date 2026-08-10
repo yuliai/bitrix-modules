@@ -489,6 +489,11 @@ class CallManager extends Engine\Controller
 
 	protected function inviteUsers(\Bitrix\Call\Call $call, $userIds, $isLegacyMobile, $isVideo, $isShow, $isRepeated): void
 	{
+		if (\Bitrix\Im\User::getInstance()->isExtranet())
+		{
+			$userIds = \Bitrix\Im\Integration\Socialnetwork\Extranet::filterUserList($userIds, \Bitrix\Im\User::getInstance()->getId()) ?: [];
+		}
+
 		$usersToInvite = [];
 		$existingUsers = [];
 		foreach ($userIds as $userId)
@@ -530,13 +535,13 @@ class CallManager extends Engine\Controller
 
 		$sendPush = $isRepeated !== true;
 
-		// send invite to the ones being invited.
-		$call->inviteUsers(
-			$this->getCurrentUser()->getId(),
-			$usersToInvite,
-			$isLegacyMobile,
-			$isVideo,
-			$sendPush
+		$call->sendInviteUsers(
+			senderId: $this->getCurrentUser()->getId(),
+			toUserIds: $usersToInvite,
+			isLegacyMobile: $isLegacyMobile,
+			video: $isVideo,
+			sendPush: $sendPush,
+			isRepeated: $isRepeated,
 		);
 
 		// send userInvited to everyone else.
@@ -1187,8 +1192,8 @@ class CallManager extends Engine\Controller
 	public function getCallLimitsAction(): array
 	{
 		return [
-			'callServerEnabled' => \Bitrix\Call\Call::isCallServerEnabled(),
-			'maxParticipants' => \Bitrix\Call\Call::getMaxParticipants(),
+			'callServerEnabled' => Settings::isCallServerEnabled(),
+			'maxParticipants' => Settings::getMaxParticipants(),
 		];
 	}
 

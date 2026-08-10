@@ -9,7 +9,7 @@ class FollowUpEvent extends Event
 {
 	protected function setDefaultParams(): self
 	{
-		if ($this->call->getId() !== null)
+		if ($this->call->getUuid() !== null)
 		{
 			$this->setP5('callId_' . $this->call->getUuid());
 		}

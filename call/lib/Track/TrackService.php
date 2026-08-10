@@ -11,20 +11,26 @@ use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
 use Bitrix\Call;
 use Bitrix\Call\Call\Registry;
+use Bitrix\Call\Settings;
 use Bitrix\Call\NotifyService;
 use Bitrix\Call\Logger\Logger;
 use Bitrix\Call\Integration\AI;
 use Bitrix\Call\Integration\AI\CallAIError;
 use Bitrix\Call\Integration\AI\CallAISettings;
-use Bitrix\Call\Integration\AI\Task\AITask;
+use Bitrix\Call\Analytics\TrackAnalytics;
 use Bitrix\Call\Analytics\FollowUpAnalytics;
-use Bitrix\Call\Track\Downloader\AbstractDownloader;
+use Bitrix\Call\Analytics\CloudRecordAnalytics;
 use Bitrix\Main\Application;
 use Bitrix\Main\IO\File;
 
 
 final class TrackService
 {
+	private const DISK_ATTACH_TYPES = [
+		Call\Track::TYPE_RECORD,
+		Call\Track::TYPE_VIDEO_RECORD,
+	];
+
 	private static ?TrackService $service = null;
 
 	private function __construct()
@@ -49,7 +55,7 @@ final class TrackService
 
 	public function doNeedNeedAttachToDisk(Call\Track $track): bool
 	{
-		if ($track->getType() != Call\Track::TYPE_RECORD)
+		if (!in_array($track->getType(), self::DISK_ATTACH_TYPES, true))
 		{
 			return false;
 		}
@@ -108,8 +114,8 @@ final class TrackService
 			));
 		}
 
-		//TODO: required preview support for other regions
-		$previewPath = Application::getDocumentRoot() . '/bitrix/images/call/cloud/preview_ru.png';
+		$previewFileName = Settings::isCisRegion() ? 'preview_ru.png' : 'preview_en.png';
+		$previewPath = Application::getDocumentRoot() . '/bitrix/images/call/cloud/' . $previewFileName;
 		if (!File::isFileExists($previewPath))
 		{
 			$log && $logger->error("TrackService::createDefaultPreview: Static file not found: {$previewPath}");
@@ -226,12 +232,12 @@ final class TrackService
 		$call = Registry::getCallWithId($track->getCallId());
 		if ($call)
 		{
-			(new FollowUpAnalytics($call))
+			(new CloudRecordAnalytics($call))
 				->sendTelemetry(
 					source: null,
 					status: 'error',
 					errorCode: 'unsupported_mime_type',
-					event: 'cloud_track_processing_error_' . $track->getId(),
+					event: 'cloud_track_processing_error',
 				);
 		}
 
@@ -543,14 +549,12 @@ final class TrackService
 			$call = Registry::getCallWithId($track->getCallId());
 			if ($call)
 			{
-				(new FollowUpAnalytics($call))
-					->sendTelemetry(
-						source: null,
-						status: 'error',
-						event: 'track_processing_error_' . $track->getId(),
-						error: $processResult->getError()
-					)
-				;
+				(new TrackAnalytics($call))->sendTelemetry(
+					source: $track,
+					status: 'error',
+					event: 'track_processing_error',
+					error: $processResult->getError()
+				);
 			}
 		}
 	}

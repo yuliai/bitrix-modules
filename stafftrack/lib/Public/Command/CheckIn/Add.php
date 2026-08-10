@@ -16,7 +16,6 @@ use Bitrix\StaffTrack\Internal\Entity\CheckInType;
 use Bitrix\StaffTrack\Internal\Integration\Im\MessageService;
 use Bitrix\StaffTrack\Internal\Integration\Pull;
 use Bitrix\StaffTrack\Internal\Integration\Timeman\WorkDayService;
-use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Text\Emoji;
 use Bitrix\StaffTrack\Internal\Geo\Geohash;
 use Bitrix\StaffTrack\Public\Services\AddressCache;
@@ -48,11 +47,6 @@ class Add extends AbstractCommand
 		$this->normalizeFileIds();
 		$this->processUploadedFiles($uploadedFiles);
 		$this->fillAddressFromCache();
-
-		if (empty(trim($this->checkInDto->description)))
-		{
-			$this->checkInDto->description = Loc::getMessage('STAFFTRACK_DEFAULT_CHECK_IN_DESCRIPTION');
-		}
 
 		if ($this->checkInDto->dialogIds && $this->checkInDto->snapshotUrl)
 		{

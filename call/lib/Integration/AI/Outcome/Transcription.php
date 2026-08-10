@@ -54,8 +54,10 @@ class Transcription extends AISenseContent
 		}
 	}
 
-	public function toRestFormat(string $mentionFormat = 'bb'): array
+	public function toRestFormat(string $mentionFormat = MentionService::FORMAT_BB): array
 	{
+		$replaceMentions = fn (string $value): string => $this->applyMentionFormat($value, $mentionFormat);
+
 		$result = [];
 		foreach ($this->transcriptions as $row)
 		{
@@ -66,7 +68,7 @@ class Transcription extends AISenseContent
 					'user' => $row->user,
 					'start' => $row->start,
 					'end' => $row->end,
-					'text' => $this->getMentionService()->replaceBBMentions($row->text),
+					'text' => $replaceMentions($row->text),
 				];
 			}
 		}

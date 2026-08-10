@@ -92,6 +92,41 @@ class Call extends JwtController
 					new UniqueRequestFilter()
 				]
 			],
+			'answer' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'decline' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'invite' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'createChatForChildCall' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'onShareScreen' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'onStartRecord' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
+			'tryJoinCall' => [
+				'+prefilters' => [
+					new UniqueRequestFilter(UniqueRequestFilter::TTL_HOT_PATH),
+				],
+			],
 		];
 	}
 
@@ -713,6 +748,7 @@ class Call extends JwtController
 				video: $isVideo,
 				sendPush: $sendPush,
 				sendMode: $sendMode,
+				isRepeated: $isRepeated,
 				usersInOtherCalls: $usersInOtherCalls
 			);
 

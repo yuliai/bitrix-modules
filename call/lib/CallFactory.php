@@ -328,7 +328,7 @@ class CallFactory
 	{
 		$depthHours = Recent::ACTIVE_CALLS_DEPTH_HOURS;
 		$query = CallTable::query()
-			->addSelect('*')
+			->setSelect(array_keys(CallTable::getEntity()->getScalarFields()))
 			->where('TYPE', $type)
 			->where('PROVIDER', $provider)
 			->where('ENTITY_TYPE', $entityType)
@@ -348,7 +348,7 @@ class CallFactory
 	protected static function searchByUuid(string $uuid): ?array
 	{
 		$callFields = CallTable::query()
-			->addSelect("*")
+			->setSelect(array_keys(CallTable::getEntity()->getScalarFields()))
 			->where("UUID", $uuid)
 			->setLimit(1)
 			->exec()

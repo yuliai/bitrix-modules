@@ -53,8 +53,9 @@ class MessageService
 				continue;
 			}
 
-			self::sendBaseMessage($checkInDto, $dialogId, $chatId, $userId, $checkInDto->description);
-			$messageId = self::sendGeoMessage($checkInDto, $dialogId, $userId, $checkInDto->description);
+			$messageText = !empty(trim($checkInDto->description)) ? $checkInDto->description : Loc::getMessage('STAFFTRACK_DEFAULT_CHECK_IN_DESCRIPTION');
+			self::sendBaseMessage($checkInDto, $dialogId, $chatId, $userId, $messageText);
+			$messageId = self::sendGeoMessage($checkInDto, $dialogId, $userId, $messageText);
 			if (!empty($messageId))
 			{
 				$messageIds[] = $messageId;
