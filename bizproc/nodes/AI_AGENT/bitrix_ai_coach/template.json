@@ -1822,7 +1822,7 @@
                                                         "Properties": {
                                                             "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
                                                             "query": "{=A4769_8071_8996_8194:Message}",
-                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_1###",
+                                                            "systemPrompt": "@@@SYSTEMPROMPT_1@@@",
                                                             "returnType": "json",
                                                             "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[\/USER][\/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
                                                             "jsonPath": {
@@ -2076,7 +2076,7 @@
                             "Properties": {
                                 "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
                                 "query": "{=A4769_8071_8996_8194:Message}",
-                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_1###",
+                                "systemPrompt": "@@@SYSTEMPROMPT_1@@@",
                                 "returnType": "json",
                                 "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[\/USER][\/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
                                 "jsonPath": {
@@ -2362,7 +2362,7 @@
                                                         "Properties": {
                                                             "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
                                                             "query": "{=A9654_3504_4807_2932:Message}",
-                                                            "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_2###",
+                                                            "systemPrompt": "@@@SYSTEMPROMPT_2@@@",
                                                             "returnType": "json",
                                                             "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    },\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"is_test_complete\",\n    \"results_of_test\"\n  ]\n}",
                                                             "jsonPath": {
@@ -2520,7 +2520,7 @@
                             "Properties": {
                                 "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
                                 "query": "{=A9654_3504_4807_2932:Message}",
-                                "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_COACH_SYSTEMPROMPT_2###",
+                                "systemPrompt": "@@@SYSTEMPROMPT_2@@@",
                                 "returnType": "json",
                                 "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    },\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"is_test_complete\",\n    \"results_of_test\"\n  ]\n}",
                                 "jsonPath": {

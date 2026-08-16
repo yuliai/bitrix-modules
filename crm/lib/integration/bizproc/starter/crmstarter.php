@@ -18,6 +18,7 @@ use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
+use Bitrix\Crm\Service\Container;
 use CCrmBizProcHelper;
 
 final class CrmStarter
@@ -25,6 +26,7 @@ final class CrmStarter
 	public const AUTOMATION_SCOPE = 'automation';
 	public const REST_SCOPE = 'rest';
 	public const MOVE_TO_BACKGROUND_DELAY = 0;
+	private const CREATE_DOCUMENT_TRIGGER = 'CrmEntityCreateTrigger';
 	private array $complexId;
 	private DocumentDto $document;
 	private string $contextModuleId = 'crm';
@@ -214,23 +216,7 @@ final class CrmStarter
 
 		if ($this->isStarterEnabled())
 		{
-			$starter =
-				(new Starter(
-					new StarterDto(
-						process: new StarterConfigDto(
-							scenario: $this->getScenarioByScope($dto->scope, $eventType === \CCrmBizProcEventType::Create),
-							validateParameters: false,
-						),
-					)
-				))
-			;
-			$this->fillStarterByRunDto($dto, $starter);
-			if ($eventType !== \CCrmBizProcEventType::Create)
-			{
-				$this->fillStarterWithCommonTriggers($dto, $starter);
-			}
-
-			$result->addErrors($starter->start()->getErrors());
+			$result->addErrors($this->createProcessStarter($dto, $eventType)->start()->getErrors());
 		}
 		else
 		{
@@ -368,6 +354,10 @@ final class CrmStarter
 		{
 			$starter = Starter::getByScenario($isNew ? Scenario::onDocumentAdd : Scenario::onDocumentUpdate);
 			$this->fillStarterByRunDto($dto, $starter);
+			if ($isNew)
+			{
+				$this->addCreateDocumentTriggerEvent($dto, $starter);
+			}
 
 			foreach ($dto->events as $event)
 			{
@@ -389,6 +379,81 @@ final class CrmStarter
 		return null;
 	}
 
+	private function createProcessStarter(RunDataDto $dto, int $eventType): Starter
+	{
+		$starter =
+			(new Starter(
+				new StarterDto(
+					process: new StarterConfigDto(
+						scenario: $this->getScenarioByScope($dto->scope, $eventType === \CCrmBizProcEventType::Create),
+						validateParameters: false,
+					),
+				)
+			))
+		;
+
+		$this->fillStarterByRunDto($dto, $starter);
+
+		if ($eventType === \CCrmBizProcEventType::Create)
+		{
+			$this->addCreateDocumentTriggerEvent($dto, $starter);
+		}
+		else
+		{
+			$this->fillStarterWithCommonTriggers($dto, $starter);
+		}
+
+		return $starter;
+	}
+
+	private function addCreateDocumentTriggerEvent(RunDataDto $dto, Starter $starter): void
+	{
+		$complexDocumentId = $this->resolveComplexDocumentIdFromDocument($this->document);
+		if (!$complexDocumentId)
+		{
+			return;
+		}
+
+		$parameters = ['Document' => $complexDocumentId];
+
+		$categoryId = $this->resolveCategoryId($dto);
+		if ($categoryId !== null)
+		{
+			$parameters['CategoryId'] = $categoryId;
+		}
+
+		$starter->addEvent(
+			self::CREATE_DOCUMENT_TRIGGER,
+			$this->convertEventDocumentsToDocumentDto([$this->document]),
+			$parameters,
+			\CBPDocumentEventType::Create,
+		);
+	}
+
+	private function resolveCategoryId(RunDataDto $dto): ?int
+	{
+		if ($dto->categoryId !== null)
+		{
+			return $dto->categoryId;
+		}
+
+		$factory = Container::getInstance()->getFactory($this->document->entityTypeId);
+		if (!$factory || !$factory->isCategoriesSupported())
+		{
+			return null;
+		}
+
+		$actualCategoryId = $dto->actualFields[\Bitrix\Crm\Item::FIELD_NAME_CATEGORY_ID] ?? null;
+		if ($actualCategoryId !== null)
+		{
+			return (int)$actualCategoryId;
+		}
+
+		$item = $factory->getItem($this->document->entityId, [\Bitrix\Crm\Item::FIELD_NAME_CATEGORY_ID]);
+
+		return $item?->getCategoryId();
+	}
+
 	private function fillStarterWithCommonTriggers(RunDataDto $dto, Starter $starter): void
 	{
 		$changedFields = $this->computeChangedFields($dto->actualFields ?? [], $dto->previousFields ?? []);
@@ -404,9 +469,7 @@ final class CrmStarter
 				[$this->document],
 				[
 					'Fields' => $changedFields,
-					'Document' => CCrmBizProcHelper::resolveDocumentId(
-						$this->document->entityTypeId, $this->document->entityId
-					),
+					'Document' => $this->resolveComplexDocumentIdFromDocument($this->document),
 				],
 			), // process
 		];
@@ -513,7 +576,7 @@ final class CrmStarter
 		/** @var DocumentDto[] $eventDocuments */
 		foreach ($eventDocuments as $document)
 		{
-			$complexId = CCrmBizProcHelper::resolveDocumentId($document->entityTypeId, $document->entityId);
+			$complexId = $this->resolveComplexDocumentIdFromDocument($document);
 			if ($complexId)
 			{
 				$documents[] = new \Bitrix\Bizproc\Starter\Dto\DocumentDto(
@@ -524,6 +587,11 @@ final class CrmStarter
 		}
 
 		return $documents;
+	}
+
+	private function resolveComplexDocumentIdFromDocument(DocumentDto $document): ?array
+	{
+		return CCrmBizProcHelper::resolveDocumentId($document->entityTypeId, $document->entityId);
 	}
 
 	private function executeTrigger(EventDto $event): void

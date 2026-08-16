@@ -178,6 +178,11 @@ class Manager
 	 */
 	private function buildSortedItems(): array
 	{
+		if ($this->context->isGuest)
+		{
+			return $this->getGuestPreset();
+		}
+
 		if (!Features::get()->isChatFoldersAvailable)
 		{
 			return $this->getDefaultPresetByContext();
@@ -206,6 +211,13 @@ class Manager
 		}
 
 		return $tabs;
+	}
+
+	private function getGuestPreset(): array
+	{
+		return [
+			$this->createSystemTab('default'),
+		];
 	}
 
 	private function getDefaultPresetByContext(): array
@@ -417,10 +429,13 @@ class Manager
 				'id' => User::getCurrent()?->getId() ?? 0,
 				'type' => User::getCurrent()?->getType()?->value ?? 'user',
 			],
+			'REQUEST_GUEST_NAME' => $this->context->requestGuestName,
+			'GUEST_CODE' => $this->context->guestCode,
 			'PERMISSIONS' => $permissions,
 			'MULTIPLE_ACTION_MESSAGE_LIMIT' => Settings::getMultipleActionMessageLimit(),
 			'CALL_SERVER_MAX_USERS' => $this->getCallServerMaxUsers(),
 			'SERVICE_HEALTH_URL' => $this->getServiceHealthUrl(),
+			'VIDEO_CALLS_TERMS_URL' => $this->getVideoCallsTermsUrl(),
 			'AI_SETTINGS' => [
 				'MAX_TRANSCRIBABLE_FILE_SIZE' => $this->getMaxTranscribableFileSize(),
 			],
@@ -546,6 +561,20 @@ class Manager
 		;
 
 		return $baseUrl . $license->getRegion();
+	}
+
+	private function getVideoCallsTermsUrl(): string
+	{
+		$license = Application::getInstance()->getLicense();
+
+		return match ($license->getRegion()) {
+			'ru' => 'https://www.bitrix24.ru/about/terms_of_use_videocalls.php',
+			'kz' => 'https://www.bitrix24.kz/about/terms_of_use_videocalls.php',
+			'by' => 'https://www.bitrix24.by/about/terms-of-use-videocalls.php',
+			default => $license->isCis()
+				? 'https://www.bitrix24.kz/about/terms_of_use_videocalls.php'
+				: 'https://www.bitrix24.com/terms/terms-of-use-videocalls.php',
+		};
 	}
 
 	private function getMaxTranscribableFileSize(): int

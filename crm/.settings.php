@@ -438,6 +438,9 @@ return [
 			'crm.kanban.entity.dynamic' => [
 				'className' => '\\Bitrix\\Crm\\Kanban\\Entity\\Dynamic',
 			],
+			'crm.kanban.entity.dynamic.activities' => [
+				'className' => '\\Bitrix\\Crm\\Kanban\\Entity\\DynamicActivities',
+			],
 			'crm.kanban.entity.smartInvoice' => [
 				'className' => '\\Bitrix\\Crm\\Kanban\\Entity\\SmartInvoice',
 			],
@@ -527,6 +530,9 @@ return [
 			],
 			'crm.filter.factory' => [
 				'className' => '\\Bitrix\\Crm\\Filter\\Factory',
+			],
+			'crm.filter.relatedEntity.registry' => [
+				'className' => '\\Bitrix\\Crm\\Filter\\RelatedEntity\\Registry',
 			],
 			'crm.timeline.timelineEntry.facade' => [
 				'className' => '\\Bitrix\\Crm\\Timeline\\TimelineEntry\\Facade',
@@ -798,6 +804,7 @@ return [
 				//Bitrix\Crm\Integration\AiAssistant\ToolSets\SearchToolSet::class,
 				Bitrix\Crm\Integration\AiAssistant\ToolSets\TuningToolSet::class,
 				OpenLineToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessToolSet::class,
 			],
 			'profileDataProviders' => [
 				Bitrix\Crm\Integration\AiAssistant\DataProviders\CrmProvider::class,

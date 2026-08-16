@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Mobile\Auth;
 
+use Bitrix\Call\Settings;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Guest\Auth\AuthError;
 use Bitrix\Im\V2\Guest\Auth\AuthorizationService;
@@ -40,6 +41,8 @@ final class GuestCheckout
 	private const SERVICE_MOBILE_APP_SETTINGS = 'intranet.option.mobile_app';
 	private const COMPONENT_COMMUNICATION = 'communication';
 	private const COMPONENT_BACKGROUND = 'background';
+	private const COMPONENT_CALLS = 'calls';
+	private const COMPONENT_CALLS_SCRIPT = 'call:calls';
 
 	public function __construct(private readonly \CUser $user)
 	{
@@ -320,7 +323,7 @@ final class GuestCheckout
 
 	private function buildServices(int $userId, mixed $pullConfig): array
 	{
-		return [
+		$services = [
 			$this->buildService(self::COMPONENT_COMMUNICATION, [
 				'USER_ID' => $userId,
 				'SITE_ID' => SITE_ID,
@@ -333,14 +336,76 @@ final class GuestCheckout
 				'LANGUAGE_ID' => LANGUAGE_ID,
 			]),
 		];
+
+		$callService = $this->buildCallService($userId);
+		if ($callService !== null)
+		{
+			$services[] = $callService;
+		}
+
+		return $services;
 	}
 
-	private function buildService(string $componentCode, array $params): array
+	/**
+	 * The call:calls runtime for the guest session: without it the guest has neither the incoming-call
+	 * handler ({@see \Call::incoming}) nor the ImMobile.CallManager:guestIdentified subscriber. Telephony
+	 * itself stays off for guests (the voximplant block is emitted in its disabled state; the guest never
+	 * initiates a call). Degrades to null — and the guest checkout keeps working — when call is unavailable.
+	 */
+	private function buildCallService(int $userId): ?array
+	{
+		if (!Loader::includeModule('call'))
+		{
+			return null;
+		}
+
+		// Merge order mirrors the employee build (mobile.data checkout): base identity → disabled
+		// voximplant block → call options. callLogService appears in both the voximplant block and
+		// getMobileOptions(); the latter wins, as it does for employees.
+		$params = array_merge(
+			[
+				'userId' => $userId,
+				'isAdmin' => false,
+				'siteDir' => SITE_DIR,
+			],
+			$this->buildDisabledVoximplantOptions(),
+			Settings::getMobileOptions(),
+		);
+
+		return $this->buildService(self::COMPONENT_CALLS, $params, 'JNUIComponent', self::COMPONENT_CALLS_SCRIPT);
+	}
+
+	/**
+	 * The voximplant block of the call:calls contract in its disabled state. Guests never place
+	 * telephony calls, but the component reads these keys via BX.componentParameters.get(), so the
+	 * full set is emitted explicitly rather than left to client-side defaults.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function buildDisabledVoximplantOptions(): array
 	{
 		return [
-			'scriptPath' => JanativeManager::getComponentPath($componentCode),
+			'voximplantInstalled' => false,
+			'voximplantServer' => '',
+			'voximplantLogin' => '',
+			'canPerformCalls' => false,
+			'lines' => [],
+			'defaultLineId' => '',
+			'callLogService' => '',
+		];
+	}
+
+	private function buildService(
+		string $componentCode,
+		array $params,
+		string $name = 'JSComponent',
+		?string $scriptComponent = null
+	): array
+	{
+		return [
+			'scriptPath' => JanativeManager::getComponentPath($scriptComponent ?? $componentCode),
 			'params' => $params,
-			'name' => 'JSComponent',
+			'name' => $name,
 			'componentCode' => $componentCode,
 		];
 	}

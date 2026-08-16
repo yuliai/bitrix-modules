@@ -7,6 +7,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Copyright;
 
 Engine::triggerEngineAddedEvent();
+Engine::addEngine(\Bitrix\AI\Engine\Enum\Category::CLASSIFY, \Bitrix\AI\Engine\Triton\Classify::class);
 
 include(__DIR__ . '/prompt_updater.php');
 

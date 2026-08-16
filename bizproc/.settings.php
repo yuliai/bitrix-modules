@@ -7,6 +7,7 @@ use Bitrix\Bizproc\Integration\UI\EntitySelector\ScriptTemplateProvider;
 use Bitrix\Bizproc\Integration\UI\EntitySelector\StorageProvider;
 use Bitrix\Bizproc\Integration\UI\EntitySelector\SystemProvider;
 use Bitrix\Bizproc\Integration\UI\EntitySelector\TemplateProvider;
+use Bitrix\Bizproc\Internal\Service\Trigger\SectionService;
 use Bitrix\Bizproc\Internal\Service\Scheduler\Messenger\Model\WorkflowStartMessageTable;
 use Bitrix\Bizproc\Internal\Service\Scheduler\Messenger\Model\WorkflowResumeMessageTable;
 use Bitrix\Bizproc\Internal\Service\Scheduler\Messenger\Receiver\WorkflowStartReceiver;
@@ -43,6 +44,39 @@ return [
 		'value' => [
 			\Bitrix\Bizproc\Public\Service\AiAgent\RegionAvailabilityServiceInterface::class => [
 				'className' => \Bitrix\Bizproc\Public\Service\AiAgent\RegionAvailabilityService::class,
+			],
+			\Bitrix\Bizproc\Public\Service\AiAgent\NodeAvailabilityServiceInterface::class => [
+				'className' => \Bitrix\Bizproc\Public\Service\AiAgent\NodeAvailabilityService::class,
+				'constructorParams' => static function() {
+					return [
+						ServiceLocator::getInstance()->get(
+							\Bitrix\Bizproc\Public\Service\AiAgent\RegionAvailabilityServiceInterface::class
+						),
+					];
+				},
+			],
+			\Bitrix\Bizproc\Public\Service\ActivityGroup\GroupVisibilityServiceInterface::class => [
+				'className' => \Bitrix\Bizproc\Public\Service\ActivityGroup\GroupVisibilityService::class,
+				'constructorParams' => static function() {
+					$nodeAvailabilityService = ServiceLocator::getInstance()->get(
+						\Bitrix\Bizproc\Public\Service\AiAgent\NodeAvailabilityServiceInterface::class
+					);
+
+					return [
+						[
+							// Groups hidden when AI agent nodes are unavailable (region/module gated).
+							// Add more HideableGroupRuleInterface instances here to hide other groups.
+							new \Bitrix\Bizproc\Public\Service\ActivityGroup\NodeAvailabilityGroupRule(
+								\Bitrix\Bizproc\Activity\Enum\ActivityGroup::AI,
+								$nodeAvailabilityService,
+							),
+							new \Bitrix\Bizproc\Public\Service\ActivityGroup\NodeAvailabilityGroupRule(
+								\Bitrix\Bizproc\Activity\Enum\ActivityGroup::MCP,
+								$nodeAvailabilityService,
+							),
+						],
+					];
+				},
 			],
 			'bizproc.service.schedulerService' => [
 				'className' => '\\CBPSchedulerService',
@@ -143,6 +177,15 @@ return [
 			'bizproc.runtime.activitysearcher.searcher' => [
 				'className' => \Bitrix\Bizproc\Runtime\ActivitySearcher\Searcher::class,
 			],
+			'bizproc.service.activity.targetDocumentResolverRegistry' => [
+				'className' => \Bitrix\Bizproc\Public\Activity\Registry\TargetDocumentResolverRegistry::class,
+			],
+			'bizproc.service.activity.targetDocumentAccessGuardRegistry' => [
+				'className' => \Bitrix\Bizproc\Public\Activity\Registry\TargetDocumentAccessGuardRegistry::class,
+			],
+			'bizproc.service.activity.filterResultPropertyResolverRegistry' => [
+				'className' => \Bitrix\Bizproc\Public\Activity\Registry\FilterResultPropertyResolverRegistry::class,
+			],
 			'bizproc.service.eval' => [
 				'className' => \Bitrix\Bizproc\Internal\Service\EvalService::class,
 			],
@@ -184,6 +227,9 @@ return [
 					];
 				},
 			],
+			'bizproc.service.storage.limits' => [
+				'className' => \Bitrix\Bizproc\Internal\Service\Storage\StorageLimitsService::class,
+			],
 			'bizproc.workflow.template.repository' => [
 				'className' => '\\Bitrix\\Bizproc\\Internal\\Repository\\WorkflowTemplate\\WorkflowTemplateRepository',
 			],
@@ -192,6 +238,9 @@ return [
 			],
 			'bizproc.service.activity.nameGenerator' => [
 				'className' => '\\Bitrix\\Bizproc\\Public\\Service\\Activity\\ActivityNameGeneratorService',
+			],
+			'bizproc.service.activity.entityFilter' => [
+				'className' => \Bitrix\Bizproc\Public\Service\Activity\EntityFilterService::class,
 			],
 			'bizproc.clear.stuck.workflow.command.handler' => [
 				'className' => '\Bitrix\Bizproc\Public\Command\WorkflowState\ClearStuckWorkflowCommand\ClearStuckWorkflowCommandHandler',
@@ -206,6 +255,10 @@ return [
 			],
 			'bizproc.service.trigger.scheduleSyncService' => [
 				'className' => \Bitrix\Bizproc\Internal\Service\Trigger\Schedule\ScheduleSyncService::class,
+			],
+			'bizproc.trigger.section.service' => [
+				'className' => SectionService::class,
+				'singleton' => false,
 			],
 			'bizproc.manager.trigger.scheduledTriggerAgent' => [
 				'className' => \Bitrix\Bizproc\Infrastructure\Agent\Trigger\ScheduledTriggerAgent::class,

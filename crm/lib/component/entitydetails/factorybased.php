@@ -1177,6 +1177,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 				'entity' => $documentType[1],
 				'documentType' => $documentType[2],
 				'documentId' => $documentId[2],
+				'categoryId' => $this->categoryId,
 			];
 		}
 
@@ -1502,6 +1503,32 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		// Save to the variable before all actions because after save the item won't be new anyway
 		$isNew = $this->item->isNew();
 
+		$activityViewModeStageId = null;
+		if (
+			$isNew
+			&& ($data['PARAMS']['VIEW_MODE'] ?? null) === \Bitrix\Crm\Kanban\ViewMode::MODE_ACTIVITIES
+		)
+		{
+			$activityStageId = (string)($data['PARAMS'][\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID] ?? '');
+			if ($activityStageId !== '')
+			{
+				$activityViewModeStageId = $activityStageId;
+			}
+
+			if ($this->factory->isStagesSupported())
+			{
+				$stageFieldName = $this->factory->getEntityFieldNameByMap(Item::FIELD_NAME_STAGE_ID);
+				if (!empty($data[$stageFieldName]))
+				{
+					if ($activityViewModeStageId === null)
+					{
+						$activityViewModeStageId = (string)$data[$stageFieldName];
+					}
+					unset($data[$stageFieldName]);
+				}
+			}
+		}
+
 		$processedData = $this->processItemFieldValues($data);
 		foreach($processedData as $name => $value)
 		{
@@ -1587,6 +1614,14 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 			$context->setEventId($eventId);
 
 			$operation->setContext($context);
+		}
+
+		if ($activityViewModeStageId !== null)
+		{
+			$operation->getContext()
+				->setItemOption('VIEW_MODE', \Bitrix\Crm\Kanban\ViewMode::MODE_ACTIVITIES)
+				->setItemOption(\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID, $activityViewModeStageId)
+			;
 		}
 
 		$result = $operation->launch();

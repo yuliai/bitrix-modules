@@ -133,6 +133,7 @@ final class ArchiveRepacker
 		Api\Dataset $api,
 		string $lang = 'en',
 		string $currency = '',
+		bool $forceImport = false,
 	): Result
 	{
 		$result = new Result();
@@ -148,7 +149,7 @@ final class ArchiveRepacker
 		/** @var IO\Directory $baseDirectory */
 		$baseDirectory = $extractResult->getData()['entity'];
 
-		$actualizeResult = $this->actualizeDashboards($baseDirectory->getPhysicalPath() . $ds . 'datasets' . $ds . $databaseFileName, $api);
+		$actualizeResult = $this->actualizeDashboards($baseDirectory->getPhysicalPath() . $ds . 'datasets' . $ds . $databaseFileName, $api, $forceImport);
 		if (!$actualizeResult->isSuccess())
 		{
 			return $result->addErrors([
@@ -401,7 +402,7 @@ final class ArchiveRepacker
 		return $result;
 	}
 
-	private function actualizeDashboards(string $pathToDatasets, Api\Dataset $api): Result
+	private function actualizeDashboards(string $pathToDatasets, Api\Dataset $api, bool $forceImport = false): Result
 	{
 		$result = new Result();
 
@@ -475,7 +476,13 @@ final class ArchiveRepacker
 			$archiveDatasetVersion = (int)($datasetContent?->extra?->version ?? 0);
 			$supersetDatasetVersion = (int)($supersetDatasets[$datasetContent->table_name]['version'] ?? 0);
 
-			if (($supersetDatasetVersion >= $archiveDatasetVersion) && ($supersetDatasetVersion !== 0))
+			if (($supersetDatasetVersion > $archiveDatasetVersion)
+				|| (
+					!$forceImport
+					&& ($supersetDatasetVersion === $archiveDatasetVersion)
+					&& ($supersetDatasetVersion !== 0)
+				)
+			)
 			{
 				$dataset->delete();
 			}

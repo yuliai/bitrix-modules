@@ -18,6 +18,7 @@ final class ImportDashboardCommand extends AbstractServerCommand
 		public readonly string $langCode = '',
 		public readonly ?string $appCode = null,
 		public readonly bool $requiresSubscription = false,
+		public readonly bool $forceImportDatasets = false,
 	)
 	{
 	}
@@ -30,6 +31,7 @@ final class ImportDashboardCommand extends AbstractServerCommand
 			$this->langCode,
 			$this->appCode,
 			$this->requiresSubscription,
+			$this->forceImportDatasets,
 		);
 	}
 }

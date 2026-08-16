@@ -33,6 +33,7 @@ final class EntitiesImporter
 		string $databaseUuid,
 		string $currency,
 		string $langCode = '',
+		bool $forceImport = false,
 	): Result
 	{
 		$result = new Result();
@@ -47,6 +48,7 @@ final class EntitiesImporter
 			$datasetApi,
 			$langCode,
 			$currency,
+			$forceImport,
 		);
 
 		if ($repackDatasetResult->isSuccess())

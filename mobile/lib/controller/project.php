@@ -17,6 +17,7 @@ use Bitrix\Mobile\Internal\Services\Project\ProjectReadService;
 use Bitrix\Mobile\Internal\Services\Project\ProjectSettingsValidator;
 use Bitrix\Mobile\Trait\PublicErrorsTrait;
 use Bitrix\Socialnetwork\Helper;
+use Bitrix\Socialnetwork\V2\Public\Provider\ProjectProvider;
 use RuntimeException;
 
 Loc::loadMessages(__FILE__);
@@ -173,6 +174,29 @@ final class Project extends JsonController
 		}
 
 		return ['chatId' => 0];
+	}
+
+	/**
+	 * @restMethod mobile.Project.getHasCollabers
+	 */
+	#[CloseSession]
+	public function getHasCollabersAction(int $projectId): ?array
+	{
+		if (!$this->canViewProject($projectId))
+		{
+			$this->addError(new Error(Loc::getMessage('MOBILE_CONTROLLER_PROJECT_ACCESS_DENIED')));
+
+			return null;
+		}
+
+		if (!class_exists(ProjectProvider::class))
+		{
+			return ['hasCollabers' => false];
+		}
+
+		return [
+			'hasCollabers' => (new ProjectProvider())->hasCollabers($projectId),
+		];
 	}
 
 	/**

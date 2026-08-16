@@ -3663,6 +3663,7 @@ class CAllCrmDeal
 								&& isset($infos[$sonetEventFields['PARAMS']['FINAL_STATUS_ID']])
 							)
 							{
+								$dealTitle = htmlspecialcharsbx($title);
 								$title = "<a href=\"" . $url . "\" class=\"bx-notifier-item-action\">" . htmlspecialcharsbx($title) . "</a>";
 								$titleOut = htmlspecialcharsbx($title);
 								$startStatusTitle = htmlspecialcharsbx($infos[$sonetEventFields['PARAMS']['START_STATUS_ID']]['NAME']);
@@ -3707,6 +3708,14 @@ class CAllCrmDeal
 									return "{$message} ({$absoluteUrl})";
 								};
 
+								$notifySubject = static fn (?string $languageId = null) =>
+									Loc::getMessage(
+										"CRM_DEAL_PROGRESS_IM_NOTIFY_SUBJECT",
+										null,
+										$languageId,
+									)
+								;
+
 								$arMessageFields = array(
 									"MESSAGE_TYPE" => IM_MESSAGE_SYSTEM,
 									"TO_USER_ID" => $assignedByID,
@@ -3719,6 +3728,22 @@ class CAllCrmDeal
 									"NOTIFY_TAG" => "CRM|DEAL_PROGRESS|".$ID,
 									"NOTIFY_MESSAGE" => $notifyMessage,
 									"NOTIFY_MESSAGE_OUT" => $notifyMessageOut,
+									"PARAMS" => [
+										'COMPONENT_ID' => 'CrmEntity',
+										'COMPONENT_PARAMS' => [
+											'SUBJECT' => $notifySubject,
+											'ENTITY' => [
+												'TITLE' => $dealTitle,
+												'HREF' => $url,
+												'ENTITY_TYPE' => 'deal',
+												'CONTENT_TYPE' => 'changed',
+												'CONTENT' => [
+													'PREV' => $startStatusTitle,
+													'NEXT' => $finalStatusTitle,
+												],
+											],
+										],
+									],
 								);
 
 								CIMNotify::Add($arMessageFields);

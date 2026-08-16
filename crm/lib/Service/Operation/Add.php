@@ -183,10 +183,14 @@ class Add extends Operation
 
 		if ($viewMode === \Bitrix\Crm\Kanban\ViewMode::MODE_ACTIVITIES)
 		{
-			$factory = $this->getFactory();
-			$stageFieldName = $factory->getEntityFieldNameByMap(Item::FIELD_NAME_STAGE_ID);
-
-			$stageId = $context->getItemOption($stageFieldName);
+			$stageId = $context->getItemOption(\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID);
+			if (!$stageId)
+			{
+				$factory = $this->getFactory();
+				$stageId = $factory
+					? $context->getItemOption($factory->getEntityFieldNameByMap(Item::FIELD_NAME_STAGE_ID))
+					: null;
+			}
 			if (!$stageId)
 			{
 				return;

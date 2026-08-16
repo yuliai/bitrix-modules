@@ -13,6 +13,7 @@ use Bitrix\Crm\Multifield\Assembler;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\EditorAdapter;
+use Bitrix\Crm\Service\ItemList\CountCache;
 use Bitrix\Crm\Settings\RestSettings;
 use Bitrix\Main\Component\ParameterSigner;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
@@ -214,16 +215,97 @@ class Item extends Base
 			$parameters['limit'] = $pageNavigation->getLimit();
 		}
 
+		$countFilter = $parameters['filter'];
+		$offset = $pageNavigation ? (int)$parameters['offset'] : null;
+		$limit = $pageNavigation ? (int)$parameters['limit'] : null;
+
 		$items = $factory->getItemsFilteredByPermissions($parameters);
 		$items = array_values($this->getJsonForItems($factory, $items, $select, $isUseOriginalFieldNames));
+
+		$rowsCount = count($items);
 
 		return new Page(
 			'items',
 			$items,
-			function() use($parameters, $factory) {
-				return $factory->getItemsCountFilteredByPermissions($parameters['filter']);
-			}
+			function() use (
+				$factory,
+				$entityTypeId,
+				$countFilter,
+				$rowsCount,
+				$offset,
+				$limit,
+			) {
+				return $this->calculateTotal(
+					$rowsCount,
+					$offset,
+					$limit,
+					function() use (
+						$factory,
+						$entityTypeId,
+						$countFilter,
+						$rowsCount,
+						$offset,
+					) {
+						$countCache = new CountCache();
+						$userId = Container::getInstance()->getUserPermissions()->getUserId();
+						$forceRefresh = $rowsCount === 0 && $offset !== null && $offset > 0;
+						$isRealCountUsed = false;
+
+						if (!$forceRefresh)
+						{
+							$count = $countCache->getOrLoad(
+								$entityTypeId,
+								$userId,
+								$countFilter,
+								static function () use ($factory, $countFilter, &$isRealCountUsed): int {
+									$isRealCountUsed = true;
+
+									return $factory->getItemsCountFilteredByPermissions($countFilter);
+								},
+							);
+
+							if (
+								$isRealCountUsed
+								|| !$this->isCountRefreshRequired($count, $rowsCount, $offset)
+							)
+							{
+								return $count;
+							}
+						}
+
+						$count = $factory->getItemsCountFilteredByPermissions($countFilter);
+						$countCache->set(
+							$entityTypeId,
+							$userId,
+							$countFilter,
+							$count,
+						);
+
+						return $count;
+					},
+				);
+			},
 		);
+	}
+
+	private function calculateTotal(int $rowsCount, ?int $offset, ?int $limit, callable $realCount): int
+	{
+		if ($offset === null || $limit === null)
+		{
+			return $rowsCount;
+		}
+
+		if ($rowsCount === 0 && $offset === 0)
+		{
+			return 0;
+		}
+
+		return (int)$realCount();
+	}
+
+	private function isCountRefreshRequired(int $count, int $rowsCount, ?int $offset): bool
+	{
+		return $rowsCount > 0 && $count <= (int)$offset + $rowsCount;
 	}
 
 	/**
@@ -811,6 +893,20 @@ class Item extends Base
 			$editorConfig['CONTEXT']['STAGE_ID'] = $stages[0] ?? null ;
 			$editorConfig['CONTEXT']['VIEW_MODE'] = ViewMode::MODE_DEADLINES;
 			$editorConfig['CONTEXT']['DEADLINE_STAGE'] = $stageId;
+		}
+
+		// In ACTIVITIES mode, propagate viewMode through CONTEXT.PARAMS so the editor
+		// merges it into the save payload. saveAction() consumes it to drive auto-TODO
+		// creation matching the activity column the user clicked "+".
+		if ($viewMode === ViewMode::MODE_ACTIVITIES)
+		{
+			$editorConfig['CONTEXT']['PARAMS'] = array_merge(
+				(array)($editorConfig['CONTEXT']['PARAMS'] ?? []),
+				[
+					'VIEW_MODE' => ViewMode::MODE_ACTIVITIES,
+					\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID => $stageId,
+				]
+			);
 		}
 
 		$forceDefaultConfig = $params['forceDefaultConfig'] ?? 'N';

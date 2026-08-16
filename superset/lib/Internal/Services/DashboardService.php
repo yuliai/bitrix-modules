@@ -410,7 +410,8 @@ final class DashboardService extends AbstractSupersetContext
 		string $currency = '',
 		string $langCode = '',
 		?string $appCode = null,
-		bool $requiresSubscription = false
+		bool $requiresSubscription = false,
+		bool $forceImportDatasets = false,
 	): Main\Result
 	{
 		if (\CFile::CheckFile($uploadedFile, strExt: 'zip') !== '')
@@ -450,6 +451,7 @@ final class DashboardService extends AbstractSupersetContext
 				$databaseDto->uuid,
 				$currency,
 				$langCode,
+				$forceImportDatasets,
 			);
 			if (!$importDatasetResult->isSuccess())
 			{

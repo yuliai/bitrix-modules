@@ -1344,6 +1344,14 @@ abstract class CCrmRestProxyBase implements ICrmRestProxy
 	}
 	public function getList($order, $filter, $select, $start)
 	{
+		// Field names in select must be strings. Malformed REST requests (e.g. SELECT[][]=ID)
+		// may pass nested arrays, which crash later on array_key_exists() in
+		// CUserTypeSQL::SetSelect() with "Illegal offset type".
+		if (is_array($select))
+		{
+			$select = array_values(array_filter($select, 'is_string'));
+		}
+
 		$this->prepareListParams($order, $filter, $select);
 
 		$navigation = CCrmRestService::getNavData($start);
@@ -6821,6 +6829,23 @@ class CCrmDealCategoryProxy extends CCrmRestProxyBase
 		}
 		return $this->FIELDS_INFO;
 	}
+
+	protected function prepareListParams(&$order, &$filter, &$select)
+	{
+		$fieldsInfo = $this->getFieldsInfo();
+		if(!is_array($order) || empty($order))
+		{
+			return;
+		}
+		foreach ($order as $field => $value)
+		{
+			if (!isset($fieldsInfo[$field]))
+			{
+				unset($order[$field]);
+			}
+		}
+	}
+
 	protected function innerGet($ID, &$errors)
 	{
 		if(!CCrmDeal::CheckReadPermission(0))

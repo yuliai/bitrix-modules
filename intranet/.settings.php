@@ -146,11 +146,13 @@ return [
 		'value' => [
 			'agents' => [
 				\Bitrix\Intranet\Internal\Integration\AiAssistant\Agents\UserInviteAgent::class,
+				\Bitrix\Intranet\Internal\Integration\AiAssistant\Agents\CollabInviteAgent::class
 			],
 			'toolSets' => [
 				\Bitrix\Intranet\Internal\Integration\AiAssistant\ToolSets\UserToolSet::class,
 				\Bitrix\Intranet\Internal\Integration\AiAssistant\ToolSets\DepartmentToolSet::class,
 				\Bitrix\Intranet\Internal\Integration\AiAssistant\ToolSets\InviteLinkToolSet::class,
+				\Bitrix\Intranet\Internal\Integration\AiAssistant\ToolSets\CollabToolSet::class,
 			],
 		],
 		'readonly' => true,

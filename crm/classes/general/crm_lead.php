@@ -3066,6 +3066,13 @@ class CAllCrmLead
 									return "{$message} ({$absoluteUrl})";
 								};
 
+								$notifySubject = static fn (?string $languageId = null) =>
+									Loc::getMessage(
+										"CRM_LEAD_PROGRESS_IM_NOTIFY_SUBJECT",
+										null,
+										$languageId,
+									);
+
 								$arMessageFields = array(
 									"MESSAGE_TYPE" => IM_MESSAGE_SYSTEM,
 									"TO_USER_ID" => $assignedByID,
@@ -3078,6 +3085,22 @@ class CAllCrmLead
 									"NOTIFY_TAG" => "CRM|LEAD_PROGRESS|".$ID,
 									"NOTIFY_MESSAGE" => $notifyMessage,
 									"NOTIFY_MESSAGE_OUT" => $notifyMessageOut,
+									"PARAMS" => [
+										'COMPONENT_ID' => 'CrmEntity',
+										'COMPONENT_PARAMS' => [
+											'SUBJECT' => $notifySubject,
+											'ENTITY' => [
+												'TITLE' => htmlspecialcharsbx($title),
+												'HREF' => $url,
+												'ENTITY_TYPE' => 'lead',
+												'CONTENT_TYPE' => 'changed',
+												'CONTENT' => [
+													'PREV' => $startStatusTitle,
+													'NEXT' => $finalStatusTitle,
+												],
+											],
+										],
+									],
 								);
 
 								CIMNotify::Add($arMessageFields);
