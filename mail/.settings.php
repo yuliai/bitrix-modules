@@ -4,6 +4,7 @@ use Bitrix\Mail\Internal\Async\Receiver\MailboxAccessNotificationReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\OrphanedMailboxAutoDisconnectNotificationReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\RepairConnectionRequestChatsReceiver;
 use Bitrix\Mail\Integration\UI\EntitySelector\AddressBookProvider;
+use Bitrix\Mail\Integration\UI\EntitySelector\MailboxProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailUserRecipientAppearanceFilter;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientAppearanceFilter;
@@ -69,6 +70,13 @@ return array(
 					'provider' => [
 						'moduleId' => 'mail',
 						'className' => MailCrmRecipientProvider::class,
+					],
+				],
+				[
+					'entityId' => 'mail_mailbox',
+					'provider' => [
+						'moduleId' => 'mail',
+						'className' => MailboxProvider::class,
 					],
 				],
 			],

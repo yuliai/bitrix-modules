@@ -719,8 +719,11 @@ final class AccessRights extends Engine\Controller
 	 */
 	private function terminateSessionsWithInsufficientRights(BaseObject $object): void
 	{
-		$sessionTerminationService = (new Disk\Document\SessionTerminationServiceFactory($object))->create();
-		$sessionTerminationService->terminateSessionsWithInsufficientRights();
+		$sessionTerminationServices = (new Disk\Document\SessionTerminationServiceFactory($object))->createAll();
+		foreach ($sessionTerminationServices as $sessionTerminationService)
+		{
+			$sessionTerminationService->terminateSessionsWithInsufficientRights();
+		}
 	}
 
 	protected function terminateSessionsForAllBoardsInFolder(Folder $object, Disk\Security\SecurityContext $securityContext): void

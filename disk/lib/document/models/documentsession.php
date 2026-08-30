@@ -190,6 +190,25 @@ final class DocumentSession extends Model
 
 	public function isOutdatedByFileContent(): bool
 	{
+		// When the session recorded the file's content-version at creation time, compare
+		// by that monotonic version instead of the second-granular SYNC_UPDATE_TIME.
+		// `GLOBAL_CONTENT_VERSION` is bumped on every `uploadVersion`, so a strict `>`
+		// here is race-free (no "created in the same second as the save" blind spot that
+		// the timestamp comparison below suffers from). The snapshot is written only by
+		// the vibeoffice session manager; OnlyOffice sessions never carry it and fall
+		// through to the unchanged timestamp logic — keeping OnlyOffice behaviour intact.
+		$contentVersionSnapshot = $this->getContentVersionSnapshot();
+		if ($contentVersionSnapshot !== null)
+		{
+			$file = $this->getObject();
+			if (!$file)
+			{
+				return false;
+			}
+
+			return (int)$file->getGlobalContentVersion() > $contentVersionSnapshot;
+		}
+
 		$syncUpdateTime = $this->getObject()->getSyncUpdateTime();
 		if (!$syncUpdateTime)
 		{
@@ -197,6 +216,51 @@ final class DocumentSession extends Model
 		}
 
 		return ($syncUpdateTime->getTimestamp() - $this->getCreateTime()->getTimestamp()) > 0;
+	}
+
+	/**
+	 * The file `GLOBAL_CONTENT_VERSION` captured when the session was created, if any.
+	 *
+	 * Neutral reader over the session CONTEXT: it is written only by the vibeoffice
+	 * session manager (under its reserved `vo` key); for sessions that never stored it
+	 * (e.g. OnlyOffice/Flipchart) this returns null and the caller keeps the legacy
+	 * timestamp-based staleness check.
+	 */
+	public function getContentVersionSnapshot(): ?int
+	{
+		$context = self::decodeRawContext($this->getContextRaw());
+
+		$vo = $context['vo'] ?? null;
+		if (!is_array($vo))
+		{
+			return null;
+		}
+
+		$version = $vo['contentVersion'] ?? null;
+
+		return is_numeric($version) ? (int)$version : null;
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private static function decodeRawContext(?string $raw): array
+	{
+		if ($raw === null || $raw === '')
+		{
+			return [];
+		}
+
+		try
+		{
+			$decoded = \Bitrix\Main\Web\Json::decode($raw);
+		}
+		catch (\Throwable)
+		{
+			return [];
+		}
+
+		return is_array($decoded) ? $decoded : [];
 	}
 
 	/**
@@ -335,12 +399,17 @@ final class DocumentSession extends Model
 
 	public function createEditSession(): ?self
 	{
-		$currentEditSession = self::load([
+		$currentEditSessionFilter = [
 			'OBJECT_ID' => $this->getObjectId(),
 			'VERSION_ID' => $this->getVersionId(),
 			'TYPE' => self::TYPE_EDIT,
 			'STATUS' => self::STATUS_ACTIVE,
-		]);
+		];
+		if ($this->getServiceRaw() !== null)
+		{
+			$currentEditSessionFilter['SERVICE'] = $this->getServiceRaw();
+		}
+		$currentEditSession = self::load($currentEditSessionFilter);
 
 		if ($currentEditSession && $currentEditSession->belongsToUser($this->getUserId()))
 		{

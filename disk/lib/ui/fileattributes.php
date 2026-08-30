@@ -2,11 +2,13 @@
 
 namespace Bitrix\Disk\Ui;
 
+use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Document\BitrixHandler;
 use Bitrix\Disk\Document\OnlyOffice\OnlyOfficeHandler;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
 use Bitrix\Disk\TypeFile;
+use Bitrix\Disk\UI\Viewer\Renderer\Markdown;
 use Bitrix\Disk\Uf\Integration\DiskUploaderController;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\UI\Extension;
@@ -22,6 +24,9 @@ final class FileAttributes extends ItemAttributes
 	public const ATTRIBUTE_ATTACHED_OBJECT_ID = 'data-attached-object-id';
 	public const ATTRIBUTE_SEPARATE_ITEM = 'data-viewer-separate-item';
 	public const ATTRIBUTE_UNIFIED_LINK = 'data-unified-link';
+	public const ATTRIBUTE_MARKDOWN_URL = 'data-markdown-url';
+
+	public const JS_TYPE_CLASS_MARKDOWN = 'BX.Disk.Viewer.MarkdownItem';
 
 	public const JS_TYPE = 'cloud-document';
 
@@ -104,6 +109,47 @@ final class FileAttributes extends ItemAttributes
 
 			$this->setAttribute(self::ATTRIBUTE_UNIFIED_LINK, $unifiedLink);
 		}
+	}
+
+	/**
+	 * Builds the markdown render url once version/attached context is known, picking the matching
+	 * endpoint so the formatted view shows the right revision with the right access:
+	 *  - attached object -> disk.attachedObject (revision is intrinsic to the attach);
+	 *  - else version     -> disk.version;
+	 *  - else file        -> disk.file (head).
+	 */
+	private function setMarkdownUrl(): void
+	{
+		if ($this->getViewerType() !== Markdown::getJsType())
+		{
+			return;
+		}
+
+		$urlManager = Driver::getInstance()->getUrlManager();
+
+		$attachedObjectId = (int)$this->getAttribute(self::ATTRIBUTE_ATTACHED_OBJECT_ID);
+		$versionId = (int)$this->getAttribute(self::ATTRIBUTE_VERSION_ID);
+
+		if ($attachedObjectId > 0)
+		{
+			$markdownUrl = $urlManager->getUrlForShowMarkdownAttached($attachedObjectId);
+		}
+		elseif ($versionId > 0)
+		{
+			$markdownUrl = $urlManager->getUrlForShowMarkdownVersion($versionId);
+		}
+		else
+		{
+			$file = $this->getFileObject();
+			if ($file === null)
+			{
+				return;
+			}
+
+			$markdownUrl = $urlManager->getUrlForShowMarkdown($file);
+		}
+
+		$this->setAttribute(self::ATTRIBUTE_MARKDOWN_URL, $markdownUrl);
 	}
 
 	/**
@@ -196,6 +242,17 @@ final class FileAttributes extends ItemAttributes
 
 				Extension::load('disk.viewer.board-item');
 			}
+		}
+
+		if ($this->getViewerType() === Markdown::getJsType())
+		{
+			$this
+				->setAttribute('data-viewer-type-class', self::JS_TYPE_CLASS_MARKDOWN)
+				->setExtension('disk.viewer.markdown-item')
+			;
+			// The render url is built later, in setMarkdownUrl() (deferred to output, once the
+			// version/attached context is known); it self-gates on the markdown viewer type.
+			Extension::load('disk.viewer.markdown-item');
 		}
 
 		if (self::isSetViewDocumentInClouds() && Document\DocumentViewPolicy::isAllowedUseClouds($this->fileData['CONTENT_TYPE']))
@@ -292,6 +349,17 @@ final class FileAttributes extends ItemAttributes
 			return $type;
 		}
 
+		$fileObject = $fileArray[self::KEY_FILE_OBJECT] ?? null;
+		if (
+			$fileObject instanceof File
+			&& Configuration::isEnabledMarkdownViewer()
+			&& self::isMarkdownFile($fileObject)
+			&& $fileObject->getSize() <= Configuration::getMaxSizeForMarkdownRender()
+		)
+		{
+			return Markdown::getJsType();
+		}
+
 		if (
 			$type === Renderer\Stub::getJsType() &&
 			!empty($fileArray['ORIGINAL_NAME']) &&
@@ -326,6 +394,13 @@ final class FileAttributes extends ItemAttributes
 		;
 	}
 
+	protected static function isMarkdownFile(File $file): bool
+	{
+		$extension = mb_strtolower($file->getExtension());
+
+		return in_array($extension, ['md', 'markdown'], true);
+	}
+
 	protected static function isSetViewDocumentInClouds()
 	{
 		$documentHandler = Document\DocumentViewPolicy::getDefaultHandlerForView();
@@ -342,6 +417,7 @@ final class FileAttributes extends ItemAttributes
 		}
 
 		$this->setUnifiedLink();
+		$this->setMarkdownUrl();
 
 		return parent::__toString();
 	}
@@ -349,6 +425,7 @@ final class FileAttributes extends ItemAttributes
 	public function toDataSet()
 	{
 		$this->setUnifiedLink();
+		$this->setMarkdownUrl();
 
 		return parent::toDataSet();
 	}
@@ -356,6 +433,7 @@ final class FileAttributes extends ItemAttributes
 	public function toVueBind(): array
 	{
 		$this->setUnifiedLink();
+		$this->setMarkdownUrl();
 
 		return parent::toVueBind();
 	}

@@ -4,6 +4,7 @@ use Bitrix\Disk\Bitrix24Disk\SubscriberManager;
 use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Document\DocumentHandlersManager;
 use Bitrix\Disk\Document\OnlyOffice;
+use Bitrix\Disk\Document\Vibeoffice;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
 use Bitrix\Disk\Internal\Entity\CustomServers\R7CustomServer;
 use Bitrix\Disk\Internal\Interface\CustomServerDataRepositoryInterface;
@@ -41,6 +42,7 @@ $supportedOnlyOfficeVersions = [
 ];
 
 $supportedR7Versions = [
+	'2025.4.*.*',
 	'2025.3.*.*',
 ];
 
@@ -60,6 +62,9 @@ return [
 		'value' => [
 			'disk.onlyofficeConfiguration' => [
 				'className' => OnlyOffice\Configuration::class,
+			],
+			'disk.vibeofficeConfiguration' => [
+				'className' => Vibeoffice\Configuration::class,
 			],
 			'disk.urlManager' => [
 				'className' => UrlManager::class,

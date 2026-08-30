@@ -4,6 +4,7 @@ namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Main;
@@ -14,17 +15,21 @@ final class AttachedObject extends Engine\Controller
 {
 	public function configureActions()
 	{
-		return [
-			'download' => [
-				'-prefilters' => [
-					Main\Engine\ActionFilter\Csrf::class,
-					Main\Engine\ActionFilter\Authentication::class,
-				],
-				'+prefilters' => [
-					new Main\Engine\ActionFilter\Authentication(true),
-					new Main\Engine\ActionFilter\CloseSession(),
-				]
+		$markdownConfig =
+		$downloadConfig = [
+			'-prefilters' => [
+				Main\Engine\ActionFilter\Csrf::class,
+				Main\Engine\ActionFilter\Authentication::class,
 			],
+			'+prefilters' => [
+				new Main\Engine\ActionFilter\Authentication(true),
+				new Main\Engine\ActionFilter\CloseSession(),
+			]
+		];
+
+		return [
+			'download' => $downloadConfig,
+			'showMarkdown' => $markdownConfig,
 		];
 	}
 
@@ -171,5 +176,50 @@ final class AttachedObject extends Engine\Controller
 		$response->setCacheTime(Disk\Configuration::DEFAULT_CACHE_TIME);
 
 		return $response;
+	}
+
+	public function showMarkdownAction(Disk\AttachedObject $attachedObject): ?array
+	{
+		if (!Disk\Configuration::isEnabledMarkdownViewer())
+		{
+			$this->addError(new Error('Markdown viewer is disabled by configuration.', MarkdownRenderService::ERROR_VIEWER_DISABLED));
+
+			return null;
+		}
+
+		// The attached object itself carries the revision: a version-pinned attach renders that
+		// version, otherwise the current file. Access is already enforced by CheckReadPermission.
+		$service = new MarkdownRenderService();
+		if ($attachedObject->isSpecificVersion())
+		{
+			$version = $attachedObject->getVersion();
+			if ($version === null)
+			{
+				$this->addError(new Error('Attached object is marked as a specific version but it could not be loaded.', 'DISK_MARKDOWN_VERSION_NOT_FOUND'));
+
+				return null;
+			}
+			$result = $service->renderByVersion($version);
+		}
+		else
+		{
+			$file = $attachedObject->getFile();
+			if ($file === null)
+			{
+				$this->addError(new Error('Attached object has no underlying file to render.', 'DISK_MARKDOWN_FILE_NOT_FOUND'));
+
+				return null;
+			}
+			$result = $service->renderByFile($file);
+		}
+
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		return $result->getData();
 	}
 }

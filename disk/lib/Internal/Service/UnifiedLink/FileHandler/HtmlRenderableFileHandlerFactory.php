@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Disk\Internal\Service\UnifiedLink\FileHandler;
 
 use Bitrix\Disk\AttachedObject;
+use Bitrix\Disk\Document\DocumentResolveContext;
 use Bitrix\Disk\Document\DocumentSource;
+use Bitrix\Disk\Document\Vibeoffice\VibeofficeHandler;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
@@ -78,7 +80,16 @@ readonly class HtmlRenderableFileHandlerFactory
 
 		$driver = Driver::getInstance();
 		$handlersManager = $driver->getDocumentHandlersManager();
-		$documentHandler = $handlersManager->getHandlerByCode('onlyoffice');
+		// Single engine-selection seam (same as controller-dispatch): the object context is
+		// passed through as the same no-op seam and does not affect the decision yet.
+		$attachedObjectId = $documentSource->getAttachedObject()?->getId();
+		$documentHandler = $handlersManager->resolveEffectiveHandler(
+			'onlyoffice',
+			DocumentResolveContext::forObject(
+				(int)$file->getId(),
+				$attachedObjectId !== null ? (int)$attachedObjectId : null,
+			),
+		);
 
 		if (!$documentHandler)
 		{
@@ -88,6 +99,11 @@ readonly class HtmlRenderableFileHandlerFactory
 		if ($deferred)
 		{
 			return new DeferredOnlyOfficeHtmlRenderableFileHandler();
+		}
+
+		if ($documentHandler instanceof VibeofficeHandler)
+		{
+			return new VibeofficeHtmlRenderableFileHandler($file, $documentSource, $analytics);
 		}
 
 		return new OnlyOfficeHtmlRenderableFileHandler($file, $documentSource, $analytics);

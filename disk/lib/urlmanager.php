@@ -753,6 +753,49 @@ class UrlManager implements IErrorable
 	}
 
 	/**
+	 * Gets url to show rendered markdown of the file.
+	 * Direct read access is assumed (the regular grid). When the file is opened by a unified link,
+	 * the caller appends the `_uls` signature itself, the same way it does for the download url.
+	 * @param File $file Target file.
+	 * @return string
+	 */
+	public function getUrlForShowMarkdown(File $file): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.file.showMarkdown',
+			['fileId' => $file->getId()]
+		);
+	}
+
+	/**
+	 * Gets url to show rendered markdown of the concrete version.
+	 * Access is enforced by the version endpoint, so no signature is needed.
+	 * @param int $versionId Target version id.
+	 * @return string
+	 */
+	public function getUrlForShowMarkdownVersion(int $versionId): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.version.showMarkdown',
+			['versionId' => $versionId]
+		);
+	}
+
+	/**
+	 * Gets url to show rendered markdown of the attached object (revision is intrinsic to it).
+	 * Access is granted by the attachment, so no signature is needed.
+	 * @param int $attachedObjectId Target attached object id.
+	 * @return string
+	 */
+	public function getUrlForShowMarkdownAttached(int $attachedObjectId): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.attachedObject.showMarkdown',
+			['attachedObjectId' => $attachedObjectId]
+		);
+	}
+
+	/**
 	 * Get url to show preview of the file.
 	 * @param File $file
 	 * @param array $params

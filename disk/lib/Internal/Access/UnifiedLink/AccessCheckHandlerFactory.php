@@ -1,10 +1,10 @@
 <?php
-
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Access\UnifiedLink;
 
 use Bitrix\Disk\AttachedObject;
+use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkPasswordService;
 use Bitrix\Disk\Public\Provider\ExternalLinkProvider;
 use Bitrix\Disk\User;
 use Bitrix\Main\Engine\CurrentUser;
@@ -17,9 +17,11 @@ final class AccessCheckHandlerFactory
 
 	/**
 	 * @param ExternalLinkProvider $externalLinkProvider
+	 * @param ExternalLinkPasswordService $externalLinkPasswordService
 	 */
 	public function __construct(
 		protected readonly ExternalLinkProvider $externalLinkProvider,
+		protected readonly ExternalLinkPasswordService $externalLinkPasswordService,
 	)
 	{
 	}
@@ -46,6 +48,7 @@ final class AccessCheckHandlerFactory
 
 		return $this->externalLinkAccessCheckHandler ??= new ExternalLinkAccessCheckHandler(
 			externalLinkProvider: $this->externalLinkProvider,
+			externalLinkPasswordService: $this->externalLinkPasswordService,
 			shouldCheckPassword: true,
 		);
 	}
@@ -62,6 +65,7 @@ final class AccessCheckHandlerFactory
 
 		return (new ExternalLinkAccessCheckHandler(
 			externalLinkProvider: $this->externalLinkProvider,
+			externalLinkPasswordService: $this->externalLinkPasswordService,
 			shouldCheckPassword: $shouldCheckPassword,
 		))
 			->setNext($unifiedLinkAccessCheckHandler

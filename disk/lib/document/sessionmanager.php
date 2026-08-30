@@ -128,6 +128,11 @@ abstract class SessionManager implements IErrorable
 		return $this;
 	}
 
+	public function getService(): ?DocumentService
+	{
+		return $this->service ?? null;
+	}
+
 	public function findOrCreateSession($exactUser = false): ?DocumentSession
 	{
 		$session = $this->findSession($exactUser) ?: $this->addSession();

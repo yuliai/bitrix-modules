@@ -3,6 +3,7 @@
 namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
+use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Main\Engine\ActionFilter;
@@ -16,7 +17,8 @@ final class Version extends Engine\Controller
 	{
 		$configureActions = parent::configureActions();
 
-		$configureActions['download'] = [
+		$configureActions['download'] =
+		$configureActions['showMarkdown'] = [
 			'-prefilters' => [
 				ActionFilter\Csrf::class,
 				ActionFilter\Authentication::class,
@@ -55,6 +57,26 @@ final class Version extends Engine\Controller
 		$response->setCacheTime(Disk\Configuration::DEFAULT_CACHE_TIME);
 
 		return $response;
+	}
+
+	public function showMarkdownAction(Disk\Version $version): ?array
+	{
+		if (!Disk\Configuration::isEnabledMarkdownViewer())
+		{
+			$this->addError(new Error('Markdown viewer is disabled by configuration.', MarkdownRenderService::ERROR_VIEWER_DISABLED));
+
+			return null;
+		}
+
+		$result = (new MarkdownRenderService())->renderByVersion($version);
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		return $result->getData();
 	}
 
 	public function deleteAction(Disk\Version $version)

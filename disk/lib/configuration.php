@@ -11,6 +11,7 @@ use Bitrix\Disk\Integration\Bitrix24Manager;
 use Bitrix\Disk\Internal\Enum\CustomServerTypes;
 use Bitrix\Disk\Internal\Enum\ServersTypesEnum;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UI\Viewer\Transformation\Document;
 use Bitrix\Main\UI\Viewer\Transformation\Video;
@@ -54,6 +55,25 @@ final class Configuration
 		}
 
 		return $isAllow;
+	}
+
+	public static function isEnabledMarkdownViewer(): bool
+	{
+		// The viewer renders markdown via Parsedown, which ships with the "ai" module. Without that
+		// module it cannot work, so it is treated as unavailable even when the option is enabled.
+		return 'Y' === Option::get(Driver::INTERNAL_MODULE_ID, 'disk_enable_markdown_viewer', 'N')
+			&& Loader::includeModule('ai');
+	}
+
+	/**
+	 * Returns maximum size (in bytes) of a markdown file that the viewer renders.
+	 * Single source of truth for the markdown render size limit.
+	 *
+	 * @return int
+	 */
+	public static function getMaxSizeForMarkdownRender(): int
+	{
+		return 2097152; // 2 MB
 	}
 
 	public static function isEnabledStorageSizeRestriction()

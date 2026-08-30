@@ -7,6 +7,7 @@ use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Controller\Response\PreviewResponseBuilder;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\Integration\Bitrix24Manager;
+use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Disk\Security\ParameterSigner;
@@ -38,7 +39,8 @@ class File extends BaseObject
 			]
 		];
 
-		$configureActions['download'] = [
+		$configureActions['download'] =
+		$configureActions['showMarkdown'] = [
 			'-prefilters' => [
 				Main\Engine\ActionFilter\Csrf::class,
 				Authentication::class,
@@ -301,6 +303,26 @@ class File extends BaseObject
 		$response->setCacheTime(Disk\Configuration::DEFAULT_CACHE_TIME);
 
 		return $response;
+	}
+
+	public function showMarkdownAction(Disk\File $file): ?array
+	{
+		if (!Configuration::isEnabledMarkdownViewer())
+		{
+			$this->addError(new Error('Markdown viewer is disabled by configuration.', MarkdownRenderService::ERROR_VIEWER_DISABLED));
+
+			return null;
+		}
+
+		$result = (new MarkdownRenderService())->renderByFile($file);
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		return $result->getData();
 	}
 
 	public function copyToAction(Disk\File $file, Disk\Folder $toFolder)

@@ -139,6 +139,11 @@ return [
 				'className' => \Bitrix\Intranet\Internal\Integration\IBlock\AbsenceRepository::class,
 				'constructorParams' => [],
 			],
+			'intranet.profile.view.resolver' => [
+				'constructor' => static fn() => new \Bitrix\Intranet\Profile\View\ProfileViewResolver(
+					new \Bitrix\Intranet\Profile\View\Rule\SystemUserProfileRule(),
+				),
+			],
 		],
 		'readonly' => true,
 	],
