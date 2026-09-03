@@ -4,19 +4,27 @@ namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Infrastructure\Controller\HtmlViewerRefusalResponse;
+use Bitrix\Disk\Internal\Service\HtmlViewerService;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Main;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response;
 
 final class AttachedObject extends Engine\Controller
 {
+	use HtmlViewerRefusalResponse;
+
 	public function configureActions()
 	{
-		$markdownConfig =
-		$downloadConfig = [
+		$configureActions = parent::configureActions();
+
+		$configureActions['download'] =
+		$configureActions['showMarkdown'] =
+		$configureActions['showHtml'] = [
 			'-prefilters' => [
 				Main\Engine\ActionFilter\Csrf::class,
 				Main\Engine\ActionFilter\Authentication::class,
@@ -27,10 +35,7 @@ final class AttachedObject extends Engine\Controller
 			]
 		];
 
-		return [
-			'download' => $downloadConfig,
-			'showMarkdown' => $markdownConfig,
-		];
+		return $configureActions;
 	}
 
 	public function getPrimaryAutoWiredParameter()
@@ -221,5 +226,10 @@ final class AttachedObject extends Engine\Controller
 		}
 
 		return $result->getData();
+	}
+
+	public function showHtmlAction(Disk\AttachedObject $attachedObject): Main\HttpResponse
+	{
+		return ServiceLocator::getInstance()->get(HtmlViewerService::class)->showByAttachedObject($attachedObject);
 	}
 }

@@ -8,6 +8,7 @@ use Bitrix\Disk\Document\Models\DocumentService;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Document\Models\DocumentSessionTable;
 use Bitrix\Disk\Document\SessionManager;
+use Bitrix\Disk\File;
 use Bitrix\Main\Application;
 use Bitrix\Main\Web\Json;
 
@@ -63,6 +64,13 @@ final class DocumentSessionManager extends SessionManager
 
 	protected DocumentService|null $service = DocumentService::Vibeoffice;
 
+	public function findOrCreateSession($exactUser = false): ?DocumentSession
+	{
+		$this->refreshLiveFile();
+
+		return parent::findOrCreateSession($exactUser);
+	}
+
 	protected function buildFields(): array
 	{
 		$fields = parent::buildFields();
@@ -98,9 +106,11 @@ final class DocumentSessionManager extends SessionManager
 	 * Persists the current file `GLOBAL_CONTENT_VERSION` into `CONTEXT.vo.contentVersion`
 	 * (merged over any existing vo-metadata, leaving the base context keys untouched).
 	 */
-	public function persistContentVersionSnapshot(DocumentSession $documentSession): bool
+	public function persistContentVersionSnapshot(DocumentSession $documentSession, ?File $file = null): bool
 	{
-		$contentVersion = $this->resolveContentVersion();
+		$contentVersion = $file
+			? (int)$file->getGlobalContentVersion()
+			: $this->resolveContentVersion();
 		if ($contentVersion === null)
 		{
 			return false;
@@ -109,6 +119,30 @@ final class DocumentSessionManager extends SessionManager
 		return $this->persistSessionMetadata($documentSession, [
 			self::CONTEXT_VO_CONTENT_VERSION_KEY => $contentVersion,
 		]);
+	}
+
+	public function cloneSessionWithCurrentContentVersion(
+		DocumentSession $documentSession,
+		int $userId,
+	): ?DocumentSession
+	{
+		$file = File::loadById($documentSession->getObjectId()) ?: $documentSession->getFile();
+		$this
+			->setFile($file)
+			->setVersion($documentSession->getVersion())
+		;
+
+		$forkedSession = $documentSession->cloneWithNewHash($userId);
+		if ($forkedSession)
+		{
+			$this->persistContentVersionSnapshot($forkedSession, $file);
+
+			// persistSessionMetadata() updates the database directly. Return a fresh model so the
+			// caller uses the new snapshot in the same request as the rotation.
+			$forkedSession = DocumentSession::loadById($forkedSession->getId()) ?: $forkedSession;
+		}
+
+		return $forkedSession;
 	}
 
 	/**
@@ -144,6 +178,26 @@ final class DocumentSessionManager extends SessionManager
 		}
 
 		return null;
+	}
+
+	private function refreshLiveFile(): void
+	{
+		if ($this->version)
+		{
+			return;
+		}
+
+		$file = $this->file ?: $this->attachedObject?->getFile();
+		if (!$file)
+		{
+			return;
+		}
+
+		$freshFile = File::loadById($file->getId());
+		if ($freshFile)
+		{
+			$this->file = $freshFile;
+		}
 	}
 
 	/**

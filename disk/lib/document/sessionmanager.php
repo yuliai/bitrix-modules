@@ -20,7 +20,6 @@ use Bitrix\Main\NotImplementedException;
 
 abstract class SessionManager implements IErrorable
 {
-
 	protected const LOCK_LIMIT = 15;
 
 	/** @var Version */
@@ -63,6 +62,11 @@ abstract class SessionManager implements IErrorable
 			'VERSION_ID' => $filter['VERSION_ID'] ?? 0,
 			'OBJECT_ID' => $filter['OBJECT_ID'] ?? 0,
 		];
+		$externalLinkId = $this->getExternalLinkId();
+		if ($externalLinkId !== null)
+		{
+			$keyData['EXTERNAL_LINK_ID'] = $externalLinkId;
+		}
 
 		return implode('|', array_values($keyData));
 	}
@@ -173,14 +177,9 @@ abstract class SessionManager implements IErrorable
 	{
 		$filter = $this->buildFilter();
 
-		$models = DocumentSession::getModelList([
-			'select' => ['*'],
-			'filter' => $filter,
-			'limit' => 1,
-			'order' => ['ID' => 'DESC'],
-		]);
-
-		$session = array_shift($models);
+		$session = $this->getExternalLinkId() === null
+			? $this->findInternalSession($filter)
+			: $this->findExternalSession($filter);
 		if ($session)
 		{
 			return $session;
@@ -192,6 +191,14 @@ abstract class SessionManager implements IErrorable
 		}
 
 		unset($filter['USER_ID']);
+
+		return $this->getExternalLinkId() === null
+			? $this->findInternalSession($filter)
+			: $this->findExternalSession($filter);
+	}
+
+	private function findInternalSession(array $filter): ?DocumentSession
+	{
 		$models = DocumentSession::getModelList([
 			'select' => ['*'],
 			'filter' => $filter,
@@ -200,6 +207,24 @@ abstract class SessionManager implements IErrorable
 		]);
 
 		return array_shift($models);
+	}
+
+	private function findExternalSession(array $filter): ?DocumentSession
+	{
+		$filter['=EXTERNAL_LINK_ID'] = $this->getExternalLinkId();
+		$models = DocumentSession::getModelList([
+			'select' => ['*'],
+			'filter' => $filter,
+			'order' => ['ID' => 'DESC'],
+			'limit' => 1,
+		]);
+
+		return array_shift($models);
+	}
+
+	private function getExternalLinkId(): ?int
+	{
+		return $this->sessionContext?->getExternalLinkId();
 	}
 
 	/**
@@ -278,6 +303,7 @@ abstract class SessionManager implements IErrorable
 		$fields = $this->buildFields();
 		$fields['OWNER_ID'] = $this->userId;
 		$fields['CONTEXT'] = $this->sessionContext->toJson();
+		$fields['EXTERNAL_LINK_ID'] = $this->getExternalLinkId();
 		$fields['SERVICE'] = $this->service->value;
 
 		return DocumentSession::add($fields, $this->errorCollection);

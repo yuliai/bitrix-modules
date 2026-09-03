@@ -10,6 +10,7 @@ use Bitrix\Disk\Document\DocumentSessionResult;
 use Bitrix\Disk\Document\DocumentSource;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Document\Vibeoffice\DocumentSessionManager;
+use Bitrix\Disk\Document\Vibeoffice\SavedContentSynchronizer;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
 use Bitrix\Disk\TrackedObjectManager;
@@ -50,6 +51,20 @@ class VibeofficeHtmlRenderableFileHandler implements HtmlRenderableFileHandler
 
 	private function handle(int $type): FileHandlerOperationResult
 	{
+		if ($type === DocumentSession::TYPE_VIEW && $this->documentSource->getVersion() === null)
+		{
+			try
+			{
+				// Unified links create the session here, before the Vibeoffice controller and the
+				// editor component get a chance to synchronize a delayed document.saved webhook.
+				(new SavedContentSynchronizer())->synchronize($this->file);
+			}
+			catch (\Throwable)
+			{
+				// A delayed save must not turn a readable unified link into an error page.
+			}
+		}
+
 		$createInternalSessionCommand = $this->sessionCommandFactory->createCreateInternalSessionCommand($type);
 
 		try

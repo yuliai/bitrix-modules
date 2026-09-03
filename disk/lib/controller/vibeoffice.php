@@ -130,6 +130,12 @@ final class Vibeoffice extends Engine\Controller
 					new HttpMethod([HttpMethod::METHOD_POST]),
 				],
 			],
+			'waitForSaved' => [
+				'+prefilters' => [
+					new HttpMethod([HttpMethod::METHOD_POST]),
+					new ContentType([ContentType::JSON]),
+				],
+			],
 			// Unified-link config channel: keeps the default prefilters (CSRF + user auth) — the
 			// visitor is a logged-in portal user — and, like getEditorConfig above, only pins the
 			// method to POST. Authorization is fail-closed inside the action via UnifiedLinkAccessService.
@@ -276,6 +282,37 @@ final class Vibeoffice extends Engine\Controller
 	}
 
 	/**
+	 * Reports whether the version produced by the finished editor session is already in Disk.
+	 *
+	 * The platform sends `document.saved` asynchronously. The editor may close before that
+	 * webhook has finished downloading and storing the new version, so the client must not open
+	 * the view URL until the edit session is inactive and its newer content is in Disk.
+	 */
+	public function waitForSavedAction(DocumentSession $documentSession): array
+	{
+		$currentUserId = User::resolveUserId($this->getCurrentUser());
+		if (!$documentSession->isEdit() || !$documentSession->belongsToUser($currentUserId))
+		{
+			$this->addError(new Error('Could not operate by this user document session.'));
+
+			return [];
+		}
+
+		$file = $documentSession->getFile();
+		$currentContentVersion = $file ? (int)$file->getGlobalContentVersion() : null;
+		$sessionContentVersion = $documentSession->getContentVersionSnapshot();
+
+		return [
+			'ready' => $currentContentVersion !== null
+				&& $sessionContentVersion !== null
+				&& $currentContentVersion > $sessionContentVersion
+				&& $documentSession->isNonActive(),
+			'contentVersion' => $currentContentVersion,
+			'snapshot' => $sessionContentVersion,
+		];
+	}
+
+	/**
 	 * Decodes the RAW (already signature-verified) webhook body so the processor reads
 	 * critical fields exactly as sent, bypassing the proactive XSS filter that
 	 * {@see JsonPayload::getData()} applies (V4). Returns null on a malformed body.
@@ -346,7 +383,7 @@ final class Vibeoffice extends Engine\Controller
 	): ?Disk\File
 	{
 		$createBlankDocumentScenario = new Document\OnlyOffice\CreateBlankDocumentScenario(
-			$this->getCurrentUser()?->getId(),
+			(int)($this->getCurrentUser()?->getId() ?? 0),
 			Context::getCurrent()?->getLanguage(),
 		);
 
@@ -453,6 +490,31 @@ final class Vibeoffice extends Engine\Controller
 		if (!$canRead)
 		{
 			return $this->showNotFoundPageAction();
+		}
+
+		if ($version === null)
+		{
+			$file = $object ?: $attachedObject?->getFile();
+			if ($file instanceof Disk\File)
+			{
+				try
+				{
+					(new Document\Vibeoffice\SavedContentSynchronizer())->synchronize($file);
+
+					// The synchronizer may wait for an asynchronous webhook to upload a new
+					// version. Do not pass the pre-wait model instance to the session manager:
+					// it can still contain the old GLOBAL_CONTENT_VERSION.
+					$freshFile = Disk\File::getById($file->getId());
+					if ($freshFile && (!$attachedObject || !$attachedObject->isSpecificVersion()))
+					{
+						$object = $freshFile;
+					}
+				}
+				catch (\Throwable)
+				{
+					// A delayed platform save must not turn a readable document into an error page.
+				}
+			}
 		}
 
 		return $this->loadDocumentEditor($object, $version, $attachedObject, DocumentSession::TYPE_VIEW, $editorMode);

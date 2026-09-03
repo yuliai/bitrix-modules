@@ -158,9 +158,38 @@ final class DocumentService extends Engine\Controller
 	public function viewDocumentAction(Document\Models\DocumentSession $documentSession): HttpResponse
 	{
 		$currentUser = $this->getCurrentUser();
+		if (
+			$documentSession->getService() === Document\Models\DocumentService::Vibeoffice
+			&& !$documentSession->isVersion()
+		)
+		{
+			try
+			{
+				$file = $documentSession->getFile();
+				if ($file)
+				{
+					(new Document\Vibeoffice\SavedContentSynchronizer())->synchronize($file);
+				}
+
+				$reloadedSession = Document\Models\DocumentSession::loadById($documentSession->getId());
+				if ($reloadedSession)
+				{
+					$documentSession = $reloadedSession;
+				}
+			}
+			catch (\Throwable)
+			{
+				// A delayed platform save must not turn a readable document into an error page.
+			}
+		}
+
 		if ($documentSession->isOutdatedByFileContent())
 		{
-			$forkedSession = $documentSession->cloneWithNewHash($currentUser->getId());
+			$forkedSession = $documentSession->getService() === Document\Models\DocumentService::Vibeoffice
+				? (new Document\Vibeoffice\DocumentSessionManager())
+					->cloneSessionWithCurrentContentVersion($documentSession, $currentUser->getId())
+				: $documentSession->cloneWithNewHash($currentUser->getId());
+
 			/** @see \Bitrix\Disk\Controller\DocumentService::viewDocumentAction() */
 			$viewUri = $this->getActionUri('viewDocument', ['documentSessionId' => $forkedSession->getId()]);
 
@@ -281,8 +310,15 @@ final class DocumentService extends Engine\Controller
 			$file = $attachedObject?->getFile();
 			if ($attachedObject)
 			{
-				$canEdit = $canEdit || $attachedObject->canUpdate($this->getCurrentUser()->getId());
-				$canRead = $canRead || $attachedObject->canRead($this->getCurrentUser()->getId());
+				// When both $objectId and $attachedObjectId are passed, $file becomes the
+				// attached object's file. Keep the $objectId file's rights in the OR only
+				// when it points to the same object as the attached one; otherwise a foreign
+				// attached file used for the unified redirect would inherit access from an
+				// unrelated $objectId file (see #250817). The $canRead gate on the redirect
+				// still enforces read rights on the resulting file (see #248603).
+				$sameObject = $objectId && (int)$objectId === (int)$attachedObject->getObjectId();
+				$canEdit = ($sameObject && $canEdit) || $attachedObject->canUpdate((int)$this->getCurrentUser()?->getId());
+				$canRead = ($sameObject && $canRead) || $attachedObject->canRead((int)$this->getCurrentUser()?->getId());
 				$objectIdForSessionCheck = (int)$attachedObject->getObjectId();
 			}
 		}

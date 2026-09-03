@@ -3,22 +3,29 @@
 namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
+use Bitrix\Disk\Infrastructure\Controller\HtmlViewerRefusalResponse;
+use Bitrix\Disk\Internal\Service\HtmlViewerService;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response;
+use Bitrix\Main\HttpResponse;
 use Bitrix\Main\Localization\Loc;
 
 final class Version extends Engine\Controller
 {
+	use HtmlViewerRefusalResponse;
+
 	public function configureActions(): array
 	{
 		$configureActions = parent::configureActions();
 
 		$configureActions['download'] =
-		$configureActions['showMarkdown'] = [
+		$configureActions['showMarkdown'] =
+		$configureActions['showHtml'] = [
 			'-prefilters' => [
 				ActionFilter\Csrf::class,
 				ActionFilter\Authentication::class,
@@ -77,6 +84,11 @@ final class Version extends Engine\Controller
 		}
 
 		return $result->getData();
+	}
+
+	public function showHtmlAction(Disk\Version $version): HttpResponse
+	{
+		return ServiceLocator::getInstance()->get(HtmlViewerService::class)->showByVersion($version);
 	}
 
 	public function deleteAction(Disk\Version $version)

@@ -16,7 +16,7 @@ use Parsedown;
 /**
  * Renders a markdown file into safe HTML for the viewer.
  *
- * Pipeline: Parsedown (bundled with the ai module) -> mandatory sanitization via
+ * Pipeline: Parsedown (bundled with the ui module) -> mandatory sanitization via
  * CBXSanitizer, which is the single point of sanitization.
  *
  * Returns a Result: on success data['html'] holds the rendered document; on failure
@@ -28,7 +28,7 @@ class MarkdownRenderService
 {
 	public const ERROR_VIEWER_DISABLED = 'DISK_MARKDOWN_VIEWER_DISABLED';
 	public const ERROR_SIZE_LIMIT = 'DISK_MARKDOWN_RENDER_SIZE_LIMIT';
-	public const ERROR_NO_AI_MODULE = 'DISK_MARKDOWN_RENDER_NO_AI_MODULE';
+	public const ERROR_RENDERER_UNAVAILABLE = 'DISK_MARKDOWN_RENDER_UNAVAILABLE';
 	public const ERROR_CONTENT_UNREADABLE = 'DISK_MARKDOWN_RENDER_CONTENT_UNREADABLE';
 	public const ERROR_RENDER_FAILED = 'DISK_MARKDOWN_RENDER_FAILED';
 
@@ -37,7 +37,8 @@ class MarkdownRenderService
 
 	// Bump on any change to the cached payload shape (old caches stored a bare html string,
 	// not the html+diagrams array) so stale entries are dropped instead of misread.
-	private const RENDER_FORMAT_VERSION = 2;
+	// v3: the em tag is now allowed, so italic-less renders cached under v2 must be dropped.
+	private const RENDER_FORMAT_VERSION = 3;
 
 	private const MERMAID_PLACEHOLDER_PREFIX = '[[DISK_MERMAID_PLACEHOLDER::';
 	private const MERMAID_PLACEHOLDER_SUFFIX = ']]';
@@ -61,6 +62,11 @@ class MarkdownRenderService
 		.disk-markdown-diagram svg { max-width: 100%; height: auto; }
 		.disk-markdown-diagram--error { margin: 16px 0; padding: 12px; border: 1px solid #e6b8ba; border-radius: 4px; background: #fdf0f0; color: #a3494c; text-align: left; }
 		CSS;
+
+	public static function isAvailable(): bool
+	{
+		return Loader::includeModule('ui') && class_exists(Parsedown::class);
+	}
 
 	public function renderByFile(File $file): Result
 	{
@@ -113,11 +119,11 @@ class MarkdownRenderService
 			]);
 		}
 
-		if (!Loader::includeModule('ai'))
+		if (!self::isAvailable())
 		{
 			return $result->addError(new Error(
-				'Module "ai" is not installed: markdown renderer (Parsedown) is unavailable.',
-				self::ERROR_NO_AI_MODULE
+				'Markdown renderer is unavailable.',
+				self::ERROR_RENDERER_UNAVAILABLE
 			));
 		}
 
@@ -133,7 +139,7 @@ class MarkdownRenderService
 		$rendered = $this->render($content);
 		if ($rendered === null)
 		{
-			// The ai module is ensured above, so reaching here is unexpected.
+			// The renderer availability is ensured above, so reaching here is unexpected.
 			return $result->addError(new Error(
 				'Markdown rendering produced no output.',
 				self::ERROR_RENDER_FAILED
@@ -153,11 +159,11 @@ class MarkdownRenderService
 
 	/**
 	 * @return array{html: string, diagrams: list<string>}|null Diagram sources are returned apart
-	 *         from the html because mermaid can only render (to SVG) in the browser. Null when ai is missing.
+	 *         from the html because mermaid can only render (to SVG) in the browser. Null when the renderer is unavailable.
 	 */
 	public function render(string $text): ?array
 	{
-		if (!Loader::includeModule('ai'))
+		if (!self::isAvailable())
 		{
 			return null;
 		}
@@ -169,6 +175,7 @@ class MarkdownRenderService
 
 		$sanitizer = new \CBXSanitizer();
 		$sanitizer->SetLevel(\CBXSanitizer::SECURE_LEVEL_MIDDLE);
+		$sanitizer->AddTags(['em' => []]);
 		$safeHtml = $sanitizer->SanitizeHtml($rawHtml);
 
 		$safeHtml = $this->rewriteLinks($safeHtml);

@@ -7,9 +7,12 @@ use Bitrix\Disk\Document\BitrixHandler;
 use Bitrix\Disk\Document\OnlyOffice\OnlyOfficeHandler;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
+use Bitrix\Disk\Internal\Service\HtmlViewerPolicy;
 use Bitrix\Disk\TypeFile;
+use Bitrix\Disk\UI\Viewer\Renderer\Html;
 use Bitrix\Disk\UI\Viewer\Renderer\Markdown;
 use Bitrix\Disk\Uf\Integration\DiskUploaderController;
+use Bitrix\Disk\Version;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\UI\Extension;
 use Bitrix\Main\UI\Viewer\ItemAttributes;
@@ -36,16 +39,18 @@ final class FileAttributes extends ItemAttributes
 	public const JS_TYPE_CLASS_BOARD = 'BX.Disk.Viewer.BoardItem';
 
 	public const KEY_FILE_OBJECT = 'FILE_OBJECT';
+	// The revision the item shows, when it shows one: the file it belongs to answers for everything else.
+	public const KEY_VERSION_OBJECT = 'VERSION_OBJECT';
 
 	private bool $needSetUnifiedLink = false;
 	private array $unifiedLinkOptions = [];
 	private bool $useUnifiedEditLink = false;
 
-	public static function tryBuildByFileId($fileId, $sourceUri, ?File $file = null): self
+	public static function tryBuildByFileId($fileId, $sourceUri, ?File $file = null, ?Version $version = null): self
 	{
 		try
 		{
-			return self::buildByFileId($fileId, $sourceUri, $file);
+			return self::buildByFileId($fileId, $sourceUri, $file, $version);
 		}
 		catch (ArgumentException)
 		{
@@ -53,7 +58,7 @@ final class FileAttributes extends ItemAttributes
 		}
 	}
 
-	public static function buildByFileId($fileId, $sourceUri, ?File $file = null): self
+	public static function buildByFileId($fileId, $sourceUri, ?File $file = null, ?Version $version = null): self
 	{
 		$fileData = \CFile::getByID($fileId)->fetch();
 
@@ -63,6 +68,7 @@ final class FileAttributes extends ItemAttributes
 		}
 
 		$fileData[self::KEY_FILE_OBJECT] = $file;
+		$fileData[self::KEY_VERSION_OBJECT] = $version;
 
 		return self::buildByFileData($fileData, $sourceUri);
 	}
@@ -255,6 +261,13 @@ final class FileAttributes extends ItemAttributes
 			Extension::load('disk.viewer.markdown-item');
 		}
 
+		// The html viewer lives on its unified link page, so the item just opens that link in a new tab.
+		// refineType() only yields this type for a file that supports the unified link.
+		if ($this->getViewerType() === Html::getJsType())
+		{
+			$this->setUnifiedLinkViewer();
+		}
+
 		if (self::isSetViewDocumentInClouds() && Document\DocumentViewPolicy::isAllowedUseClouds($this->fileData['CONTENT_TYPE']))
 		{
 			$documentHandler = Document\DocumentViewPolicy::getDefaultHandlerForView();
@@ -360,6 +373,19 @@ final class FileAttributes extends ItemAttributes
 			return Markdown::getJsType();
 		}
 
+		// The formatted view of an html file lives on its unified link page, so the type is claimed only
+		// when that link exists. Size is not checked here (unlike markdown): the limit is enforced when
+		// the content is served, so an oversized file still opens the page (with a 413 stub) instead of
+		// the code view.
+		if (
+			$fileObject instanceof File
+			&& self::isHtmlViewerSource($fileObject, self::getVersionObject($fileArray))
+			&& $fileObject->supportsUnifiedLink()
+		)
+		{
+			return Html::getJsType();
+		}
+
 		if (
 			$type === Renderer\Stub::getJsType() &&
 			!empty($fileArray['ORIGINAL_NAME']) &&
@@ -384,6 +410,33 @@ final class FileAttributes extends ItemAttributes
 		}
 
 		return $type;
+	}
+
+	private static function getVersionObject(array $fileArray): ?Version
+	{
+		$version = $fileArray[self::KEY_VERSION_OBJECT] ?? null;
+
+		return $version instanceof Version ? $version : null;
+	}
+
+	/**
+	 * Asks about the source the item actually shows — the revision when one is given, the file otherwise.
+	 * A revision keeps the name it was saved under and has no stored type of its own, so renaming the file
+	 * neither takes the formatted view away from a revision that has it nor sends one that has not into a
+	 * page whose endpoint would refuse it. The stored type stays part of the file answer: it is what keeps
+	 * a document renamed to .html with the editors it was stored for.
+	 */
+	private static function isHtmlViewerSource(File $file, ?Version $version): bool
+	{
+		if (!Configuration::isEnabledHtmlViewer())
+		{
+			return false;
+		}
+
+		return $version === null
+			? HtmlViewerPolicy::isViewableFile($file)
+			: HtmlViewerPolicy::isViewableExtension($version->getExtension())
+		;
 	}
 
 	protected static function isBoardType(array $fileData): bool

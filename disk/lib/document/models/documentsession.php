@@ -57,6 +57,8 @@ final class DocumentSession extends Model
 	protected $type;
 	/** @var int */
 	protected $status;
+	/** @var int|null */
+	protected $externalLinkId;
 	/** @var string */
 	protected $context;
 	/** @var string|null */
@@ -73,6 +75,11 @@ final class DocumentSession extends Model
 
 	public static function add(array $data, ErrorCollection $errorCollection)
 	{
+		if (!array_key_exists('EXTERNAL_LINK_ID', $data))
+		{
+			$data['EXTERNAL_LINK_ID'] = self::extractExternalLinkId($data['CONTEXT'] ?? null);
+		}
+
 		self::trackFirstEditForLimitedEdit($data);
 
 		return parent::add($data, $errorCollection);
@@ -307,6 +314,11 @@ final class DocumentSession extends Model
 		return $this->context;
 	}
 
+	public function getExternalLinkId(): ?int
+	{
+		return $this->externalLinkId;
+	}
+
 	public function getServiceRaw(): ?string
 	{
 		return $this->service;
@@ -320,6 +332,17 @@ final class DocumentSession extends Model
 	public function getContext(): ?DocumentSessionContext
 	{
 		return DocumentSessionContext::buildFromJson($this->getContextRaw());
+	}
+
+	public function matchesExternalContext(DocumentSessionContext $requestedContext): bool
+	{
+		$requestedExternalLinkId = $requestedContext->getExternalLinkId();
+		if ($requestedExternalLinkId === null)
+		{
+			return true;
+		}
+
+		return $this->getExternalSessionContext()?->getExternalLinkId() === $requestedExternalLinkId;
 	}
 
 	public function isView(): bool
@@ -409,7 +432,11 @@ final class DocumentSession extends Model
 		{
 			$currentEditSessionFilter['SERVICE'] = $this->getServiceRaw();
 		}
-		$currentEditSession = self::load($currentEditSessionFilter);
+
+		$externalContext = $this->getExternalSessionContext();
+		$currentEditSession = $externalContext === null
+			? self::load($currentEditSessionFilter)
+			: $this->findEditSessionByExternalContext($currentEditSessionFilter, $externalContext);
 
 		if ($currentEditSession && $currentEditSession->belongsToUser($this->getUserId()))
 		{
@@ -436,6 +463,53 @@ final class DocumentSession extends Model
 			'CONTEXT' => $this->getContextRaw(),
 			'SERVICE' => $this->getServiceRaw(),
 		], $this->errorCollection);
+	}
+
+	private function findEditSessionByExternalContext(
+		array $filter,
+		DocumentSessionContext $context,
+	): ?self
+	{
+		$filter['=EXTERNAL_LINK_ID'] = $context->getExternalLinkId();
+		$sessions = self::getModelList([
+			'select' => ['*'],
+			'filter' => $filter,
+			'order' => ['ID' => 'DESC'],
+			'limit' => 1,
+		]);
+
+		return array_shift($sessions);
+	}
+
+	private static function extractExternalLinkId(mixed $context): ?int
+	{
+		if (!is_string($context) || $context === '')
+		{
+			return null;
+		}
+
+		try
+		{
+			return DocumentSessionContext::buildFromJson($context)?->getExternalLinkId();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+	}
+
+	private function getExternalSessionContext(): ?DocumentSessionContext
+	{
+		try
+		{
+			$context = $this->getContext();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		return $context?->getExternalLinkId() === null ? null : $context;
 	}
 
 	/**
@@ -645,6 +719,7 @@ final class DocumentSession extends Model
 			'CREATE_TIME' => 'createTime',
 			'TYPE' => 'type',
 			'STATUS' => 'status',
+			'EXTERNAL_LINK_ID' => 'externalLinkId',
 			'CONTEXT' => 'context',
 			'SERVICE' => 'service',
 		];
