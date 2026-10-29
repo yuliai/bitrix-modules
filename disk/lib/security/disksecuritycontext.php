@@ -4,7 +4,10 @@ namespace Bitrix\Disk\Security;
 
 use Bitrix\Disk\BaseObject;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Internal\Access\DownloadAccess;
 use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
+use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessResult;
+use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessSource;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internals\ObjectPathTable;
 use Bitrix\Disk\Internals\RightTable;
@@ -12,22 +15,31 @@ use Bitrix\Disk\Internals\SimpleRightTable;
 use Bitrix\Disk\RightsManager;
 use Bitrix\Disk\Access\AccessCodeEnum;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\SystemException;
 use Bitrix\Main\UserAccessTable;
 use CAccess;
 
 class DiskSecurityContext extends SecurityContext
 {
 	protected UnifiedLinkAccessService $unifiedLinkAccessService;
+	protected DownloadAccess $downloadAccess;
 	protected bool $shouldCheckUnifiedLink = false;
 	/** @var  array */
-	protected $operationsCache = array();
+	protected $operationsCache = [];
 	protected array $unifiedLinkCache = [];
+	/** @var array<int, UnifiedLinkAccessResult> */
+	protected array $unifiedLinkAccessResultCache = [];
+	/** @var array<int, BaseObject|null> */
+	protected array $objectCache = [];
 
 	public function __construct($user)
 	{
 		parent::__construct($user);
 
-		$this->unifiedLinkAccessService = ServiceLocator::getInstance()->get(UnifiedLinkAccessService::class);
+		$serviceLocator = ServiceLocator::getInstance();
+		$this->unifiedLinkAccessService = $serviceLocator->get(UnifiedLinkAccessService::class);
+		$this->downloadAccess = $serviceLocator->get(DownloadAccess::class);
 	}
 
 	public function checkUnifiedLink(bool $shouldCheckUnifiedLink): void
@@ -71,26 +83,26 @@ class DiskSecurityContext extends SecurityContext
 			return false;
 		}
 
-		if (!array_key_exists($objectId, $this->unifiedLinkCache))
+		$objectId = (int)$objectId;
+
+		if (array_key_exists($objectId, $this->unifiedLinkCache))
+		{
+			$accessLevel = $this->unifiedLinkCache[$objectId];
+		}
+		else
 		{
 			$object = $this->getObject($objectId);
 
-			if (!$object instanceof BaseObject)
+			if ($object instanceof BaseObject)
 			{
-				$accessLevel = null;
+				$accessLevel = $this->getUnifiedLinkAccessLevel($object);
 			}
 			else
 			{
-				$accessLevel = $this->unifiedLinkAccessService->check(
-					baseObject: $object,
-					userId: (int)$this->userId,
-				);
+				$this->unifiedLinkCache[$objectId] = null;
+				$accessLevel = null;
 			}
-
-			$this->unifiedLinkCache[$objectId] = $accessLevel;
 		}
-
-		$accessLevel = $this->unifiedLinkCache[$objectId];
 
 		if (!$accessLevel instanceof UnifiedLinkAccessLevel)
 		{
@@ -102,13 +114,16 @@ class DiskSecurityContext extends SecurityContext
 
 	protected function getOperationsByObject($objectId)
 	{
-		$access = new CAccess;
-		$access->updateCodes(array('USER_ID' => $this->userId));
+		$access = new CAccess();
+		$access->updateCodes(['USER_ID' => $this->userId]);
 
 		return Driver::getInstance()->getRightsManager()->getUserOperationsByObject($objectId, $this->userId);
 	}
 
-	public function preloadOperationsForChildren($parentObjectId): void
+	public function preloadOperationsForChildren(
+		$parentObjectId,
+		bool $shouldPreloadDownloadAccess = false,
+	): void
 	{
 		$rightsManager = Driver::getInstance()->getRightsManager();
 
@@ -122,10 +137,14 @@ class DiskSecurityContext extends SecurityContext
 
 		unset($operations);
 
-		$this->preloadUnifiedLinkAccessLevels($objectIds);
+		$this->preloadAccessForObjectIds($objectIds, $shouldPreloadDownloadAccess);
 	}
 
-	public function preloadOperationsForSpecifiedObjects($parentObjectId, array $objectIds): void
+	public function preloadOperationsForSpecifiedObjects(
+		$parentObjectId,
+		array $objectIds,
+		bool $shouldPreloadDownloadAccess = false,
+	): void
 	{
 		$rightsManager = Driver::getInstance()->getRightsManager();
 
@@ -140,16 +159,81 @@ class DiskSecurityContext extends SecurityContext
 			$this->operationsCache[$objectId] = $operations;
 		}
 
-		$this->preloadUnifiedLinkAccessLevels($objectIds);
+		$this->preloadAccessForObjectIds($objectIds, $shouldPreloadDownloadAccess);
 	}
 
-	protected function preloadUnifiedLinkAccessLevels(array $objectIds): void
+	/**
+	 * @param array<int, BaseObject> $objects
+	 */
+	public function preloadOperationsForObjects(array $objects): void
 	{
-		if (!$this->shouldCheckUnifiedLink || $this->userId === static::GUEST_USER)
+		$objectIds = [];
+
+		foreach ($objects as $object)
+		{
+			if (!$object instanceof BaseObject)
+			{
+				continue;
+			}
+
+			$this->cacheObject($object);
+
+			$objectId = (int)$object->getId();
+			$realObjectId = (int)$object->getRealObjectId();
+
+			if ($objectId > 0)
+			{
+				$objectIds[] = $objectId;
+			}
+
+			if ($realObjectId > 0 && $realObjectId !== $objectId)
+			{
+				$objectIds[] = $realObjectId;
+			}
+		}
+
+		$this->preloadOperationsForObjectIds($objectIds);
+	}
+
+	/**
+	 * @param array<int, int> $objectIds
+	 */
+	public function preloadOperationsForObjectIds(array $objectIds): void
+	{
+		$objectIds = array_values(array_unique(array_filter(array_map('intval', $objectIds))));
+		if (empty($objectIds))
 		{
 			return;
 		}
 
+		$operationsByObjectId = $this->getOperationsByObjects($objectIds);
+
+		foreach ($operationsByObjectId as $objectId => $operations)
+		{
+			$this->operationsCache[$objectId] = $operations;
+		}
+
+		foreach ($objectIds as $objectId)
+		{
+			$this->operationsCache[$objectId] ??= [];
+		}
+
+		$this->preloadAccessForObjectIds($objectIds);
+	}
+
+	protected function getOperationsByObjects(array $objectIds): array
+	{
+		return Driver::getInstance()
+			->getRightsManager()
+			->getUserOperationsForObjects($objectIds, $this->userId)
+		;
+	}
+
+	protected function preloadAccessForObjectIds(
+		array $objectIds,
+		bool $shouldPreloadDownloadAccess = true,
+	): void
+	{
 		$objectIds = array_values(array_unique(array_filter(array_map('intval', $objectIds))));
 
 		if (empty($objectIds))
@@ -158,13 +242,55 @@ class DiskSecurityContext extends SecurityContext
 		}
 
 		$objects = [];
+		$objectIdsToLoad = [];
+		$objectIdsWithoutObjects = [];
 
-		foreach (BaseObject::loadBatchById($objectIds) as $object)
+		foreach ($objectIds as $objectId)
+		{
+			if (array_key_exists($objectId, $this->objectCache))
+			{
+				$object = $this->objectCache[$objectId];
+
+				if ($object instanceof BaseObject)
+				{
+					$objects[$objectId] = $object;
+				}
+
+				continue;
+			}
+
+			if ($this->shouldCheckUnifiedLink)
+			{
+				$objectIdsToLoad[] = $objectId;
+			}
+			else
+			{
+				$objectIdsWithoutObjects[] = $objectId;
+			}
+		}
+
+		foreach (BaseObject::loadBatchById($objectIdsToLoad) as $object)
 		{
 			if ($object instanceof BaseObject)
 			{
 				$objects[(int)$object->getId()] = $object;
+				$this->cacheObject($object);
 			}
+		}
+
+		if ($shouldPreloadDownloadAccess && !empty($objects))
+		{
+			$this->downloadAccess->preload($objects);
+		}
+
+		if (!$this->shouldCheckUnifiedLink)
+		{
+			if ($shouldPreloadDownloadAccess && !empty($objectIdsWithoutObjects))
+			{
+				$this->downloadAccess->preloadByObjectIds($objectIdsWithoutObjects);
+			}
+
+			return;
 		}
 
 		if (empty($objects))
@@ -183,10 +309,12 @@ class DiskSecurityContext extends SecurityContext
 	/**
 	 * @param array<int, BaseObject> $objects
 	 * @return void
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
 	 */
 	public function preloadUnifiedLinkAccessLevelsForObjects(array $objects): void
 	{
-		if (!$this->shouldCheckUnifiedLink || $this->userId === static::GUEST_USER)
+		if (!$this->shouldCheckUnifiedLink)
 		{
 			return;
 		}
@@ -198,6 +326,7 @@ class DiskSecurityContext extends SecurityContext
 			if ($object instanceof BaseObject)
 			{
 				$baseObjects[(int)$object->getId()] = $object;
+				$this->cacheObject($object);
 			}
 		}
 
@@ -207,6 +336,7 @@ class DiskSecurityContext extends SecurityContext
 		}
 
 		$this->preloadUnifiedLinkAccessLevelsByObjects($baseObjects, array_keys($baseObjects));
+		$this->downloadAccess->preload($baseObjects);
 	}
 
 	/**
@@ -216,7 +346,7 @@ class DiskSecurityContext extends SecurityContext
 	 */
 	protected function preloadUnifiedLinkAccessLevelsByObjects(array $baseObjects, array $objectIds): void
 	{
-		$accessLevelsByObjectId = $this->unifiedLinkAccessService->checkCollection(
+		$accessResultsByObjectId = $this->unifiedLinkAccessService->checkAllCollection(
 			baseObjects: $baseObjects,
 			userId: (int)$this->userId,
 			operationsByObjectId: $this->operationsCache,
@@ -224,8 +354,53 @@ class DiskSecurityContext extends SecurityContext
 
 		foreach ($objectIds as $objectId)
 		{
-			$this->unifiedLinkCache[$objectId] = $accessLevelsByObjectId[$objectId] ?? null;
+			$accessResult = $accessResultsByObjectId[$objectId] ?? null;
+
+			if ($accessResult instanceof UnifiedLinkAccessResult)
+			{
+				$this->unifiedLinkAccessResultCache[$objectId] = $accessResult;
+				$this->unifiedLinkCache[$objectId] = $accessResult->getMaxAccessLevel();
+			}
+			else
+			{
+				$this->unifiedLinkCache[$objectId] = null;
+			}
 		}
+	}
+
+	protected function getUnifiedLinkAccessLevel(BaseObject $object): ?UnifiedLinkAccessLevel
+	{
+		$objectId = (int)$object->getId();
+
+		if (!array_key_exists($objectId, $this->unifiedLinkCache))
+		{
+			$this->unifiedLinkCache[$objectId] = $this->unifiedLinkAccessService->check(
+				baseObject: $object,
+				userId: (int)$this->userId,
+			);
+		}
+
+		$accessLevel = $this->unifiedLinkCache[$objectId];
+
+		return $accessLevel instanceof UnifiedLinkAccessLevel ? $accessLevel : null;
+	}
+
+	protected function getUnifiedLinkAccessResult(BaseObject $object): UnifiedLinkAccessResult
+	{
+		$objectId = (int)$object->getId();
+
+		if (!isset($this->unifiedLinkAccessResultCache[$objectId]))
+		{
+			$accessResult = $this->unifiedLinkAccessService->checkAll(
+				baseObject: $object,
+				userId: (int)$this->userId,
+			);
+
+			$this->unifiedLinkAccessResultCache[$objectId] = $accessResult;
+			$this->unifiedLinkCache[$objectId] = $accessResult->getMaxAccessLevel();
+		}
+
+		return $this->unifiedLinkAccessResultCache[$objectId];
 	}
 
 	/**
@@ -299,6 +474,103 @@ class DiskSecurityContext extends SecurityContext
 	public function canRead($objectId)
 	{
 		return $this->canDoOperation($objectId, RightsManager::OP_READ);
+	}
+
+	/**
+	 * @param $objectId
+	 * @return bool
+	 */
+	public function canDownload($objectId)
+	{
+		$objectId = (int)$objectId;
+
+		if ($this->userId === static::GUEST_USER)
+		{
+			$object = $this->getObject($objectId);
+
+			if (!$object instanceof BaseObject)
+			{
+				return false;
+			}
+
+			if (!$this->shouldCheckUnifiedLink)
+			{
+				return false;
+			}
+
+			$accessLevel = $this->getUnifiedLinkAccessLevel($object);
+
+			if (
+				$accessLevel instanceof UnifiedLinkAccessLevel
+				&& $accessLevel->value >= UnifiedLinkAccessLevel::Edit->value
+			)
+			{
+				return true;
+			}
+
+			return $accessLevel === UnifiedLinkAccessLevel::Read && $this->downloadAccess->checkExternalLink($object);
+		}
+
+		if ($objectId <= 0)
+		{
+			return false;
+		}
+
+		if (!$this->shouldCheckUnifiedLink)
+		{
+			if (!$this->canRead($objectId))
+			{
+				return false;
+			}
+
+			if ($this->canUpdate($objectId))
+			{
+				return true;
+			}
+
+			return $this->downloadAccess->checkObjectOptionByObjectId($objectId);
+		}
+
+		$object = $this->objectCache[$objectId] ?? $this->getObject($objectId);
+
+		if (!$object instanceof BaseObject)
+		{
+			return false;
+		}
+
+		$accessResult = $this->getUnifiedLinkAccessResult($object);
+		$maxAccessLevel = $accessResult->getMaxAccessLevel();
+
+		if ($maxAccessLevel === UnifiedLinkAccessLevel::Edit)
+		{
+			return true;
+		}
+
+		if ($maxAccessLevel !== UnifiedLinkAccessLevel::Read)
+		{
+			return false;
+		}
+
+		$privateReadSources = [
+			UnifiedLinkAccessSource::ParentUnifiedLink,
+			UnifiedLinkAccessSource::UnifiedLink,
+			UnifiedLinkAccessSource::PermissionSystem,
+			UnifiedLinkAccessSource::AttachedObject,
+		];
+
+		foreach ($privateReadSources as $source)
+		{
+			if (
+				$accessResult->getAccessLevel($source) === UnifiedLinkAccessLevel::Read
+				&& $this->downloadAccess->checkObjectOption($object)
+			)
+			{
+				return true;
+			}
+		}
+
+		return $accessResult->getAccessLevel(UnifiedLinkAccessSource::ExternalLink) === UnifiedLinkAccessLevel::Read
+			&& $this->downloadAccess->checkExternalLink($object);
 	}
 
 	/**
@@ -461,6 +733,41 @@ class DiskSecurityContext extends SecurityContext
 
 	protected function getObject(mixed $objectId): ?BaseObject
 	{
-		return BaseObject::getById($objectId);
+		$objectId = (int)$objectId;
+
+		if ($objectId <= 0)
+		{
+			return null;
+		}
+
+		if (!array_key_exists($objectId, $this->objectCache))
+		{
+			$object = BaseObject::getById($objectId);
+
+			if ($object instanceof BaseObject)
+			{
+				$this->cacheObject($object);
+			}
+			else
+			{
+				$this->objectCache[$objectId] = null;
+			}
+		}
+
+		$object = $this->objectCache[$objectId];
+
+		return $object instanceof BaseObject ? $object : null;
+	}
+
+	protected function cacheObject(BaseObject $object): void
+	{
+		$objectId = (int)$object->getId();
+
+		if ($objectId <= 0)
+		{
+			return;
+		}
+
+		$this->objectCache[$objectId] = $object;
 	}
 }

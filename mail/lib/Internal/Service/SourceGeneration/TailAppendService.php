@@ -1586,12 +1586,13 @@ class TailAppendService
 
 			/*
 				The lazy download of the attachments reads the coordinates off the very row it is
-				given, and the boundary of the engine checks the generation of them: without the
-				generation of the placement the download would be refused.
+				given, and the boundary of the engine checks the generation and the folder version
+				of them: without them the download would be refused.
 			*/
 			$letters[$messageId] = $row + [
 				'DIR_MD5' => $placement['DIR_MD5'],
 				'MSG_UID' => $placement['MSG_UID'],
+				'DIR_UIDV' => $placement['DIR_UIDV'],
 				'GENERATION_ID' => $placement['GENERATION_ID'],
 				'__placement' => $placement,
 			];
@@ -1671,7 +1672,7 @@ class TailAppendService
 	private function loadArchivedPlacements(int $mailboxId, array $messageIds): array
 	{
 		$rows = MailMessageUidTable::getList([
-			'select' => ['ID', 'MESSAGE_ID', 'DIR_MD5', 'MSG_UID', 'GENERATION_ID', 'INTERNALDATE', 'IS_SEEN'],
+			'select' => ['ID', 'MESSAGE_ID', 'DIR_MD5', 'MSG_UID', 'DIR_UIDV', 'GENERATION_ID', 'INTERNALDATE', 'IS_SEEN'],
 			'filter' => GenerationScope::forMailbox($mailboxId)->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'@MESSAGE_ID' => $messageIds,

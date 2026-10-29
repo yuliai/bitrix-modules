@@ -353,8 +353,14 @@ final class DocumentSessionManager extends SessionManager
 			return false;
 		}
 
+		$ownsTransaction = false;
 		try
 		{
+			if (!$this->hasTransaction())
+			{
+				$connection->startTransaction();
+				$ownsTransaction = true;
+			}
 			$rawContext = $this->readFreshContextRaw($sessionId);
 			if ($rawContext === null)
 			{
@@ -375,12 +381,24 @@ final class DocumentSessionManager extends SessionManager
 			$result = DocumentSessionTable::update($sessionId, [
 				'CONTEXT' => Json::encode($context),
 			]);
+			if ($result->isSuccess() && $ownsTransaction)
+			{
+				$connection->commitTransaction();
+				$ownsTransaction = false;
+			}
 
 			return $result->isSuccess();
 		}
 		finally
 		{
-			if ($locked)
+			try
+			{
+				if ($ownsTransaction)
+				{
+					$connection->rollbackTransaction();
+				}
+			}
+			finally
 			{
 				$connection->unlock($lockName);
 			}
@@ -394,11 +412,14 @@ final class DocumentSessionManager extends SessionManager
 	private function readFreshContextRaw(int $sessionId): ?string
 	{
 		$query = DocumentSessionTable::query()->setSelect(['CONTEXT'])->where('ID', $sessionId);
-		$row = Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch();
-
-		$context = $row['CONTEXT'] ?? null;
+		$context = DocumentStateRepository::fetchForUpdate($query)['CONTEXT'] ?? null;
 
 		return is_string($context) ? $context : null;
+	}
+
+	private function hasTransaction(): bool
+	{
+		return DocumentStateRepository::hasOpenTransaction();
 	}
 
 	/**

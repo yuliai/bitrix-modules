@@ -6,6 +6,12 @@ use Bitrix\Disk\Document\DocumentHandlersManager;
 use Bitrix\Disk\Document\Flipchart\DualMode;
 use Bitrix\Disk\Document\OnlyOffice;
 use Bitrix\Disk\Document\Vibeoffice;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\CapabilitiesGetMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ChangesListMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ContentGetMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\SessionCreateMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\SnapshotListMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\StateCheckMethodProvider;
 use Bitrix\Disk\Integration\Bitrix24Manager;
 use Bitrix\Disk\Integration\Ui\EntitySelector\SpecialAccessProvider;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
@@ -22,6 +28,7 @@ use Bitrix\Disk\Internal\Repository\Interface\LimitEncounterCounterRepositoryInt
 use Bitrix\Disk\Internal\Repository\LimitEncounterCounterPersistentStorageRepository;
 use Bitrix\Disk\Internal\Service\CustomServerConfig;
 use Bitrix\Disk\Internal\Service\DocumentHeader\HeaderCompositionService;
+use Bitrix\Disk\Internal\Service\DocumentHeader\OpeningContextFactory;
 use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
 use Bitrix\Disk\Internal\Service\DocumentPresence\InitialRosterService;
 use Bitrix\Disk\Internal\Service\DocumentPresence\PresenceAccessService;
@@ -30,7 +37,16 @@ use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkOpenPolicy;
 use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkScenarioRegistry;
 use Bitrix\Disk\Internal\Service\ExternalLink\MailAttachmentExternalLinkService;
 use Bitrix\Disk\Internal\Service\Folder\MailAttachmentsFolderPredicate;
-use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\DocumentChannelReporter;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\DocumentSaveService;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\DownloadedFileVerifier;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\EditedDocumentDownloaderInterface;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\InterruptedSessionNotifier;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\InterruptedSessionService;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\KeptDocumentRecovery;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SaveTimingConfig;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SavingMarker;
+use Bitrix\Disk\Internal\Service\Sync\Snapshot\SnapshotService;
 use Bitrix\Disk\Internal\Service\VersionMatcher\DottedMatcher;
 use Bitrix\Disk\Internal\Service\VersionMatcher\Matcher;
 use Bitrix\Disk\Internals\DeletedLogManager;
@@ -50,6 +66,7 @@ use Bitrix\Disk\Uf\UserFieldManager;
 use Bitrix\Disk\UrlManager;
 use Bitrix\Disk\TrackedObjectManager;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
 
@@ -74,6 +91,24 @@ return [
 		],
 		'readonly' => true,
 	],
+	'rest' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Disk\\Infrastructure\\Rest\\V3\\Controller',
+			// The automatic generator writes a single "200" per method, so a refusal never reaches the
+			// published document. Every method of the sync contour brings a provider that describes its
+			// own envelope and the refusals it answers with.
+			'documentation' => [
+				'methods' => [
+					'disk.sync.capabilities.get' => CapabilitiesGetMethodProvider::class,
+					'disk.sync.session.create' => SessionCreateMethodProvider::class,
+					'disk.sync.snapshot.list' => SnapshotListMethodProvider::class,
+					'disk.sync.changes.list' => ChangesListMethodProvider::class,
+					'disk.sync.state.check' => StateCheckMethodProvider::class,
+					'disk.sync.content.get' => ContentGetMethodProvider::class,
+				],
+			],
+		],
+	],
 	'services' => [
 		'value' => [
 			'disk.onlyofficeConfiguration' => [
@@ -81,6 +116,88 @@ return [
 			],
 			'disk.vibeofficeConfiguration' => [
 				'className' => Vibeoffice\Configuration::class,
+			],
+			SaveTimingConfig::class => [
+				'constructor' => static function() {
+					return SaveTimingConfig::fromModuleOptions();
+				},
+			],
+			// The seam a test replaces to save a document without an editor server behind the webhook.
+			EditedDocumentDownloaderInterface::class => [
+				'constructor' => static function() {
+					return new OnlyOffice\FileDownloader(
+						timingConfig: ServiceLocator::getInstance()->get(SaveTimingConfig::class),
+					);
+				},
+			],
+			DownloadedFileVerifier::class => [
+				'className' => DownloadedFileVerifier::class,
+			],
+			// The mark of a save in progress: the storage behind it is the seam a test replaces.
+			SavingMarker::class => [
+				'constructor' => static function() {
+					return new SavingMarker(
+						timingConfig: ServiceLocator::getInstance()->get(SaveTimingConfig::class),
+					);
+				},
+			],
+			DocumentSaveService::class => [
+				'constructor' => static function() {
+					$locator = ServiceLocator::getInstance();
+
+					return new DocumentSaveService(
+						$locator->get(EditedDocumentDownloaderInterface::class),
+						$locator->get(DownloadedFileVerifier::class),
+					);
+				},
+			],
+			// The log of the save path; everyone who writes into it takes it from here, and a test
+			// replaces this very instance.
+			//
+			// A portal which configures no channel of this id must not fall back to the default logger of
+			// the core: that one is the common file log of the portal, written under an exclusive lock and
+			// never rotated. The refusals of this path arrive in bursts - every open editor reports one
+			// when the editor server goes away - so they go to the event log instead, where the portal
+			// already keeps what it has to answer for afterwards.
+			//
+			// A literal, not DocumentSaveService::LOGGER_SERVICE_ID: the core reads this file on pages
+			// without the module, where a class constant cannot be resolved.
+			'disk.onlyoffice.saveLogger' => [
+				'constructor' => static function() {
+					return (new LoggerFactory(false))->createById(
+						DocumentSaveService::LOGGER_ID,
+						isCheckEnabledFromRegistry: false,
+						returnDefaultLoggerIfNotExists: false,
+					) ?? new \Bitrix\Main\Diag\EventLogger(
+						'disk',
+						'DISK_ONLYOFFICE_SAVE_FAILED',
+						static fn (array $context): array => [
+							'ITEM_ID' => (string)($context['objectId'] ?? ''),
+						],
+					);
+				},
+			],
+			DocumentChannelReporter::class => [
+				'className' => DocumentChannelReporter::class,
+			],
+			// The notifier is the seam a test replaces to read the recipients of an interrupted session.
+			// The client of the command service behind it is the seam a test replaces.
+			KeptDocumentRecovery::class => [
+				'className' => KeptDocumentRecovery::class,
+			],
+			InterruptedSessionNotifier::class => [
+				'className' => InterruptedSessionNotifier::class,
+			],
+			InterruptedSessionService::class => [
+				'constructor' => static function() {
+					$locator = ServiceLocator::getInstance();
+
+					return new InterruptedSessionService(
+						$locator->get(SavingMarker::class),
+						$locator->get(InterruptedSessionNotifier::class),
+						$locator->get(DocumentChannelReporter::class),
+					);
+				},
 			],
 			'disk.urlManager' => [
 				'className' => UrlManager::class,
@@ -91,10 +208,14 @@ return [
 
 					// The boost service is left unasked for: the header resolves it only when it draws Boost.
 					return new HeaderCompositionService(
-						$locator->get(UnifiedLinkAccessService::class),
 						$locator->get('disk.urlManager'),
 					);
 				},
+			],
+			// The access check of the unified link is left unasked: the builder resolves it only for an
+			// opening authorized by a link.
+			OpeningContextFactory::class => [
+				'className' => OpeningContextFactory::class,
 			],
 			RenameService::class => [
 				'className' => RenameService::class,
@@ -120,6 +241,12 @@ return [
 						$locator->get(PresenceAccessService::class),
 					);
 				},
+			],
+			// The page of the initial fetch. Declared here rather than built by its caller because the
+			// confirmation of the source of access is a seam of the fetch: an implementation of it is
+			// wired by replacing this declaration, without touching the method that serves the page.
+			SnapshotService::class => [
+				'className' => SnapshotService::class,
 			],
 			'disk.storageRuntimeCache' => [
 				'className' => StorageRuntimeCache::class,
@@ -369,6 +496,10 @@ return [
 			'queues' => [
 				'download_board' => [
 					'handler' => \Bitrix\Disk\Document\Flipchart\Messenger\DownloadBoardReceiver::class,
+				],
+				// Must match KeptDocumentSaveMessage::QUEUE; see the literal of the save logger above.
+				'onlyoffice_kept_document_save' => [
+					'handler' => \Bitrix\Disk\Internal\Service\OnlyOffice\Save\Messenger\KeptDocumentSaveReceiver::class,
 				],
 			],
 		],

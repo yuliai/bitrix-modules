@@ -5,9 +5,14 @@ namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Internal\Service\DocumentHeader\HeaderCompositionService;
+use Bitrix\Disk\Internal\Service\DocumentHeader\OpeningContext;
+use Bitrix\Disk\Internal\Service\DocumentHeader\OpeningContextFactory;
 use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
 use Bitrix\Disk\Internal\Service\DocumentPresence\InitialRosterService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internals\Engine;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\CurrentUser;
@@ -18,8 +23,8 @@ use Bitrix\Main\Result;
 /**
  * Header of the document/board viewer: everything the header needs for a concrete opening.
  *
- * Holds no composition logic of its own and does not branch by editor engine - it resolves the
- * access type from the session context and hands the decision to {@see HeaderCompositionService}.
+ * Holds no composition logic of its own and does not branch by editor engine - it builds the context
+ * of the opening from the session and hands the decision to {@see HeaderCompositionService}.
  */
 class DocumentHeader extends Engine\Controller
 {
@@ -144,10 +149,10 @@ class DocumentHeader extends Engine\Controller
 			return null;
 		}
 
+		$userId = (int)$currentUser->getId();
 		$result = $headerCompositionService->compose(
-			$documentSession,
-			(int)$currentUser->getId(),
-			$headerCompositionService->resolveAccessType($documentSession),
+			$this->buildOpeningContext($documentSession, $userId),
+			$userId,
 		);
 
 		if (!$result->isSuccess())
@@ -179,10 +184,12 @@ class DocumentHeader extends Engine\Controller
 		}
 
 		$userId = (int)$currentUser->getId();
-		$accessType = $headerCompositionService->resolveAccessType($documentSession);
+		$openingContext = $this->buildPresenceContext($documentSession, $userId);
 
-		$presence = $headerCompositionService->hasPresence($documentSession, $userId, $accessType);
-		if (!$presence->isSuccess())
+		$presence = $headerCompositionService->hasPresence($openingContext);
+		// An opening that could not be described is refused by the answer above; naming it here as well
+		// leaves nothing below reading a context of nothing.
+		if ($openingContext === null || !$presence->isSuccess())
 		{
 			$this->addLocalizedErrors($presence);
 
@@ -200,7 +207,9 @@ class DocumentHeader extends Engine\Controller
 			return null;
 		}
 
-		$roster = $initialRosterService->collect($documentSession, $userId, $accessType);
+		// A successful answer of the header means the opening was described, so its access type is the
+		// one the roster of that opening is stored under.
+		$roster = $initialRosterService->collect($documentSession, $userId, $openingContext->accessType());
 		if (!$roster->isSuccess())
 		{
 			$this->addLocalizedErrors($roster);
@@ -238,6 +247,73 @@ class DocumentHeader extends Engine\Controller
 		}
 
 		return $result->getData();
+	}
+
+	/**
+	 * The description is composed from the context of the opening; the session is the way this
+	 * controller builds one, and the only thing about the header that still knows about a session.
+	 */
+	protected function buildOpeningContext(DocumentSession $documentSession, int $userId): ?OpeningContext
+	{
+		return $this->getOpeningContextFactory()->fromDocumentSession(
+			$documentSession,
+			$userId,
+			$this->hasUnifiedLinkProof($documentSession),
+		);
+	}
+
+	/**
+	 * The presence action asks the description whether this user may read the opening and whether the
+	 * opening carries a roster, and nothing else, so the context of it is built for those two questions
+	 * alone {@see OpeningContextFactory::forPresence()}.
+	 */
+	protected function buildPresenceContext(DocumentSession $documentSession, int $userId): ?OpeningContext
+	{
+		return $this->getOpeningContextFactory()->forPresence(
+			$documentSession,
+			$userId,
+			$this->hasUnifiedLinkProof($documentSession),
+		);
+	}
+
+	/**
+	 * A visitor the storage of the object grants nothing is let in by the unified link of it, so the
+	 * description is told whether they proved they hold one - the signature naming the object of this
+	 * very opening, the same proof the session filter of the editor and the reading of the file ask for
+	 * {@see \Bitrix\Disk\Document\OnlyOffice\Filters\DocumentSessionCheck}. Bringing none is no error of
+	 * the action: the description then refuses the way it refused before the link was ever asked about.
+	 */
+	protected function hasUnifiedLinkProof(DocumentSession $documentSession): bool
+	{
+		$objectId = (int)$documentSession->getObjectId();
+		if ($objectId <= 0)
+		{
+			return false;
+		}
+
+		$uls = $this->getUnifiedLinkUrl()->getUlsFromRequest($this->getRequest());
+
+		return $uls !== null
+			&& $this->getUnifiedLinkAccessService()->validateUlsForObjectId($objectId, $uls)
+		;
+	}
+
+	/**
+	 * One instance per request, shared with every other consumer of the locator.
+	 */
+	protected function getOpeningContextFactory(): OpeningContextFactory
+	{
+		return ServiceLocator::getInstance()->get(OpeningContextFactory::class);
+	}
+
+	protected function getUnifiedLinkUrl(): UnifiedLinkUrl
+	{
+		return ServiceLocator::getInstance()->get(UnifiedLinkUrl::class);
+	}
+
+	protected function getUnifiedLinkAccessService(): UnifiedLinkAccessService
+	{
+		return ServiceLocator::getInstance()->get(UnifiedLinkAccessService::class);
 	}
 
 	private function addSessionNotFoundError(): void

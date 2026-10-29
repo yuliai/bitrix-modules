@@ -17,8 +17,6 @@ use Bitrix\Main\UuidGenerator;
 
 class SessionRegistry
 {
-	public const PENDING_TTL_SECONDS = 600;
-
 	/** A refusal of the registry the open path cannot repeat its way out of. */
 	public const ERROR_CODE_FAILED = 'vibeoffice_registry_failed';
 
@@ -31,9 +29,76 @@ class SessionRegistry
 	public const ERROR_CODE_BUSY = 'vibeoffice_registry_busy';
 
 	private const MAX_EVENT_SESSIONS = 2000;
+	private const OPEN_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 3600;
 
 	public function __construct(private readonly DocumentStateRepository $stateRepository = new DocumentStateRepository())
 	{
+	}
+
+	/** Resume an ambiguous live attempt of the same local session, or reserve a new one. */
+	public function beginOrResumeOpen(DocumentSession $session, string $hostDocKey): Result
+	{
+		if (!$session->getId() || HostDocumentKey::resolve($session) !== $hostDocKey)
+		{
+			return $this->failure('Invalid Vibeoffice open binding.');
+		}
+
+		$binding = $this->stateRepository->ensureSessionState($session);
+		if (!$binding->isSuccess())
+		{
+			return $binding;
+		}
+
+		$result = $this->stateRepository->withLockedDocument($hostDocKey, function () use ($session, $hostDocKey): Result {
+			$query = DocumentSessionTable::query()->setSelect(['*'])->where('ID', $session->getId());
+			$row = $this->fetchLocked($query);
+			$fresh = $row ? DocumentSession::buildFromArray($row) : null;
+			if (!$fresh || !$fresh->isActive() || HostDocumentKey::resolve($fresh) !== $hostDocKey)
+			{
+				return $this->failure('Vibeoffice session is no longer active.');
+			}
+
+			$pending = $this->fetchLocked(PlatformSessionTable::query()
+				->setSelect(['ID', 'OPEN_TOKEN', 'CREATE_TIME'])
+				->where('HOST_DOC_KEY', $hostDocKey)
+				->where('DOCUMENT_SESSION_ID', $fresh->getId())
+				->where('STATUS', PlatformSessionTable::STATUS_PENDING)
+				->whereNotNull('OPEN_TOKEN')
+				->setOrder(['ID' => 'DESC'])
+				->setLimit(1));
+			if ($pending)
+			{
+				if ($pending['CREATE_TIME'] instanceof DateTime
+					&& time() - $pending['CREATE_TIME']->getTimestamp() >= self::OPEN_TOKEN_MAX_AGE_SECONDS)
+				{
+					$deleted = PlatformSessionTable::delete((int)$pending['ID']);
+					if (!$deleted->isSuccess())
+					{
+						return (new Result())->addErrors($deleted->getErrors());
+					}
+
+					return (new Result())->setData(['expired' => true]);
+				}
+
+				return (new Result())->setData(['openToken' => $pending['OPEN_TOKEN']]);
+			}
+
+			$token = UuidGenerator::generateV4();
+			$add = PlatformSessionTable::add([
+				'HOST_DOC_KEY' => $hostDocKey,
+				'DOCUMENT_SESSION_ID' => $fresh->getId(),
+				'OPEN_TOKEN' => $token,
+				'STATUS' => PlatformSessionTable::STATUS_PENDING,
+			]);
+
+			return $add->isSuccess()
+				? (new Result())->setData(['openToken' => $token])
+				: (new Result())->addErrors($add->getErrors());
+		});
+
+		return $result->isSuccess() && ($result->getData()['expired'] ?? false)
+			? (new Result())->addError(new Error('Vibeoffice open operation expired.', 'open_operation_expired'))
+			: $result;
 	}
 
 	/** Reserve once before the HTTP retry loop. No network calls may run inside repository locks. */
@@ -58,7 +123,6 @@ class SessionRegistry
 			{
 				return $this->failure('Vibeoffice session is no longer active.');
 			}
-
 			$token = UuidGenerator::generateV4();
 			$add = PlatformSessionTable::add([
 				'HOST_DOC_KEY' => $hostDocKey,
@@ -97,14 +161,12 @@ class SessionRegistry
 				return $this->completionResult($pending, $sessionId);
 			}
 
-			$createdAt = $pending['CREATE_TIME'];
-			if (!$createdAt instanceof DateTime)
+			$query = DocumentSessionTable::query()->setSelect(['*'])->where('ID', $sessionId);
+			$sessionRow = $this->fetchLocked($query);
+			$session = $sessionRow ? DocumentSession::buildFromArray($sessionRow) : null;
+			if (!$session || !$session->isActive())
 			{
-				$createdAt = Application::getConnection()->getSqlHelper()->convertFromDbDateTime($createdAt);
-			}
-			if ($createdAt->getTimestamp() < time() - self::PENDING_TTL_SECONDS)
-			{
-				return $this->failure('Vibeoffice open reservation expired.');
+				return $this->failure('Vibeoffice session is no longer active.');
 			}
 
 			$known = $this->findUuid($uuid);
@@ -141,8 +203,7 @@ class SessionRegistry
 				return (new Result())->addErrors($update->getErrors());
 			}
 
-			$session = DocumentSession::loadById($sessionId);
-			if (!$session || !(new DocumentSessionManager())->persistSessionMetadata($session, [
+			if (!(new DocumentSessionManager())->persistSessionMetadata($session, [
 				'session_id' => $uuid,
 				'editor_key' => $editorKey,
 				'rev' => $rev,
@@ -270,32 +331,6 @@ class SessionRegistry
 		});
 	}
 
-	/** Only pending reservations expire; active UUIDs and terminal tombstones never use a TTL. */
-	public function expirePending(string $hostDocKey): Result
-	{
-		return $this->stateRepository->withLockedDocument($hostDocKey, function () use ($hostDocKey): Result {
-			$cutoff = DateTime::createFromTimestamp(time() - self::PENDING_TTL_SECONDS);
-			$rows = $this->queryLocked(PlatformSessionTable::query()
-				->setSelect(['*'])
-				->where('HOST_DOC_KEY', $hostDocKey)
-				->where('STATUS', PlatformSessionTable::STATUS_PENDING)
-				->where('CREATE_TIME', '<', $cutoff)
-				->setLimit(1000));
-			$sessionIds = [];
-			foreach ($rows as $row)
-			{
-				$result = PlatformSessionTable::delete($row['ID']);
-				if (!$result->isSuccess())
-				{
-					return (new Result())->addErrors($result->getErrors());
-				}
-				$sessionIds[] = (int)$row['DOCUMENT_SESSION_ID'];
-			}
-
-			return (new Result())->setData(['sessionIds' => $this->eligibleSessionIds($sessionIds)]);
-		});
-	}
-
 	public function hasLiveSessions(int $documentSessionId): bool
 	{
 		return (bool)$this->fetchLocked(PlatformSessionTable::query()
@@ -330,7 +365,7 @@ class SessionRegistry
 
 		return array_values(array_unique(array_filter(array_map(
 			static fn(array $row): int => (int)$row['DOCUMENT_SESSION_ID'],
-			$this->queryLocked($query),
+			$query->fetchAll(),
 		))));
 	}
 
@@ -422,9 +457,7 @@ class SessionRegistry
 	{
 		return Query::filter()->logic('or')
 			->where('STATUS', PlatformSessionTable::STATUS_ACTIVE)
-			->where(Query::filter()
-				->where('STATUS', PlatformSessionTable::STATUS_PENDING)
-				->where('CREATE_TIME', '>=', DateTime::createFromTimestamp(time() - self::PENDING_TTL_SECONDS)));
+			->where('STATUS', PlatformSessionTable::STATUS_PENDING);
 	}
 
 	private function eligibleSessionIds(array $sessionIds): array
@@ -464,12 +497,12 @@ class SessionRegistry
 
 	private function fetchLocked(Query $query): ?array
 	{
-		return Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch() ?: null;
+		return DocumentStateRepository::fetchForUpdate($query);
 	}
 
 	private function queryLocked(Query $query): array
 	{
-		return Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetchAll();
+		return DocumentStateRepository::fetchAllForUpdate($query);
 	}
 
 	private function normalizeUuid(mixed $uuid): ?string

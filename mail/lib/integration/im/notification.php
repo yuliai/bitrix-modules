@@ -7,6 +7,7 @@ use Bitrix\Mail\Internal\Async\Message\MailboxAccessNotificationMessage;
 use Bitrix\Mail\Internal\Async\Message\OrphanedMailboxAutoDisconnectNotificationMessage;
 use Bitrix\Mail\Internal\Async\Message\ScheduledMessageFailedMessage;
 use Bitrix\Mail\Internals\ScheduledMessageTable;
+use Bitrix\Mail\Service\Message\SendFailure;
 use Bitrix\Mail\Service\ScheduledMessage\ScheduledMessageErrorText;
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
@@ -805,6 +806,30 @@ class Notification
 		]);
 	}
 
+	public static function notifyAdminAboutDeletedMailhostMailbox(
+		int $adminUserId,
+		int $mailboxId,
+		string $mailboxEmail,
+	): bool
+	{
+		if (!Main\Loader::includeModule('im'))
+		{
+			return false;
+		}
+
+		$message = self::getNotificationMessageCallback(
+			'MAIL_NOTIFY_MAILHOST_MAILBOX_DELETED',
+			['#EMAIL#' => htmlspecialcharsbx($mailboxEmail)],
+		);
+		return (int)\CIMNotify::Add([
+			'TO_USER_ID' => $adminUserId,
+			'NOTIFY_TYPE' => IM_NOTIFY_SYSTEM,
+			'NOTIFY_MODULE' => 'mail',
+			'NOTIFY_TAG' => 'MAIL|MAILHOST_DELETED|' . $mailboxId,
+			'NOTIFY_MESSAGE' => $message,
+		]) > 0;
+	}
+
 	public static function dispatchOrphanedMailboxAutoDisconnectNotifications(
 		int $mailboxId,
 		string $mailboxEmail,
@@ -897,6 +922,41 @@ class Notification
 				[
 					'#SUBJECT#' => htmlspecialcharsbx($subject),
 					'#ERROR#' => ScheduledMessageErrorText::getReason($errorCode, $languageId),
+					'#VIEW_URL#' => $viewUrl,
+				],
+				$languageId,
+			),
+		]);
+	}
+
+	/** One notification per letter: a mailbox whose server keeps refusing does not repeat it on every retry. */
+	public static function notifyUserAboutMessageSendFailed(
+		int $authorId,
+		int $messageId,
+		string $subject,
+		string $errorCode,
+	): void
+	{
+		if ($authorId <= 0 || !Main\Loader::includeModule('im'))
+		{
+			return;
+		}
+
+		$viewUrl = $messageId > 0 ? htmlspecialcharsbx(sprintf('/mail/message/%u', $messageId)) : '';
+		$messagePhrase = $viewUrl === ''
+			? 'MAIL_NOTIFY_MESSAGE_SEND_FAILED'
+			: 'MAIL_NOTIFY_MESSAGE_SEND_FAILED_WITH_LINK';
+
+		\CIMNotify::Add([
+			'TO_USER_ID' => $authorId,
+			'NOTIFY_TYPE' => IM_NOTIFY_SYSTEM,
+			'NOTIFY_MODULE' => 'mail',
+			'NOTIFY_TAG' => 'MAIL|MESSAGE|FAILED|' . $messageId,
+			'NOTIFY_MESSAGE' => static fn (?string $languageId = null) => Loc::getMessage(
+				$messagePhrase,
+				[
+					'#SUBJECT#' => htmlspecialcharsbx($subject),
+					'#ERROR#' => SendFailure::getText($errorCode, $languageId),
 					'#VIEW_URL#' => $viewUrl,
 				],
 				$languageId,

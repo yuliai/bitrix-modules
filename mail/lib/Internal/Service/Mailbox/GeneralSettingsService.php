@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Internal\Service\Mailbox;
 
 use Bitrix\Mail\Access\Model\MailboxModel;
+use Bitrix\Mail\Internal\Service\Mailbox\Avatar\AvatarChange;
+use Bitrix\Mail\Internal\Service\Mailbox\Avatar\AvatarService;
 use Bitrix\Mail\Helper\Config\Feature;
 use Bitrix\Mail\Helper\Dto\MailboxConnect\GeneralSettingsPatch;
 use Bitrix\Mail\Helper\Enum\CrmFlag;
@@ -42,7 +44,7 @@ final class GeneralSettingsService
 	{
 	}
 
-	public function update(int $mailboxId, GeneralSettingsPatch $patch): Result
+	public function update(int $mailboxId, GeneralSettingsPatch $patch, ?AvatarChange $avatar = null): Result
 	{
 		$mailbox = MailboxTable::getByPrimary($mailboxId, [
 			'select' => ['ID', 'USER_ID', 'ACTIVE', 'SERVER_TYPE'],
@@ -57,19 +59,40 @@ final class GeneralSettingsService
 		{
 			return $validation;
 		}
-		if ($patch->isEmpty())
+		if ($patch->isEmpty() && $avatar === null)
 		{
 			return (new Result())->setData(['id' => $mailboxId]);
 		}
 
-		return $this->coordinator->execute(
-			$mailboxId,
-			fn (array $state, array &$afterCommit): Result => $this->applyWithinTransaction(
-				$state['mailbox'],
-				$patch,
-				$afterCommit,
-			),
-		);
+		$save = function (?int $resourceId = null) use ($mailboxId, $patch, $avatar): Result {
+			return $this->coordinator->execute(
+				$mailboxId,
+				function (array $state, array &$afterCommit) use ($patch, $avatar, $resourceId): Result {
+					$mailbox = $state['mailbox'];
+					$avatarService = new AvatarService();
+					if ($avatar !== null)
+					{
+						$checked = $avatarService->checkChange($mailbox, $avatar);
+						if (!$checked->isSuccess())
+						{
+							return $checked;
+						}
+					}
+					$result = $this->applyWithinTransaction($mailbox, $patch, $afterCommit);
+					if (!$result->isSuccess() || $avatar === null)
+					{
+						return $result;
+					}
+					$applied = $avatarService->applyWithinTransaction($mailbox, $avatar, $resourceId, $afterCommit);
+
+					return $applied->isSuccess()
+						? $result->setData($result->getData() + $applied->getData())
+						: $applied;
+				},
+			);
+		};
+
+		return $avatar === null ? $save() : (new AvatarService())->save($mailboxId, $avatar, $save);
 	}
 
 	/** The caller owns the mailbox lock, rollback and publication after the outer commit. */
@@ -213,15 +236,24 @@ final class GeneralSettingsService
 		}
 		if ($patch->hasCrmChanges())
 		{
+			$crmEnabled = in_array(CrmFlag::Connect->value, $options['flags'] ?? [], true);
 			$crmResult = CrmImapFilter::sync(
 				$mailboxId,
-				in_array(CrmFlag::Connect->value, $options['flags'] ?? [], true),
+				$crmEnabled,
 				CrmImapFilterContext::SettingsSave,
 				lockFilters: true,
 			);
 			if (!$crmResult->isSuccess())
 			{
 				return $crmResult;
+			}
+			$markerResult = (new CrmImapGateReconciler())->writeSatisfiedMarkerWithinTransaction(
+				$mailboxId,
+				$crmEnabled,
+			);
+			if (!$markerResult->isSuccess())
+			{
+				return $markerResult;
 			}
 		}
 
@@ -435,13 +467,14 @@ final class GeneralSettingsService
 	): void
 	{
 		$mailboxId = (int)$mailbox['ID'];
-		$afterCommit[] = static function () use ($mailboxId, $accessState): void {
+		$ownerId = (int)$mailbox['USER_ID'];
+		$afterCommit[] = static function () use ($mailboxId, $ownerId, $accessState): void {
 			MailboxTable::cleanRuntimeFullRowCachesByMailboxId($mailboxId);
 			if ($accessState !== null)
 			{
-				MailboxTable::cleanCachesByMailboxId($mailboxId);
+				MailboxTable::cleanCachesByMailboxId($mailboxId, $ownerId);
 			}
-			MailboxTable::getEntity()->cleanCache();
+			MailboxTable::cleanEntityCache();
 		};
 		if ($accessState !== null)
 		{

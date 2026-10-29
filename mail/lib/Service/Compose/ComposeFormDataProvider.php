@@ -8,6 +8,7 @@ use Bitrix\Calendar;
 use Bitrix\Mail\Helper;
 use Bitrix\Mail\Integration\AI;
 use Bitrix\Mail\Integration\Crm;
+use Bitrix\Mail\Internal\Service\Mailbox\Avatar\AvatarService;
 use Bitrix\Mail\Message;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
@@ -15,6 +16,7 @@ use Bitrix\Main\FileTable;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Mail\Sender;
+use Bitrix\Main\Mail\Sender\UserSenderDataProvider;
 
 /**
  * Initial data of the redesigned compose form (DTO-01).
@@ -73,17 +75,29 @@ class ComposeFormDataProvider
 
 	private Crm\CrmTemplateProvider $crmTemplateProvider;
 
+	private Crm\MailTemplateEditor $mailTemplateEditor;
+
+	private AvatarService $avatarService;
+
+	private SenderListProvider $senderListProvider;
+
 	public function __construct(
 		?SignatureListProvider $signatureListProvider = null,
 		?ReplyRecipientResolver $replyRecipientResolver = null,
 		?MessageQuoteBuilder $messageQuoteBuilder = null,
 		?Crm\CrmTemplateProvider $crmTemplateProvider = null,
+		?Crm\MailTemplateEditor $mailTemplateEditor = null,
+		?AvatarService $avatarService = null,
+		?SenderListProvider $senderListProvider = null,
 	)
 	{
 		$this->signatureListProvider = $signatureListProvider ?? new SignatureListProvider();
 		$this->replyRecipientResolver = $replyRecipientResolver ?? new ReplyRecipientResolver();
 		$this->messageQuoteBuilder = $messageQuoteBuilder ?? new MessageQuoteBuilder();
 		$this->crmTemplateProvider = $crmTemplateProvider ?? new Crm\CrmTemplateProvider();
+		$this->mailTemplateEditor = $mailTemplateEditor ?? new Crm\MailTemplateEditor();
+		$this->avatarService = $avatarService ?? new AvatarService();
+		$this->senderListProvider = $senderListProvider ?? new SenderListProvider();
 	}
 
 	/**
@@ -111,7 +125,7 @@ class ComposeFormDataProvider
 	 */
 	public function getInitialData(array $message, array $params = []): array
 	{
-		$senders = array_values($this->loadSenders());
+		$senders = $this->applyMailboxAvatars($this->loadSenders());
 		$senderEmail = (string)($message['__email'] ?? '');
 		$mailboxId = (int)($message['MAILBOX_ID'] ?? 0);
 		$mailboxId = $mailboxId > 0 ? $mailboxId : null;
@@ -136,7 +150,7 @@ class ComposeFormDataProvider
 			'subject' => (string)($message['SUBJECT'] ?? ''),
 			'body' => [
 				'quote' => $carriedOver['quote'],
-				'quoteFolded' => $parentMessageId !== null,
+				'quoteFolded' => $parentMessageId !== null && self::isReplyScenario($scenario),
 			],
 			'attachments' => [
 				'files' => $carriedOver['files'],
@@ -198,8 +212,7 @@ class ComposeFormDataProvider
 		$data['subject'] = (string)($scheduledMessage['SUBJECT'] ?? '');
 		$data['send']['inReplyTo'] = isset($scheduledMessage['IN_REPLY_TO'])
 			? (string)$scheduledMessage['IN_REPLY_TO']
-			: null
-		;
+			: null;
 		$data['body'] = [
 			'content' => (string)($scheduledMessage['BODY'] ?? ''),
 			'quote' => '',
@@ -411,6 +424,38 @@ class ComposeFormDataProvider
 		return $this->toSelectedSender($senders[0]);
 	}
 
+	private function applyMailboxAvatars(array $senders): array
+	{
+		$mailboxIds = [];
+		foreach ($senders as $sender)
+		{
+			$mailboxId = (int)($sender['mailboxId'] ?? 0);
+			if ($mailboxId > 0)
+			{
+				$mailboxIds[] = $mailboxId;
+			}
+		}
+
+		$mailboxIds = array_values(array_unique($mailboxIds));
+		if ($mailboxIds === [])
+		{
+			return $senders;
+		}
+
+		$avatars = $this->loadMailboxAvatars($mailboxIds);
+		foreach ($senders as $index => $sender)
+		{
+			$mailboxId = (int)($sender['mailboxId'] ?? 0);
+			$avatarUrl = $avatars[$mailboxId]['url'] ?? null;
+			if ($mailboxId > 0 && $avatarUrl !== null)
+			{
+				$senders[$index]['avatar'] = $avatarUrl;
+			}
+		}
+
+		return $senders;
+	}
+
 	private function toSelectedSender(array $sender): ?string
 	{
 		$formated = (string)($sender['formated'] ?? '');
@@ -458,11 +503,28 @@ class ComposeFormDataProvider
 
 	private function buildPaths(?int $mailboxId, array $params): array
 	{
-		return [
+		$paths = [
 			'messageList' => $this->resolveMessageListPath($mailboxId, $params),
 			'home' => (string)($params['pathToHome'] ?? ''),
-			'templatesManage' => $this->resolveTemplatesManagePath(),
 		];
+
+		if ($this->mailTemplateEditor->isAvailable($this->getCurrentUserId()))
+		{
+			$siteId = $this->getSiteId();
+			$paths['templatesManage'] = Crm\MailTemplateEditor::getListUrl($siteId);
+			$paths['templatesCreate'] = Crm\MailTemplateEditor::getAddUrl($siteId);
+		}
+		else
+		{
+			$paths['templatesManage'] = $this->resolveTemplatesManagePath();
+		}
+
+		return $paths;
+	}
+
+	protected function getSiteId(): string
+	{
+		return defined('SITE_ID') ? (string)SITE_ID : '';
 	}
 
 	/**
@@ -595,7 +657,12 @@ class ComposeFormDataProvider
 
 	protected function loadSenders(): array
 	{
-		return Sender::prepareUserMailboxes();
+		return $this->senderListProvider->getSenders();
+	}
+
+	protected function loadMailboxAvatars(array $mailboxIds): array
+	{
+		return $this->avatarService->getDisplayData($mailboxIds);
 	}
 
 	/**

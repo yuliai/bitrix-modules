@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Internal\Entity\Draft;
 
 use Bitrix\Mail\Helper\Attachment\Storage;
+use Bitrix\Mail\Internal\Service\DateTime\UtcDateTimeFormatter;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Json;
 
@@ -161,8 +162,8 @@ final class DraftView
 			'contextType' => $this->contextType,
 			'crmEntityTypeId' => $this->crmEntityTypeId,
 			'crmEntityId' => $this->crmEntityId,
-			'updatedAt' => $this->updatedAt->format(DATE_ATOM),
-			'expiresAt' => $this->expiresAt->format(DATE_ATOM),
+			'updatedAt' => UtcDateTimeFormatter::format($this->updatedAt),
+			'expiresAt' => UtcDateTimeFormatter::format($this->expiresAt),
 			'snapshot' => $this->snapshot->toArray(),
 			'attachments' => array_map(
 				static fn(array $attachment): array => [

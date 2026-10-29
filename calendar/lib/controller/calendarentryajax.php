@@ -589,9 +589,10 @@ class CalendarEntryAjax extends \Bitrix\Main\Engine\Controller
 				{
 					if ($request->getPost('recursive') === 'Y')
 					{
-						\CCalendar::SaveEventEx(
+						$saveResult = \CCalendar::SaveEventEx(
 							[
 								'arFields' => $arFields,
+								'checkLocationOccupancy' => 'Y',
 								'silentErrorMode' => false,
 								'recursionEditMode' => 'this',
 								'currentEventDateFrom' => \CCalendar::Date(
@@ -602,18 +603,28 @@ class CalendarEntryAjax extends \Bitrix\Main\Engine\Controller
 								'requestUid' => $requestUid,
 							]
 						);
+						if ($saveResult === false)
+						{
+							$this->addError(new Error(Loc::getMessage('EC_JS_EV_SAVE_ERR'), 'edit_entry_save'));
+							$id = false;
+						}
 					}
 					else
 					{
 						$id = \CCalendar::SaveEvent(
 							[
 								'arFields' => $arFields,
+								'checkLocationOccupancy' => 'Y',
 								'silentErrorMode' => false,
 								'sendInvitesToDeclined' => $sendInvitesToDeclined,
 								'requestUid' => $requestUid,
 							]
 						);
 					}
+				}
+				catch (\Bitrix\Calendar\Core\Event\EventSaveStateException $e)
+				{
+					$this->addError(new Error($e->getMessage(), $e->getErrorCode()));
 				}
 				catch (Rooms\OccupancyCheckerException|Rooms\OccupancyLockedException)
 				{
@@ -691,6 +702,10 @@ class CalendarEntryAjax extends \Bitrix\Main\Engine\Controller
 		catch (Internals\Exception\EventNotFound)
 		{
 			$this->addError(new Error('Event not found', 'edit_entry_event_not_found'));
+		}
+		catch (\Bitrix\Calendar\Core\Event\EventSaveStateException $e)
+		{
+			$this->addError(new Error($e->getMessage(), $e->getErrorCode()));
 		}
 		catch (Rooms\OccupancyCheckerException $e)
 		{

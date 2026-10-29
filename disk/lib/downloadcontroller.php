@@ -2,6 +2,7 @@
 
 namespace Bitrix\Disk;
 
+use Bitrix\Disk\Internal\Access\DownloadAccess;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internals\Error\Error;
@@ -21,6 +22,7 @@ class DownloadController extends Internals\Controller
 
 	protected UnifiedLinkAccessService $unifiedLinkAccessService;
 	protected UnifiedLinkUrl $unifiedLinkUrl;
+	protected DownloadAccess $downloadAccess;
 	protected $fileId;
 	protected $versionId;
 	/** @var File */
@@ -34,6 +36,7 @@ class DownloadController extends Internals\Controller
 		$serviceLocator = ServiceLocator::getInstance();
 		$this->unifiedLinkAccessService = $serviceLocator->get(UnifiedLinkAccessService::class);
 		$this->unifiedLinkUrl = $serviceLocator->get(UnifiedLinkUrl::class);
+		$this->downloadAccess = $serviceLocator->get(DownloadAccess::class);
 	}
 
 	protected function listActions()
@@ -117,17 +120,17 @@ class DownloadController extends Internals\Controller
 
 	protected function onBeforeActionDownloadFile()
 	{
-		return $this->onWorkWithOneFile();
+		return $this->onWorkWithOneFile(true);
 	}
 
 	protected function onBeforeActionDownloadVersion()
 	{
-		return $this->onWorkWithOneFile();
+		return $this->onWorkWithOneFile(true);
 	}
 
 	protected function onBeforeActionCopyToMe()
 	{
-		return $this->onWorkWithOneFile();
+		return $this->onWorkWithOneFile(true);
 	}
 
 	protected function onBeforeActionTransformOnOpen()
@@ -135,7 +138,7 @@ class DownloadController extends Internals\Controller
 		return $this->onWorkWithOneFile();
 	}
 
-	private function onWorkWithOneFile()
+	protected function onWorkWithOneFile($shouldCheckDownload = false)
 	{
 		if(!$this->checkRequiredGetParams(array('fileId')))
 		{
@@ -163,15 +166,21 @@ class DownloadController extends Internals\Controller
 			return new EventResult(EventResult::ERROR);
 		}
 		//todo refactor. The method send response. It's bad.
-		$this->checkPermissions();
+		$this->checkPermissions($shouldCheckDownload);
 
 		return new EventResult(EventResult::SUCCESS);
 	}
 
-	protected function checkPermissions()
+	protected function checkPermissions($shouldCheckDownload = false)
 	{
 		$securityContext = $this->file->getStorage()->getCurrentUserSecurityContext($this->hasUnifiedLinkAccess());
-		if(!$this->file->canRead($securityContext))
+
+		$hasAccess = $shouldCheckDownload
+			? $this->file->canDownload($securityContext)
+			: $this->file->canRead($securityContext)
+		;
+
+		if(!$hasAccess)
 		{
 			$this->errorCollection->addOne(new Error(Loc::getMessage('DISK_DOWNLOAD_CONTROLLER_ERROR_BAD_RIGHTS'), self::ERROR_BAD_RIGHTS));
 
@@ -446,24 +455,22 @@ class DownloadController extends Internals\Controller
 		}
 
 		$zipArchive = new ZipNginx\Archive('archive' . date('y-m-d') . '.zip');
+		$files = File::loadBatchById(array_map('intval', $objectIds), ['STORAGE']);
+		$securityContextByFile = $this->preloadArchiveFileSecurityContexts(
+			$files,
+			(int)$this->getUser()->getId(),
+		);
 
-		foreach($objectIds as $id)
+		foreach($files as $file)
 		{
-			//now we can't allow to download whole folder.
-			$file = File::loadById($id);
-			if(!$file)
+			if (!$file instanceof File)
 			{
 				continue;
 			}
 
-			$storage = $file->getStorage();
-			if(!$storage)
-			{
-				continue;
-			}
+			$securityContext = $securityContextByFile[spl_object_id($file)] ?? null;
 
-			$securityContext = $storage->getCurrentUserSecurityContext();
-			if(!$file->canRead($securityContext))
+			if(!$securityContext || !$file->canDownload($securityContext))
 			{
 				continue;
 			}
@@ -483,6 +490,11 @@ class DownloadController extends Internals\Controller
 		$this->end();
 	}
 
+	protected function preloadArchiveFileSecurityContexts(array $files, int $userId): array
+	{
+		return DownloadAccess::preloadForFilesBySecurityContext($files, $userId);
+	}
+
 	protected function processActionDownloadByExternalLink($externalLink)
 	{
 		if(!ExternalLink::isValidValueForField('HASH', $externalLink, $this->errorCollection))
@@ -491,13 +503,8 @@ class DownloadController extends Internals\Controller
 		}
 
 		/** @var ExternalLink $externalLink */
-		$externalLink = ExternalLink::load(
-			array(
-				'=HASH' => $externalLink,
-			),
-			array(
-				'FILE'
-			)
+		$externalLink = $this->loadExternalLinkForDownload(
+			$externalLink,
 		);
 
 		if (!$externalLink || $externalLink->isExpired() || $externalLink->isSpecificVersion() || !$externalLink->getFile())
@@ -513,6 +520,34 @@ class DownloadController extends Internals\Controller
 		}
 
 		$file = $externalLink->getFile();
+		$canDownloadWithReadAccess = $this->downloadAccess->checkExternalLink($file, $externalLink);
+
+		if (!$externalLink->allowEdit() && !$canDownloadWithReadAccess)
+		{
+			$this->errorCollection[] = new Error(
+				Loc::getMessage('DISK_DOWNLOAD_CONTROLLER_ERROR_BAD_RIGHTS'),
+				self::ERROR_BAD_RIGHTS,
+			);
+			$this->sendJsonErrorResponse();
+		}
+
+		$this->sendExternalLinkFile($file);
+	}
+
+	protected function loadExternalLinkForDownload(string $externalLink): ?ExternalLink
+	{
+		return ExternalLink::load(
+			array(
+				'=HASH' => $externalLink,
+			),
+			array(
+				'FILE'
+			)
+		);
+	}
+
+	protected function sendExternalLinkFile(File $file): void
+	{
 		$fileData = $file->getFile();
 
 		\CFile::viewByUser($fileData, array('force_download' => false, 'attachment_name' => $file->getName()));

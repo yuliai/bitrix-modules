@@ -715,11 +715,24 @@ class CAllMailBox
 			}
 		}
 
+		$writeMailbox = static function () use ($ID, $arFields): bool {
+			return \Bitrix\Mail\MailboxTable::update($ID, $arFields)->isSuccess();
+		};
+		$updated = array_key_exists('OPTIONS', $arFields)
+			? (new \Bitrix\Mail\Internal\Service\Mailbox\LegacyCrmImapGateWriteCoordinator())->updateMailbox(
+				$ID,
+				$arFields,
+				$writeMailbox,
+			)
+			: $writeMailbox();
+		if (!$updated)
+		{
+			return false;
+		}
+
 		\CAgent::removeAgent(sprintf('CMailbox::CheckMailAgent(%u);', $ID), 'mail');
 		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::syncMailboxAgent(%u);', $ID), 'mail');
 		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::cleanupMailboxAgent(%u);', $ID), 'mail');
-
-		\Bitrix\Mail\MailboxTable::update($ID, $arFields);
 
 		if (in_array($serverType, array('imap', 'controller', 'domain', 'crdomain')))
 		{
@@ -943,6 +956,33 @@ class CAllMailBox
 		$DB->query(sprintf('DELETE FROM b_mail_counter WHERE MAILBOX_ID = %u', $ID));
 		MailEntityOptionsTable::deleteList(['=MAILBOX_ID' => (int)$ID]);
 		$DB->query(sprintf('DELETE FROM b_mail_mailbox_list_search_index WHERE MAILBOX_ID = %u', $ID));
+		/*
+			The avatar resources are handed over to the cleanup queue instead of being deleted here: the
+			file behind a resource outlives its row and only MailboxAvatarCleanupAgent drops both, in that
+			order. Left attached they would be found by the reconciliation walk alone, days later. The ones
+			already being deleted keep their state - the agent is holding them. Same catch and the same
+			reason as the auto-reply below: a portal that got the code without the table loses no mailbox.
+		*/
+		try
+		{
+			\Bitrix\Main\Application::getConnection()->queryExecute((new \Bitrix\Main\DB\SqlExpression(
+				'UPDATE ?# SET STATE = ?s WHERE MAILBOX_ID = ?i AND STATE <> ?s',
+				\Bitrix\Mail\Internals\MailboxAvatarResourceTable::getTableName(),
+				\Bitrix\Mail\Internals\MailboxAvatarResourceTable::STATE_ORPHANED,
+				$ID,
+				\Bitrix\Mail\Internals\MailboxAvatarResourceTable::STATE_DELETING,
+			))->compile());
+		}
+		catch (\Throwable $exception)
+		{
+			(new \Bitrix\Main\Diag\LoggerFactory())->createById('mail.MailboxAvatar')?->error(
+				'Avatar resources of a deleted mailbox were not queued for cleanup.',
+				[
+					'mailboxId' => $ID,
+					'error' => $exception->getMessage(),
+				],
+			);
+		}
 		// Not behind the switch of the feature on purpose: the rows have to go whenever the tables are
 		// there, and a switch turned off after the feature was used would leave them behind. What the
 		// catch is for is a portal that got the code without the tables - the mailbox goes all the same.
@@ -2081,6 +2121,11 @@ class CAllMailMessage
 			if (isset($params['trackable']) && $params['trackable'])
 			{
 				$arFields['OPTIONS']['trackable'] = \Bitrix\Main\Config\Option::get('main', 'track_outgoing_emails_read', 'Y') == 'Y';
+			}
+
+			if (!empty($params['outgoing_author_id']))
+			{
+				$arFields['OPTIONS']['outgoingAuthorId'] = (int)$params['outgoing_author_id'];
 			}
 
 			$message_id = \CMailMessage::add($arFields, $mailboxId);
@@ -3830,10 +3875,30 @@ class CMailFilter
 		if(!CMailFilter::CheckFields($arFields))
 			return false;
 
-		$ID = $DB->Add("b_mail_filter", $arFields, Array("PHP_CONDITION", "ACTION_PHP"));
+		$writeFilter = static function () use ($DB, $arFields): int|false {
+			$filterId = $DB->Add('b_mail_filter', $arFields, ['PHP_CONDITION', 'ACTION_PHP']);
+			if (!$filterId)
+			{
+				return false;
+			}
+			if (is_set($arFields, 'CONDITIONS'))
+			{
+				CMailFilterCondition::SetConditions($filterId, $arFields['CONDITIONS']);
+			}
 
-		if(is_set($arFields, "CONDITIONS"))
-			CMailFilterCondition::SetConditions($ID, $arFields["CONDITIONS"]);
+			return (int)$filterId;
+		};
+		$ID = ($arFields['ACTION_TYPE'] ?? '') === 'crm_imap'
+			? (new \Bitrix\Mail\Internal\Service\Mailbox\LegacyCrmImapGateWriteCoordinator())->addFilter(
+				(int)$arFields['MAILBOX_ID'],
+				(string)$arFields['ACTION_TYPE'],
+				$writeFilter,
+			)
+			: $writeFilter();
+		if (!$ID)
+		{
+			return false;
+		}
 
 		CMailbox::SMTPReload();
 
@@ -3869,22 +3934,33 @@ class CMailFilter
 		if(!CMailFilter::CheckFields($arFields, $ID))
 			return false;
 
-		$arUpdateBinds = array();
-		$strUpdate = $DB->PrepareUpdateBind("b_mail_filter", $arFields,"", false, $arUpdateBinds);
+		$updated = (new \Bitrix\Mail\Internal\Service\Mailbox\LegacyCrmImapGateWriteCoordinator())->updateFilter(
+			$ID,
+			$arFields,
+			static function () use ($DB, $ID, $arFields): bool {
+				$arUpdateBinds = [];
+				$strUpdate = $DB->PrepareUpdateBind('b_mail_filter', $arFields, '', false, $arUpdateBinds);
+				$strSql = 'UPDATE b_mail_filter SET ' . $strUpdate . ' WHERE ID=' . $ID;
 
-		$strSql =
-			"UPDATE b_mail_filter SET ".
-				$strUpdate." ".
-			"WHERE ID=".$ID;
+				$arBinds = [];
+				foreach ($arUpdateBinds as $fieldId)
+				{
+					$arBinds[$fieldId] = $arFields[$fieldId];
+				}
 
-		$arBinds = array();
-		foreach($arUpdateBinds as $field_id)
-			$arBinds[$field_id] = $arFields[$field_id];
+				$DB->QueryBind($strSql, $arBinds);
+				if (is_set($arFields, 'CONDITIONS'))
+				{
+					CMailFilterCondition::SetConditions($ID, $arFields['CONDITIONS']);
+				}
 
-		$DB->QueryBind($strSql, $arBinds);
-
-		if(is_set($arFields, "CONDITIONS"))
-			CMailFilterCondition::SetConditions($ID, $arFields["CONDITIONS"]);
+				return true;
+			},
+		);
+		if (!$updated)
+		{
+			return false;
+		}
 
 		CMailbox::SMTPReload();
 
@@ -3895,16 +3971,27 @@ class CMailFilter
 	{
 		global $DB;
 		$ID = intval($ID);
-		$dbr = CMailFilterCondition::GetList(Array(), Array("FILTER_ID"=>$ID));
-		while($r = $dbr->Fetch())
+		$result = (new \Bitrix\Mail\Internal\Service\Mailbox\LegacyCrmImapGateWriteCoordinator())->deleteFilter(
+			$ID,
+			static function () use ($DB, $ID) {
+				$dbr = CMailFilterCondition::GetList([], ['FILTER_ID' => $ID]);
+				while ($condition = $dbr->Fetch())
+				{
+					if (!CMailFilterCondition::Delete($condition['ID']))
+					{
+						return false;
+					}
+				}
+
+				return $DB->Query('DELETE FROM b_mail_filter WHERE ID=' . $ID, true);
+			},
+		);
+		if ($result !== false)
 		{
-			if(!CMailFilterCondition::Delete($r["ID"]))
-				return false;
+			CMailbox::SMTPReload();
 		}
 
-		$strSql = "DELETE FROM b_mail_filter WHERE ID=".$ID;
-		CMailbox::SMTPReload();
-		return $DB->Query($strSql, true);
+		return $result;
 	}
 
 	public static function Filter($arFields, $event, $FILTER_ID=false, $PARENT_FILTER_ID = false)

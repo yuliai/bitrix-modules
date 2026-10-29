@@ -7,6 +7,13 @@ use Bitrix\Disk\Document;
 use Bitrix\Disk\Document\Models;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\DocumentChannelReporter;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\DocumentSaveService;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\KeptDocumentRecovery;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SaveFailureCategory;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SaveTimingConfig;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SavingMarker;
+use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SessionReportBuilder;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
@@ -31,10 +38,11 @@ use Bitrix\Main\Error;
 use Bitrix\Main\HttpResponse;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Request;
+use Bitrix\Main\Result;
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
-use Bitrix\Main\Web\MimeType;
 use Bitrix\Ui;
+use Psr\Log\LoggerInterface;
 
 final class OnlyOffice extends Engine\Controller
 {
@@ -69,15 +77,42 @@ final class OnlyOffice extends Engine\Controller
 	 */
 	protected const STATUS_ERROR_WHILE_FORCE_SAVING = 7;
 
+	/** The editor answered with an error, or warned about changes it could not confirm. */
+	private const REASON_EDITOR_FAILURE = 'editor_failure';
+	/** The page closed on a save the editor never confirmed. */
+	private const REASON_SAVE_UNCONFIRMED = 'save_unconfirmed';
+	private const EDITOR_FAILURE_REASONS = [self::REASON_EDITOR_FAILURE, self::REASON_SAVE_UNCONFIRMED];
+	private const ERROR_INVALID_REASON = 'INVALID_REASON';
+	private const EDITOR_MESSAGE_LIMIT = 500;
+
 	protected const ACTION_TYPE_DISCONNECT = 0;
 	protected const ACTION_TYPE_CONNECT = 1;
 	protected const ACTION_TYPE_FORCE_SAVE = 2;
+
+	/**
+	 * Answer of the callback that closes the request. The document server hands the document over
+	 * once more for every other answer, so this one is also the only way to stop it asking.
+	 * @var int
+	 */
+	protected const CALLBACK_ERROR_NONE = 0;
+	/**
+	 * Answer of the callback for a save that stored nothing. The document server keeps the
+	 * document on its side instead of dropping it as saved, and hands it over again.
+	 * @var int
+	 */
+	protected const CALLBACK_ERROR_SAVE_FAILED = 1;
 
 	protected UnifiedLinkAccessService $unifiedLinkAccessService;
 	protected UnifiedLinkUrl $unifiedLinkUrl;
 	/** @var array */
 	protected $documentSessions;
 	private $addExtendedErrorInfo = false;
+	/**
+	 * A save the callback asked for left no new version behind: the write node refused it, or the
+	 * document could not be downloaded. Neither the answer nor the stored state may report such a
+	 * save as done.
+	 */
+	private bool $saveFailed = false;
 
 	public function __construct(?Request $request = null)
 	{
@@ -155,6 +190,18 @@ final class OnlyOffice extends Engine\Controller
 				],
 			],
 			'endSession' => [
+				'+prefilters' => [
+					new HttpMethod([HttpMethod::METHOD_POST]),
+					new ContentType([ContentType::JSON]),
+					(new Document\OnlyOffice\Filters\DocumentSessionCheck())
+						->enableOwnerCheck()
+						->enableHashCheck(function(){
+							return (new JsonPayload())->getData()['documentSessionHash'];
+						})
+					,
+				],
+			],
+			'reportEditorFailure' => [
 				'+prefilters' => [
 					new HttpMethod([HttpMethod::METHOD_POST]),
 					new ContentType([ContentType::JSON]),
@@ -323,7 +370,9 @@ final class OnlyOffice extends Engine\Controller
 			return null;
 		}
 
-		if ($documentInfo->isFinished())
+		// A key kept after a rejected save or an interrupted session is exactly the key the user comes
+		// back to with a broken file: the editing behind it is over, but the document is still its own.
+		if ($documentInfo->isFinished() && !$this->keepsDocumentKey($documentInfo))
 		{
 			$this->addError(new Error("Session {$session->getId()} is already finished."));
 
@@ -360,6 +409,15 @@ final class OnlyOffice extends Engine\Controller
 			return null;
 		}
 
+		// The editor server keeps the document of a rejected save and of an interrupted session under the
+		// key it knows. A new key would open the copy Disk holds - the one without the lost editing.
+		// Both of those statuses are finished ones, so the order against $force decides nothing: $force
+		// only lets an unfinished session through, and an unfinished session has no kept key to come back to.
+		if ($this->keepsDocumentKey($documentInfo))
+		{
+			return $this->makeSessionAnswer($session);
+		}
+
 		$newSession = $session->cloneWithNewHash($session->getUserId());
 		if (!$newSession)
 		{
@@ -368,21 +426,97 @@ final class OnlyOffice extends Engine\Controller
 			return null;
 		}
 
+		return $this->makeSessionAnswer($newSession);
+	}
+
+	/**
+	 * Whether the document behind the session is still the one the editor server holds, so the next
+	 * opening has to come back to the same key instead of starting over on the copy Disk has.
+	 */
+	private function keepsDocumentKey(Models\DocumentInfo $documentInfo): bool
+	{
+		return in_array(
+			$documentInfo->getContentStatus(),
+			[
+				Models\DocumentInfo::CONTENT_STATUS_SAVE_REJECTED,
+				Models\DocumentInfo::CONTENT_STATUS_INTERRUPTED,
+			],
+			true,
+		);
+	}
+
+	private function makeSessionAnswer(Models\DocumentSession $session): array
+	{
 		/** @see \DiskFileEditorOnlyOfficeController::getSliderContentAction */
 		$link = UrlManager::getInstance()->create('getSliderContent', [
 			'c' => 'bitrix:disk.file.editor-onlyoffice',
 			'mode' => Router::COMPONENT_MODE_AJAX,
-			'documentSessionId' => $newSession->getId(),
-			'documentSessionHash' => $newSession->getExternalHash(),
+			'documentSessionId' => $session->getId(),
+			'documentSessionHash' => $session->getExternalHash(),
 		]);
 
 		return [
 			'documentSession' => [
-				'id' => $newSession->getId(),
-				'hash' => $newSession->getExternalHash(),
+				'id' => $session->getId(),
+				'hash' => $session->getExternalHash(),
 				'link' => $link,
 			],
 		];
+	}
+
+	/**
+	 * Takes the word of the page that the editor is in trouble, and only writes it down.
+	 *
+	 * The page sees what the portal never does: the editor answering with an error, or a save the editor
+	 * confirmed to nobody. Nothing about the session follows from that - the callback of the editor
+	 * server is still the only word on whether the document was written - so the report changes no state
+	 * and is not shown to the user; it is there to tell a silent session apart from a broken editor
+	 * afterwards.
+	 */
+	public function reportEditorFailureAction(
+		Models\DocumentSession $session,
+		string $reason,
+		?int $editorCode = null,
+		?string $editorMessage = null,
+	): ?array
+	{
+		if (!in_array($reason, self::EDITOR_FAILURE_REASONS, true))
+		{
+			$this->addError(new Error('Unknown reason of the editor failure.', self::ERROR_INVALID_REASON));
+
+			return null;
+		}
+
+		// The key of the document is a secret of the session and never reaches the log.
+		$this->getSaveLogger()->warning('OnlyOffice editor failure reported by the page: {reason}.', [
+			'sessionId' => (int)$session->getId(),
+			'objectId' => $session->getObjectId(),
+			'userId' => (int)$this->getCurrentUser()?->getId(),
+			'reason' => $reason,
+			'editorCode' => $editorCode,
+			'editorMessage' => $this->cutEditorMessage($editorMessage),
+		]);
+
+		return null;
+	}
+
+	/**
+	 * The text comes from the editor and is only evidence: a long one is cut instead of being refused,
+	 * because the record is worth more than its tail.
+	 */
+	private function cutEditorMessage(?string $editorMessage): ?string
+	{
+		if ($editorMessage === null)
+		{
+			return null;
+		}
+
+		return mb_substr($editorMessage, 0, self::EDITOR_MESSAGE_LIMIT);
+	}
+
+	private function getSaveLogger(): LoggerInterface
+	{
+		return ServiceLocator::getInstance()->get(DocumentSaveService::LOGGER_SERVICE_ID);
 	}
 
 	public function endSessionAction(Models\DocumentSession $session): array
@@ -447,16 +581,13 @@ final class OnlyOffice extends Engine\Controller
 
 	public function handleOnlyOfficeAction(Models\DocumentSession $documentSession, JsonPayload $payload): ?Response\Json
 	{
+		$processingStartedAt = microtime(true);
 		$this->enableExtendedErrorInfo();
 
 		$payloadData = $payload->getData();
 		$status = $payloadData['status'];
 
 		$this->processRestrictionLogs($status, $payloadData);
-
-		Application::getInstance()->addBackgroundJob(function () use ($status, $documentSession){
-			$this->processStatusToInfoModel($documentSession, $status);
-		});
 
 		$userDocumentSessions = [];
 
@@ -475,7 +606,9 @@ final class OnlyOffice extends Engine\Controller
 
 		$this->logUsageMetrics($documentSession, $payloadData, $userDocumentSessions);
 
-		$wasDocumentWritten = false;
+		$reportBuilder = new SessionReportBuilder();
+		$channelReport = null;
+		$channelCommand = SessionReportBuilder::COMMAND_SESSION_END;
 
 		switch ($status)
 		{
@@ -485,37 +618,68 @@ final class OnlyOffice extends Engine\Controller
 
 			case self::STATUS_IS_READY_FOR_SAVE:
 			case self::STATUS_ERROR_WHILE_SAVING:
-				$wasDocumentWritten = $this->saveDocument($documentSession, $payloadData);
-				if ($wasDocumentWritten)
-				{
-					$this->deactivateDocumentSessions($documentSession->getExternalHash());
-					$this->commentAttachedObjectsOnBackground($documentSession);
-				}
+				$this->sendDocumentClosedWithChangesAnalytics($documentSession);
+				$documentInfo = $documentSession->getInfo();
+				$saveResult = $this->saveFinalDocument(
+					$documentSession,
+					$payloadData,
+					$processingStartedAt,
+					$documentInfo,
+				);
+				$channelReport = $reportBuilder->buildSessionEndReport(
+					$documentSession,
+					$documentInfo,
+					$saveResult->isSuccess(),
+					$this->readFailureCategory($saveResult),
+				);
 				break;
 
 			case self::STATUS_CLOSE_WITHOUT_CHANGES:
 				$this->handleDocumentClosedWithoutChanges($documentSession);
+				$channelReport = $reportBuilder->buildSessionEndReport(
+					$documentSession,
+					$documentSession->getInfo(),
+					wasDocumentWritten: false,
+				);
 				break;
 
 			case self::STATUS_FORCE_SAVE:
 			case self::STATUS_ERROR_WHILE_FORCE_SAVING:
-				$this->saveDocument($documentSession, $payloadData);
+				// No mark of a save in progress here: an intermediate save is written while the people are
+				// still in the document, and a key with users in it never looks abandoned to a second opening.
+				$documentInfo = $documentSession->getInfo();
+				$saveResult = $this->saveDocument($documentSession, $payloadData, $processingStartedAt);
+				$this->markIntermediateSave($documentInfo, $saveResult->isSuccess());
+				$channelReport = $reportBuilder->buildIntermediateSaveReport(
+					$documentSession,
+					$documentInfo,
+					$saveResult->isSuccess(),
+					$this->readFailureCategory($saveResult),
+				);
+				$channelCommand = SessionReportBuilder::COMMAND_INTERMEDIATE_SAVE;
 				break;
 		}
 
-		$this->processStatusToInfoModel($documentSession, $status);
-		$sessionEndReport = $this->makeSessionEndReportForChannel($documentSession->getInfo(), $wasDocumentWritten);
-		if ($sessionEndReport !== null)
+		if ($channelReport !== null)
 		{
-			$this->sendEventToDocumentChannel($documentSession, $sessionEndReport);
+			$this->sendEventToDocumentChannel($documentSession, $channelCommand, $channelReport);
 		}
 
-		if ($this->getErrors())
-		{
-			return null;
-		}
+		return $this->makeCallbackResponse();
+	}
 
-		return new Response\Json(['error' => 0]);
+	/**
+	 * The answer the document server reads to learn whether it has to hand the document over again.
+	 * A save that stored nothing is answered with a non-zero code, so the editor keeps the document
+	 * instead of considering it saved and dropping it, and hands it over once more.
+	 */
+	private function makeCallbackResponse(): Response\Json
+	{
+		$askAgain = $this->saveFailed;
+
+		return new Response\Json([
+			'error' => $askAgain ? self::CALLBACK_ERROR_SAVE_FAILED : self::CALLBACK_ERROR_NONE,
+		]);
 	}
 
 	protected function processRestrictionLogs(int $status, array $hookData): void
@@ -527,40 +691,32 @@ final class OnlyOffice extends Engine\Controller
 		}
 	}
 
-	protected function processStatusToInfoModel(Models\DocumentSession $documentSession, int $status): void
+	/**
+	 * The state of the content of an intermediate save, which the editing goes on after. The code the
+	 * editor server sent says nothing here: only the version written on Disk does.
+	 */
+	private function markIntermediateSave(?Models\DocumentInfo $documentInfo, bool $wasWritten): void
 	{
-		$documentInfo = $documentSession->getInfo();
-		if(!$documentInfo)
+		if (!$documentInfo)
 		{
 			return;
 		}
 
-		switch ($status)
+		if ($wasWritten)
 		{
-			case self::STATUS_IS_BEING_EDITED:
-				break;
-
-			case self::STATUS_IS_READY_FOR_SAVE:
-				$documentInfo->markAsSaved();
-				break;
-
-			case self::STATUS_ERROR_WHILE_SAVING:
-				$documentInfo->markAsSavedWithError();
-				break;
-
-			case self::STATUS_CLOSE_WITHOUT_CHANGES:
-				$documentInfo->markAsNoChanges();
-				break;
-
-			case self::STATUS_FORCE_SAVE:
-				$documentInfo->markAsForceSaved();
-				break;
-
-			case self::STATUS_ERROR_WHILE_FORCE_SAVING:
-				$documentInfo->markAsForceSavedWithError();
-				break;
+			$documentInfo->markAsForceSaved();
 		}
+		else
+		{
+			$documentInfo->markAsForceSavedWithError();
+		}
+	}
 
+	private function readFailureCategory(Result $saveResult): ?SaveFailureCategory
+	{
+		$failureCategory = $saveResult->getData()[DocumentSaveService::DATA_FAILURE_CATEGORY] ?? null;
+
+		return $failureCategory instanceof SaveFailureCategory ? $failureCategory : null;
 	}
 
 	protected function handleDocumentClosedWithoutChanges(Models\DocumentSession $documentSession): void
@@ -583,10 +739,14 @@ final class OnlyOffice extends Engine\Controller
 			return;
 		}
 
+		// Read before the state of the content is written over: an intermediate save left a version
+		// which the attached objects have not been told about yet.
 		if ($documentInfo->wasForceSaved())
 		{
 			$this->commentAttachedObjectsOnBackground($documentSession);
 		}
+
+		$documentInfo->markAsNoChanges();
 	}
 
 	protected function handleDocumentIsEditing(
@@ -603,14 +763,23 @@ final class OnlyOffice extends Engine\Controller
 		$onlineUsers = $payloadData['users'] ?? [];
 		$onlineUsers = array_map('intval', $onlineUsers);
 
+		$actions = $payloadData['actions'] ?? [];
+
 		$documentInfo = $documentSession->getInfo();
 		if ($documentInfo)
 		{
+			// Read before the state is written over: it is the only trace of a document the editor server kept.
+			$wasDocumentKept = $this->keepsDocumentKey($documentInfo);
+
 			$documentInfo->markAsEditing();
 			$documentInfo->setUserCount(count($onlineUsers));
+
+			if ($wasDocumentKept && $this->hasConnectedUser($actions))
+			{
+				ServiceLocator::getInstance()->get(KeptDocumentRecovery::class)->scheduleRecovery($documentSession);
+			}
 		}
 
-		$actions = $payloadData['actions'] ?? [];
 		foreach ($actions as $action)
 		{
 			$type = $action['type'] ?? null;
@@ -634,6 +803,19 @@ final class OnlyOffice extends Engine\Controller
 				$userSession->setAsActive();
 			}
 		}
+	}
+
+	private function hasConnectedUser(array $actions): bool
+	{
+		foreach ($actions as $action)
+		{
+			if ((int)($action['type'] ?? -1) === self::ACTION_TYPE_CONNECT)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	protected function getDocumentSessionsByKeyForUsers(string $documentSessionHash, array $userIds): array
@@ -701,134 +883,146 @@ final class OnlyOffice extends Engine\Controller
 		Models\DocumentSessionTable::deactivateByHash($documentSessionHash);
 	}
 
-	protected function saveDocument(DocumentSession $documentSession, array $payloadData): bool
-	{
-		if (!in_array($payloadData['status'], [
-			self::STATUS_IS_READY_FOR_SAVE,
-			self::STATUS_FORCE_SAVE,
-			self::STATUS_ERROR_WHILE_SAVING,
-			self::STATUS_ERROR_WHILE_FORCE_SAVING,
-		], true))
-		{
-			return false;
-		}
-
-		if (in_array($payloadData['status'], [
-			self::STATUS_IS_READY_FOR_SAVE,
-			self::STATUS_ERROR_WHILE_SAVING,
-		], true))
-		{
-			AddEventToStatFile(
-				'disk',
-				'disk_oo_doc_closed',
-				$documentSession->getExternalHash(),
-				ServiceLocator::getInstance()->get('disk.onlyofficeConfiguration')->getServer(),
-				'with_changes',
-				0
-			);
-
-			$this->sendSessionEndAnalyticsEvent($documentSession);
-		}
-
-		if (empty($payloadData['url']))
-		{
-			$this->addError(new Error("Could not find 'url' in payload. Status: {$payloadData['status']}"));
-
-			return false;
-		}
-
-		if (!$documentSession->getObject())
-		{
-			$this->addError(new Error('Could not find file.'));
-
-			return false;
-		}
-
-		$fileDownloader = new Document\OnlyOffice\FileDownloader($payloadData['url']);
-		$downloadResult = $fileDownloader->download();
-		if ($downloadResult->isSuccess())
-		{
-			$tmpFile = $downloadResult->getData()['file'];
-			$tmpFileArray = \CFile::makeFileArray($tmpFile);
-			if (\in_array($tmpFileArray['type'], [
-				'application/encrypted',
-				'application/zip',
-			], true))
-			{
-				$fileType = $payloadData['filetype'] ?? $documentSession->getObject()->getExtension();
-				$tmpFileArray['type'] = MimeType::getByFileExtension($fileType);
-			}
-
-			$payloadData['users'] = $payloadData['users'] ?? [$documentSession->getUserId()];
-			if (!is_array($payloadData['users']))
-			{
-				$payloadData['users'] = [$payloadData['users']];
-			}
-
-			$options = ['commentAttachedObjects' => false];
-			if ($documentSession->getObject()->uploadVersion($tmpFileArray, $payloadData['users'][0], $options))
-			{
-				$this->sendEventToParticipants($documentSession->getExternalHash(), 'saved');
-
-				return true;
-			}
-		}
-
-		return false;
-	}
-
 	/**
-	 * What the channel of the document learns from the hook, or null when it learns nothing. The event
-	 * means the end of the session and the page waiting for the document navigates by it, so a final
-	 * save which never reached Disk has to release it all the same; whether the document was written is
-	 * told apart, by the report the header reads. An intermediate save leaves the session going.
+	 * The final save of the session, with the key marked as being saved while it goes on.
+	 *
+	 * Without the mark a save slower than the two minutes of inactivity looks abandoned to a second
+	 * opening, which then edits the stale document under a new key and overwrites the version this very
+	 * webhook is writing. The mark is set again right before the version is written - the writing of a
+	 * document of up to a hundred megabytes into a cloud storage is bounded by nothing - and released
+	 * after the state of the content is written, so nothing between the two sees a key which is neither
+	 * saving nor finished.
 	 */
-	private function makeSessionEndReportForChannel(
+	private function saveFinalDocument(
+		DocumentSession $documentSession,
+		array $payloadData,
+		float $processingStartedAt,
 		?Models\DocumentInfo $documentInfo,
-		bool $wasDocumentWritten,
-	): ?array
+	): Result
 	{
-		if (!$documentInfo || !$documentInfo->isFinished())
-		{
-			return null;
-		}
+		$savingMarker = ServiceLocator::getInstance()->get(SavingMarker::class);
+		$externalHash = $documentSession->getExternalHash();
+		$wasMarkedAsSaving = $savingMarker->trySet($externalHash);
 
-		return [
-			'contentStatus' => $documentInfo->getContentStatus(),
-			'wasFinallySaved' => $wasDocumentWritten && $documentInfo->wasFinallySaved(),
-		];
+		$renewMarkBeforeWrite =
+			$wasMarkedAsSaving
+				? static fn(): bool => $savingMarker->trySet($externalHash)
+				: null
+		;
+
+		try
+		{
+			$saveResult = $this->saveDocument(
+				$documentSession,
+				$payloadData,
+				$processingStartedAt,
+				$renewMarkBeforeWrite,
+			);
+			if ($saveResult->isSuccess())
+			{
+				$documentInfo?->markAsSaved();
+				$this->deactivateDocumentSessions($externalHash);
+				$this->commentAttachedObjectsOnBackground($documentSession);
+			}
+			else
+			{
+				// The sessions of the key stay active and the key stays the same: the editor server keeps
+				// the document of a rejected save, and the next opening has to find that same document.
+				$documentInfo?->markAsSaveRejected();
+			}
+
+			return $saveResult;
+		}
+		finally
+		{
+			if ($wasMarkedAsSaving)
+			{
+				$savingMarker->tryDelete($externalHash);
+			}
+		}
 	}
 
 	/**
-	 * The object may be gone by the time the session ends - moved to the recycle bin while the editing
-	 * went on - and the channel of the document is the channel of that object, so there is nowhere left
-	 * to report to. The hook of the document server is answered all the same.
+	 * The outcome of the writing of the version on Disk.
+	 *
+	 * The limit of execution is raised before the download: the default one of the portal can be shorter
+	 * than the budget of the download plus the writing, and then the webhook dies without an answer. It
+	 * bounds the processor time of the webhook and nothing by the clock, which is why the lifetime of
+	 * the mark of a save in progress is not derived from it. An intermediate save is raised just as far:
+	 * it downloads and writes the same document, and a limit cut for it would kill the webhook of a large
+	 * document exactly where the answer matters.
+	 *
+	 * @param \Closure|null $beforeWrite called between the downloading and the writing of the version.
+	 */
+	private function saveDocument(
+		DocumentSession $documentSession,
+		array $payloadData,
+		float $processingStartedAt,
+		?\Closure $beforeWrite = null,
+	): Result
+	{
+		$serviceLocator = ServiceLocator::getInstance();
+		set_time_limit($serviceLocator->get(SaveTimingConfig::class)->executionLimit);
+
+		$saveResult = $serviceLocator
+			->get(DocumentSaveService::class)
+			->save(
+				$documentSession,
+				$payloadData,
+				$processingStartedAt,
+				$beforeWrite,
+				$this->buildEditingSessionWriteOptions($documentSession),
+			)
+		;
+
+		if ($saveResult->isSuccess())
+		{
+			$this->sendEventToParticipants($documentSession->getExternalHash(), 'saved');
+		}
+		else
+		{
+			$this->saveFailed = true;
+		}
+
+		return $saveResult;
+	}
+
+	/**
+	 * Options of the writing of a version coming out of an editing session.
+	 */
+	private function buildEditingSessionWriteOptions(DocumentSession $documentSession): array
+	{
+		return ['commentAttachedObjects' => false];
+	}
+
+	private function sendDocumentClosedWithChangesAnalytics(DocumentSession $documentSession): void
+	{
+		AddEventToStatFile(
+			'disk',
+			'disk_oo_doc_closed',
+			$documentSession->getExternalHash(),
+			ServiceLocator::getInstance()->get('disk.onlyofficeConfiguration')->getServer(),
+			'with_changes',
+			0
+		);
+
+		$this->sendSessionEndAnalyticsEvent($documentSession);
+	}
+
+	/**
+	 * The agent of interrupted sessions reports to the same channel, so the delivery and its answer to a
+	 * document which is already gone live in {@see DocumentChannelReporter}.
 	 */
 	protected function sendEventToDocumentChannel(
 		Models\DocumentSession $documentSession,
-		array $sessionEndReport,
+		string $command,
+		array $report,
 	): void
 	{
-		$object = $documentSession->getObject();
-		if (!$object)
-		{
-			return;
-		}
-
-		$objectEvent = $object->makeObjectEvent(
-			'onlyoffice',
-			[
-				'object' => [
-					'id' => $documentSession->getObjectId(),
-				],
-				'documentSession' => [
-					'hash' => $documentSession->getExternalHash(),
-				],
-				'documentSessionInfo' => $sessionEndReport,
-			]
-		);
-
-		$objectEvent->sendToObjectChannel();
+		ServiceLocator::getInstance()
+			->get(DocumentChannelReporter::class)
+			->send($documentSession, $command, $report)
+		;
 	}
 
 	protected function sendEventToParticipants(string $documentSessionHash, string $event): void

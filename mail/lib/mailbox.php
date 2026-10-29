@@ -48,6 +48,10 @@ class MailboxTable extends Entity\DataManager
 	private static array $onlyIdOwnerCache = [];
 	private static array $sharedCache = [];
 	private static array $onlyIdSharedCache = [];
+	private static int $deferredCacheDepth = 0;
+	private static bool $deferredSharedCacheClean = false;
+	private static bool $deferredEntityCacheClean = false;
+	private static bool $deferredCacheCleanupShutdownRegistered = false;
 
 	public static function getFilePath()
 	{
@@ -314,19 +318,24 @@ class MailboxTable extends Entity\DataManager
 				{
 					$mailboxesById = self::getAddressFieldsForIds($mailboxIds);
 					$groups = [];
+					$normalizer = new EmailNormalizer();
 					foreach ($mailboxesById as $mailboxId => $mailbox)
 					{
-						$normalizedEmail = (new EmailNormalizer())->normalizeMailbox($mailbox);
+						$normalizedEmail = $normalizer->normalizeMailbox($mailbox);
 						$groupKey = $normalizedEmail ?? "\0";
 						$groups[$groupKey]['ids'][] = $mailboxId;
 						$groups[$groupKey]['normalizedEmail'] = $normalizedEmail;
+						$groups[$groupKey]['domainHash'] = $normalizer->domainHash($normalizedEmail);
 					}
 
 					foreach ($groups as $group)
 					{
 						$derivedResult = parent::updateMulti(
 							$group['ids'],
-							['EMAIL_NORMALIZED' => $group['normalizedEmail']],
+							[
+								'EMAIL_NORMALIZED' => $group['normalizedEmail'],
+								'EMAIL_DOMAIN_HASH' => $group['domainHash'],
+							],
 							true,
 						);
 						if (!$derivedResult->isSuccess())
@@ -770,8 +779,11 @@ class MailboxTable extends Entity\DataManager
 				$mailbox = static::getById((int)($primary['ID'] ?? 0))->fetch() ?: [];
 			}
 
+			$normalizer = new EmailNormalizer();
+			$normalizedEmail = $normalizer->normalizeMailbox(array_merge($mailbox, $fields));
 			$result->modifyFields([
-				'EMAIL_NORMALIZED' => (new EmailNormalizer())->normalizeMailbox(array_merge($mailbox, $fields)),
+				'EMAIL_NORMALIZED' => $normalizedEmail,
+				'EMAIL_DOMAIN_HASH' => $normalizer->domainHash($normalizedEmail),
 			]);
 		}
 
@@ -879,6 +891,9 @@ class MailboxTable extends Entity\DataManager
 			'EMAIL_NORMALIZED' => array(
 				'data_type' => 'string',
 			),
+			'EMAIL_DOMAIN_HASH' => array(
+				'data_type' => 'string',
+			),
 			'USERNAME' => array(
 				'data_type' => 'string',
 			),
@@ -974,6 +989,13 @@ class MailboxTable extends Entity\DataManager
 				'data_type' => 'integer',
 				'default_value' => 0,
 			),
+			'AVATAR_RESOURCE_ID' => array(
+				'data_type' => 'integer',
+			),
+			'AVATAR_REVISION' => array(
+				'data_type' => 'integer',
+				'default_value' => 0,
+			),
 			'OPTIONS' => array(
 				'data_type'  => 'text',
 				'save_data_modification' => function()
@@ -1011,9 +1033,10 @@ class MailboxTable extends Entity\DataManager
 		;
 	}
 
-	public static function cleanCachesByMailboxId(int $mailboxId): void
+	/** A caller that already holds the row passes its owner instead of making it be read again. */
+	public static function cleanCachesByMailboxId(int $mailboxId, ?int $ownerId = null): void
 	{
-		$ownerId = self::getOwnerId($mailboxId);
+		$ownerId = ($ownerId ?? 0) > 0 ? $ownerId : self::getOwnerId($mailboxId);
 		if ($ownerId > 0)
 		{
 			self::cleanOwnerCacheByUserId($ownerId);
@@ -1184,7 +1207,87 @@ class MailboxTable extends Entity\DataManager
 		self::$onlyIdSharedCache = [];
 		self::$sharedCache = [];
 
-		$cacheManager = Cache::createInstance();
-		$cacheManager->cleanDir(self::SHARED_CACHE_DIR);
+		if (self::$deferredCacheDepth > 0)
+		{
+			self::$deferredSharedCacheClean = true;
+
+			return;
+		}
+
+		Cache::createInstance()->cleanDir(self::SHARED_CACHE_DIR);
+	}
+
+	/** Within a deferred scope the entity cache is dropped once at the end of it. */
+	public static function cleanEntityCache(): void
+	{
+		if (self::$deferredCacheDepth > 0)
+		{
+			self::$deferredEntityCacheClean = true;
+
+			return;
+		}
+
+		self::getEntity()->cleanCache();
+	}
+
+	/**
+	 * Defers to the end of the scope the drop of the cache directories that belong to no single
+	 * mailbox: the portal-wide shared one and the one of the entity. The in-memory maps are still
+	 * dropped at once, so a read of the shared mailboxes inside the scope answers from the disk
+	 * directory and may be stale until the scope ends. A fatal error skips `finally`, so the drop is
+	 * asked for on shutdown too: it is lost only when the process itself is killed.
+	 */
+	public static function withDeferredCacheCleanup(callable $run): mixed
+	{
+		self::registerDeferredCacheCleanupOnShutdown();
+		self::$deferredCacheDepth++;
+		try
+		{
+			return $run();
+		}
+		finally
+		{
+			self::$deferredCacheDepth--;
+			if (self::$deferredCacheDepth === 0)
+			{
+				self::flushDeferredCacheCleanup();
+			}
+		}
+	}
+
+	/**
+	 * The last chance of a scope that never reached its end. The depth is dropped as well: after the
+	 * shutdown of the hit there is no scope left to defer anything to.
+	 */
+	public static function flushDeferredCacheCleanupOnShutdown(): void
+	{
+		self::$deferredCacheDepth = 0;
+		self::flushDeferredCacheCleanup();
+	}
+
+	private static function registerDeferredCacheCleanupOnShutdown(): void
+	{
+		if (self::$deferredCacheCleanupShutdownRegistered)
+		{
+			return;
+		}
+
+		self::$deferredCacheCleanupShutdownRegistered = true;
+		register_shutdown_function([self::class, 'flushDeferredCacheCleanupOnShutdown']);
+	}
+
+	private static function flushDeferredCacheCleanup(): void
+	{
+		if (self::$deferredSharedCacheClean)
+		{
+			self::$deferredSharedCacheClean = false;
+			Cache::createInstance()->cleanDir(self::SHARED_CACHE_DIR);
+		}
+
+		if (self::$deferredEntityCacheClean)
+		{
+			self::$deferredEntityCacheClean = false;
+			self::getEntity()->cleanCache();
+		}
 	}
 }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Access\UnifiedLink;
@@ -49,6 +50,11 @@ class UnifiedLinkAccessResult
 		return $maxAccessLevel;
 	}
 
+	public function getAccessLevel(UnifiedLinkAccessSource $source): UnifiedLinkAccessLevel
+	{
+		return $this->accessLevels[$source->value] ?? UnifiedLinkAccessLevel::Denied;
+	}
+
 	/**
 	 * @return bool
 	 */
@@ -58,7 +64,6 @@ class UnifiedLinkAccessResult
 
 		return count($this->accessLevels) === 1
 			&& $permissionSystemAccessLevel instanceof UnifiedLinkAccessLevel
-			&& $permissionSystemAccessLevel->value > UnifiedLinkAccessLevel::Denied->value
-		;
+			&& $permissionSystemAccessLevel->value > UnifiedLinkAccessLevel::Denied->value;
 	}
 }

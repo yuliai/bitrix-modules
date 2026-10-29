@@ -22,12 +22,22 @@ class PresenceService
 	public const ERROR_ACCESS_DENIED = 'ACCESS_DENIED';
 	public const ERROR_LOCKED = 'PRESENCE_LOCKED';
 
-	private const REGISTRATION_TTL = 90;
-	// A cached verdict never outlives the registration it authorizes, so the roster gains no staleness
-	// beyond REGISTRATION_TTL. A shorter TTL would expire every verdict once per heartbeat interval.
-	private const AUTHORIZATION_TTL = self::REGISTRATION_TTL;
-	private const STATE_REFRESH_INTERVAL = 45;
-	private const HEARTBEAT_THROTTLE = 10;
+	// Two heartbeat intervals plus a margin: one lost beat must not drop a participant out of the roster,
+	// because a dropped registration also stops receiving roster changes.
+	private const REGISTRATION_TTL = 660;
+	// A cached verdict stays within one heartbeat interval and no longer follows REGISTRATION_TTL:
+	// a participant whose access was revoked would otherwise linger in the rosters of others for eleven
+	// minutes. It is rechecked once per beat instead.
+	private const AUTHORIZATION_TTL = 300;
+	// Below the heartbeat interval, so every rare beat refreshes the presence mark of its caller.
+	private const STATE_REFRESH_INTERVAL = 150;
+	/**
+	 * A third of the beat an opening keeps, in seconds - the share the throttle of the previous scheme held
+	 * of the previous beat, so a beat arriving early is still let through. What it refuses is a stream of
+	 * requests from one tab, and it refuses them on a read of the state alone: before the lock of the
+	 * scope, before anything is written and before any roster is published.
+	 */
+	private const HEARTBEAT_THROTTLE = PresenceAccessService::HEARTBEAT_INTERVAL / 1000 / 3;
 	private const MAX_REGISTRATIONS_PER_SESSION = 8;
 	private const MAX_REGISTRATIONS_PER_USER = 16;
 	/** The ceiling of the roster as a whole: nothing that feeds it may offer more participants than this. */
@@ -58,11 +68,18 @@ class PresenceService
 		);
 	}
 
+	/**
+	 * @param bool $isConfirming Whether the calling opening maintains the contour of confirmations. Only the
+	 *                           participants that do are ever hidden by silence, so an opening which cannot
+	 *                           confirm itself - an old tab, one without a channel of confirmations - says so
+	 *                           and is shown until the server itself takes it out of the roster.
+	 */
 	public function handle(
 		string $action,
 		string $presenceContext,
 		int $currentUserId,
 		int $clientRevision = 0,
+		bool $isConfirming = false,
 	): Result
 	{
 		if (!in_array($action, [self::ACTION_ENTER, self::ACTION_HEARTBEAT, self::ACTION_LEAVE], true))
@@ -84,6 +101,11 @@ class PresenceService
 		if ($scope === null)
 		{
 			return $this->getErrorResult(self::ERROR_ACCESS_DENIED, 'Presence access is denied.');
+		}
+
+		if (!$isRelease && $this->isThrottledBeat($scope, $binding, $isConfirming, ($this->clock)()))
+		{
+			return new Result();
 		}
 
 		/** @var array<string, bool> $liveAuthorizations Verdicts actually rechecked during this request. */
@@ -113,13 +135,11 @@ class PresenceService
 		{
 			$now = ($this->clock)();
 			$state = $this->normalizeState($this->storage->get($scope['storageKey'], []));
-			if ($action === self::ACTION_HEARTBEAT && $this->isThrottledHeartbeat($state['registrations'], $binding, $now))
-			{
-				return new Result();
-			}
 
 			$authorizationKey = $this->getAuthorizationKey($binding['userId'], $binding['sessionId']);
-			$isCallerStateFresh = $this->isCallerStateFresh($state, $binding, $authorizationKey, $now);
+			$isCallerStateFresh = $this->isCallerStateFresh($state, $binding, $authorizationKey, $now)
+				&& $isConfirming === $this->isRegisteredAsConfirming($state['registrations'], $binding)
+			;
 			if (!$isCallerStateFresh && !$isRelease)
 			{
 				// The caller is already reauthorized by resolveAuthorizedScopeFromBinding() above. A release
@@ -146,17 +166,27 @@ class PresenceService
 			}
 			else
 			{
-				$previousRegistration = $state['registrations'][$binding['tabId']] ?? null;
+				$previousRegistration = $this->normalizeRegistration($state['registrations'][$binding['tabId']] ?? null);
+				$hasChangedConfirming = $previousRegistration !== null
+					&& $previousRegistration['isConfirming'] !== $isConfirming
+				;
+				$previousConfirmingChangedAt = $previousRegistration['confirmingChangedAt'] ?? 0;
 				$state['registrations'][$binding['tabId']] = [
 					'userId' => $binding['userId'],
 					'sessionId' => $binding['sessionId'],
 					'tabId' => $binding['tabId'],
 					'lastSeen' => $now,
+					'isConfirming' => $isConfirming,
+					// A registration that has never changed its contour keeps 0, so the one correction an
+					// opening makes right after its entry is never refused by the throttle.
+					'confirmingChangedAt' => $hasChangedConfirming ? $now : $previousConfirmingChangedAt,
 				];
 				$shouldPublishRoster = $shouldPublishRoster
-					|| !is_array($previousRegistration)
+					|| $previousRegistration === null
 					|| $previousRegistration['userId'] !== $binding['userId']
-					|| $previousRegistration['sessionId'] !== $binding['sessionId'];
+					|| $previousRegistration['sessionId'] !== $binding['sessionId']
+					// the roster carries the flag, so a change of it is a change of the roster
+					|| $previousRegistration['isConfirming'] !== $isConfirming;
 				$shouldPublishRoster = $this->enforceRegistrationLimits($state['registrations'], $binding)
 					|| $shouldPublishRoster;
 			}
@@ -168,20 +198,22 @@ class PresenceService
 
 			if ($shouldPublishRoster)
 			{
-				// The state record expires after 90 seconds, while a browser can retain the last roster.
+				// The state record expires after REGISTRATION_TTL, while a browser can retain the last roster.
 				// A physical-time floor prevents a newly created state from restarting the revision at zero.
 				$state['revision'] = max($state['revision'] + 1, ($this->revisionClock)());
 			}
 
 			// A heartbeat that neither changes the roster nor lets the caller's own entries age past
-			// STATE_REFRESH_INTERVAL needs no state rewrite, so the standard client interval does not
-			// turn into one storage write per beat.
+			// STATE_REFRESH_INTERVAL needs no state rewrite, so a client still beating at the former
+			// frequent interval does not turn into one storage write per beat.
 			if ($shouldPublishRoster || !$isCallerStateFresh)
 			{
+				// The record has to outlive every registration it holds, or a roster would vanish between
+				// two rare beats instead of ageing out registration by registration.
 				$stored = $this->storage->set(
 					$scope['storageKey'],
 					$state,
-					new \DateInterval('PT90S'),
+					new \DateInterval('PT' . self::REGISTRATION_TTL . 'S'),
 				);
 				if (!$stored)
 				{
@@ -244,7 +276,7 @@ class PresenceService
 	 * is returned with.
 	 *
 	 * @param array{storageKey: string} $scope
-	 * @return array{revision: int, userIds: list<int>}
+	 * @return array{revision: int, userIds: list<int>, confirmingUserIds: list<int>}
 	 */
 	public function snapshot(array $scope): array
 	{
@@ -254,11 +286,12 @@ class PresenceService
 		}
 		catch (\Throwable)
 		{
-			return ['revision' => 0, 'userIds' => []];
+			return ['revision' => 0, 'userIds' => [], 'confirmingUserIds' => []];
 		}
 
 		$now = ($this->clock)();
 		$userIds = [];
+		$liveRegistrations = [];
 		foreach ($state['registrations'] as $tabId => $storedRegistration)
 		{
 			$registration = $this->normalizeRegistration($storedRegistration);
@@ -272,9 +305,14 @@ class PresenceService
 			}
 
 			$userIds[$registration['userId']] = $registration['userId'];
+			$liveRegistrations[$tabId] = $registration;
 		}
 
-		return ['revision' => $state['revision'], 'userIds' => array_values($userIds)];
+		return [
+			'revision' => $state['revision'],
+			'userIds' => array_values($userIds),
+			'confirmingUserIds' => array_keys($this->collectConfirmingUserIds($liveRegistrations)),
+		];
 	}
 
 	/**
@@ -282,7 +320,7 @@ class PresenceService
 	 * arrive with the initial roster.
 	 *
 	 * @param list<int> $recipientIds
-	 * @param array{scope: string, revision: int, participants: list<array{id: int, name: string, avatar: string}>} $snapshot
+	 * @param array{scope: string, revision: int, participants: list<array{id: int, name: string, avatar: string, isConfirming: bool}>} $snapshot
 	 */
 	protected function publishRoster(array $recipientIds, array $snapshot): void
 	{
@@ -345,27 +383,9 @@ class PresenceService
 	}
 
 	/**
-	 * A repeated heartbeat of the same tab is dropped before any state rewrite or authorization work.
-	 *
-	 * @param array<string, mixed> $registrations
-	 * @param array{sessionId: int, userId: int, tabId: string, accessType: string} $binding
-	 */
-	private function isThrottledHeartbeat(array $registrations, array $binding, int $now): bool
-	{
-		$registration = $this->normalizeRegistration($registrations[$binding['tabId']] ?? null);
-
-		return (
-			$registration !== null
-			&& $registration['userId'] === $binding['userId']
-			&& $registration['sessionId'] === $binding['sessionId']
-			&& $now < $registration['lastSeen'] + self::HEARTBEAT_THROTTLE
-		);
-	}
-
-	/**
-	 * Both of the caller's own entries stay valid well past the next heartbeat, so nothing has to be
-	 * persisted for them: the registration outlives REGISTRATION_TTL and the verdict AUTHORIZATION_TTL
-	 * until the following write.
+	 * Both of the caller's own entries are younger than STATE_REFRESH_INTERVAL, so nothing has to be
+	 * persisted for them. The interval sits below the heartbeat one, so a beat of the current client always
+	 * rewrites; what this absorbs is the extra beats of a client still running the former frequent interval.
 	 *
 	 * @param array{revision: int, registrations: array<string, mixed>, authorizations: array<string, mixed>} $state
 	 * @param array{sessionId: int, userId: int, tabId: string, accessType: string} $binding
@@ -394,6 +414,63 @@ class PresenceService
 	}
 
 	/**
+	 * A repeat of a request whose answer the stored state already holds. It is refused on a read alone: the
+	 * lock of the scope is never taken, nothing is stored and no roster reaches the recipients, so a tab
+	 * beating far ahead of its interval costs one read of the storage and nothing else.
+	 *
+	 * A change of the contour is let through, because the opening corrects the claim of its entry within one
+	 * frequent beat - long before the throttle opens. It is let through once per throttle though: flipping
+	 * the flag back and forth would otherwise be a free way of making the server publish the roster to every
+	 * recipient of the scope.
+	 *
+	 * @param array{storageKey: string} $scope
+	 * @param array{sessionId: int, userId: int, tabId: string, accessType: string} $binding
+	 */
+	private function isThrottledBeat(array $scope, array $binding, bool $isConfirming, int $now): bool
+	{
+		try
+		{
+			$state = $this->normalizeState($this->storage->get($scope['storageKey'], []));
+		}
+		catch (\Throwable)
+		{
+			return false;
+		}
+
+		$registration = $this->normalizeRegistration($state['registrations'][$binding['tabId']] ?? null);
+		if (
+			$registration === null
+			|| $registration['userId'] !== $binding['userId']
+			|| $registration['sessionId'] !== $binding['sessionId']
+			|| $registration['lastSeen'] > $now
+			|| $now >= $registration['lastSeen'] + self::HEARTBEAT_THROTTLE
+		)
+		{
+			return false;
+		}
+
+		if ($isConfirming === $registration['isConfirming'])
+		{
+			return true;
+		}
+
+		return $registration['confirmingChangedAt'] > 0
+			&& $now < $registration['confirmingChangedAt'] + self::HEARTBEAT_THROTTLE
+		;
+	}
+
+	/**
+	 * @param array<string, mixed> $registrations
+	 * @param array{sessionId: int, userId: int, tabId: string, accessType: string} $binding
+	 */
+	private function isRegisteredAsConfirming(array $registrations, array $binding): bool
+	{
+		$registration = $this->normalizeRegistration($registrations[$binding['tabId']] ?? null);
+
+		return $registration !== null && $registration['isConfirming'];
+	}
+
+	/**
 	 * @param array<string, mixed> $registrations
 	 * @param array<string, mixed> $authorizations Cached moments of the last successful authorization per user/session.
 	 * @param array<string, bool> $liveAuthorizations Collects the verdicts rechecked here for the snapshot below.
@@ -408,8 +485,8 @@ class PresenceService
 		int $now,
 	): array
 	{
-		$activeRegistrations = [];
-		$verdicts = [];
+		$liveRegistrations = [];
+		$expiredRegistrations = [];
 		foreach ($registrations as $tabId => $registration)
 		{
 			$normalizedRegistration = $this->normalizeRegistration($registration);
@@ -422,30 +499,19 @@ class PresenceService
 				continue;
 			}
 
-			$authorizationKey = $this->getAuthorizationKey(
-				$normalizedRegistration['userId'],
-				$normalizedRegistration['sessionId'],
-			);
-			if (!array_key_exists($authorizationKey, $verdicts))
+			$liveRegistrations[$tabId] = $normalizedRegistration;
+			if (!$this->isAuthorizationFresh($authorizations, $normalizedRegistration, $now))
 			{
-				$verdicts[$authorizationKey] = $this->authorizeRegistration(
-					$authorizationKey,
-					$authorizations,
-					$liveAuthorizations,
-					$scope,
-					$normalizedRegistration,
-					$now,
-				);
+				$expiredRegistrations[$tabId] = $normalizedRegistration;
 			}
-			if (!$verdicts[$authorizationKey])
-			{
-				continue;
-			}
-
-			$activeRegistrations[$tabId] = $normalizedRegistration;
 		}
 
-		return $activeRegistrations;
+		$this->recheckAuthorizations($expiredRegistrations, $authorizations, $liveAuthorizations, $scope, $now);
+
+		return array_filter(
+			$liveRegistrations,
+			fn(array $registration): bool => $this->isAuthorizationFresh($authorizations, $registration, $now),
+		);
 	}
 
 	/**
@@ -453,37 +519,58 @@ class PresenceService
 	 * so a positive verdict is reused until AUTHORIZATION_TTL expires.
 	 *
 	 * @param array<string, mixed> $authorizations
+	 * @param array{userId: int, sessionId: int} $registration
+	 */
+	private function isAuthorizationFresh(array $authorizations, array $registration, int $now): bool
+	{
+		$authorizationKey = $this->getAuthorizationKey($registration['userId'], $registration['sessionId']);
+		$authorizedAt = $authorizations[$authorizationKey] ?? null;
+
+		return is_int($authorizedAt) && $authorizedAt <= $now && $now < $authorizedAt + self::AUTHORIZATION_TTL;
+	}
+
+	/**
+	 * AUTHORIZATION_TTL is as long as a heartbeat interval, so the verdict of a neighbour is regularly
+	 * expired by the time anybody else beats. That recheck happens inside the scope lock, where one live
+	 * check per registration would hold every parallel beat of the same document on the lock, so all of
+	 * them go through a single batch call instead.
+	 *
+	 * @param array<string, array{userId: int, sessionId: int, tabId: string, lastSeen: int}> $expiredRegistrations
+	 * @param array<string, mixed> $authorizations
 	 * @param array<string, bool> $liveAuthorizations
 	 * @param array{accessType: string, storageKey: string, scope: string, realObjectId: int, attachedObjectId: int} $scope
-	 * @param array{userId: int, sessionId: int, tabId: string, lastSeen: int} $registration
 	 */
-	private function authorizeRegistration(
-		string $authorizationKey,
+	private function recheckAuthorizations(
+		array $expiredRegistrations,
 		array &$authorizations,
 		array &$liveAuthorizations,
 		array $scope,
-		array $registration,
 		int $now,
-	): bool
+	): void
 	{
-		$authorizedAt = $authorizations[$authorizationKey] ?? null;
-		if (is_int($authorizedAt) && $authorizedAt <= $now && $now < $authorizedAt + self::AUTHORIZATION_TTL)
+		if ($expiredRegistrations === [])
 		{
-			return true;
+			return;
 		}
 
-		$authorized = $this->presenceAccessService->isRegistrationAuthorized($scope, $registration);
-		$liveAuthorizations[$authorizationKey] = $authorized;
-		if ($authorized)
+		$authorizedRegistrations = $this->presenceAccessService->filterAuthorizedRegistrations(
+			$scope,
+			$expiredRegistrations,
+		);
+		foreach ($expiredRegistrations as $tabId => $registration)
 		{
-			$authorizations[$authorizationKey] = $now;
+			$authorizationKey = $this->getAuthorizationKey($registration['userId'], $registration['sessionId']);
+			$authorized = array_key_exists($tabId, $authorizedRegistrations);
+			$liveAuthorizations[$authorizationKey] = $authorized;
+			if ($authorized)
+			{
+				$authorizations[$authorizationKey] = $now;
+			}
+			else
+			{
+				unset($authorizations[$authorizationKey]);
+			}
 		}
-		else
-		{
-			unset($authorizations[$authorizationKey]);
-		}
-
-		return $authorized;
 	}
 
 	/**
@@ -639,8 +726,8 @@ class PresenceService
 	}
 
 	/**
-	 * @param array<string, array{userId: int, sessionId: int, tabId: string, lastSeen: int}> $registrations
-	 * @return array{0: list<array{id: int, name: string, avatar: string}>, 1: list<int>}
+	 * @param array<string, array{userId: int, sessionId: int, tabId: string, lastSeen: int, isConfirming: bool}> $registrations
+	 * @return array{0: list<array{id: int, name: string, avatar: string, isConfirming: bool}>, 1: list<int>}
 	 */
 	private function buildParticipants(array $registrations): array
 	{
@@ -648,6 +735,7 @@ class PresenceService
 			array_values(array_unique(array_column($registrations, 'userId'))),
 		);
 
+		$confirmingUserIds = $this->collectConfirmingUserIds($registrations);
 		$participants = [];
 		$recipientIds = [];
 		foreach ($registrations as $registration)
@@ -664,7 +752,7 @@ class PresenceService
 				continue;
 			}
 
-			$participants[$userId] = $participant;
+			$participants[$userId] = $participant + ['isConfirming' => isset($confirmingUserIds[$userId])];
 			$recipientIds[] = $userId;
 		}
 
@@ -672,8 +760,30 @@ class PresenceService
 	}
 
 	/**
+	 * A user is led by the weakest of their openings: one tab of theirs that cannot confirm itself keeps
+	 * them out of the contour entirely, because that tab would go silent while the user is still here.
+	 *
+	 * @param array<string, array{userId: int, sessionId: int, tabId: string, lastSeen: int, isConfirming: bool}> $registrations
+	 * @return array<int, true>
+	 */
+	private function collectConfirmingUserIds(array $registrations): array
+	{
+		$confirmingUserIds = [];
+		foreach ($registrations as $registration)
+		{
+			$userId = $registration['userId'];
+			$confirmingUserIds[$userId] = ($confirmingUserIds[$userId] ?? true) && $registration['isConfirming'];
+		}
+
+		return array_filter($confirmingUserIds);
+	}
+
+	/**
+	 * A record stored before the contour of confirmations existed carries no flag, and neither does the
+	 * registration of a tab that cannot confirm itself: both mean the same and read as `false`.
+	 *
 	 * @param mixed $registration
-	 * @return array{userId: int, sessionId: int, tabId: string, lastSeen: int}|null
+	 * @return array{userId: int, sessionId: int, tabId: string, lastSeen: int, isConfirming: bool, confirmingChangedAt: int}|null
 	 */
 	private function normalizeRegistration(mixed $registration): ?array
 	{
@@ -700,11 +810,15 @@ class PresenceService
 			return null;
 		}
 
+		$confirmingChangedAt = $registration['confirmingChangedAt'] ?? null;
+
 		return [
 			'userId' => $userId,
 			'sessionId' => $sessionId,
 			'tabId' => $tabId,
 			'lastSeen' => $lastSeen,
+			'isConfirming' => ($registration['isConfirming'] ?? null) === true,
+			'confirmingChangedAt' => is_int($confirmingChangedAt) && $confirmingChangedAt > 0 ? $confirmingChangedAt : 0,
 		];
 	}
 

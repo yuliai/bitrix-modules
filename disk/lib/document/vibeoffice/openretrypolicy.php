@@ -115,29 +115,16 @@ final class OpenRetryPolicy
 		return $attemptDurationSec >= (float)$this->longAttemptSec;
 	}
 
-	/**
-	 * The pause before the next attempt, capped; null when the platform asked for none - disk never
-	 * invents a delay of its own.
-	 */
 	public function resolvePauseSeconds(?int $retryAfterSec): ?int
 	{
-		if ($retryAfterSec === null || $retryAfterSec <= 0)
+		if ($retryAfterSec === null || $retryAfterSec <= 0 || $retryAfterSec > $this->maxPauseSec)
 		{
 			return null;
 		}
 
-		return min($retryAfterSec, $this->maxPauseSec);
+		return $retryAfterSec;
 	}
 
-	/**
-	 * The same pause in the unit it is waited out in, scattered around the asked delay.
-	 *
-	 * The platform answers every client of one document the same `Retry-After` - `saving_in_progress`
-	 * is exactly several people opening one document at the same moment - so a wait taken literally
-	 * brings their repeats back as one burst. The scatter keeps within a fifth of the pause either way
-	 * and never above the ceiling; the budget counts the asked pause, and a fifth of it stays well
-	 * inside the reserve kept for the worst answer of the platform.
-	 */
 	public function scatterPauseMicroseconds(int $pauseSec): int
 	{
 		$pauseMicroseconds = $pauseSec * self::MICROSECONDS_IN_SECOND;
@@ -146,19 +133,19 @@ final class OpenRetryPolicy
 			return 0;
 		}
 
-		$spread = (int)round($pauseMicroseconds * self::PAUSE_JITTER_RATIO);
-
-		return min(
-			$pauseMicroseconds + random_int(-$spread, $spread),
+		$maximum = min(
+			$pauseMicroseconds + (int)round($pauseMicroseconds * self::PAUSE_JITTER_RATIO),
 			$this->maxPauseSec * self::MICROSECONDS_IN_SECOND,
 		);
+
+		return random_int($pauseMicroseconds, $maximum);
 	}
 
 	/**
 	 * Whether the remaining budget holds the pause plus the worst platform answer. The deadline
 	 * limits the start of an attempt, never the completion of one already running.
 	 */
-	public function fitsIntoBudget(float $now, float $deadline, int $pauseSec): bool
+	public function fitsIntoBudget(float $now, float $deadline, float $pauseSec): bool
 	{
 		return ($now + $pauseSec + $this->worstAnswerSec) <= $deadline;
 	}

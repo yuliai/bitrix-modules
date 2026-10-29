@@ -7,10 +7,16 @@ namespace Bitrix\Disk\Document\Vibeoffice;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\ExternalLink;
 use Bitrix\Disk\File;
+use Bitrix\Disk\Internal\Service\Audit\AuditTransaction;
+use Bitrix\Disk\Internal\Service\Audit\AuditTransactionException;
+use Bitrix\Disk\Internal\Service\Audit\AuditTransactionOutcome;
 use Bitrix\Disk\Version;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\Connection;
+use Bitrix\Main\DB\TransactionException;
 use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Error;
+use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Result;
 use Bitrix\Main\UuidGenerator;
 
@@ -47,13 +53,19 @@ class DocumentStateRepository
 	}
 
 	/**
-	 * Lock order: document named lock, transaction, optional object row, state row, session/ledger rows.
+	 * Lock order: document named lock, transaction, optional object row, session/ledger rows.
 	 * The callback must not perform network I/O. Nested transactions leave the caller's commit intact.
-	 * The state row stays locked until the outer commit, including after the named lock is released.
+	 * The named lock alone serializes state writers, so the state row itself is read without a row lock.
+	 * Audited file changes own the transaction and cannot join an external SQL transaction.
 	 *
 	 * @param callable(array, ?File): Result $mutation
 	 */
-	public function withLockedDocument(string $hostDocKey, callable $mutation, bool $lockObject = false): Result
+	public function withLockedDocument(
+		string $hostDocKey,
+		callable $mutation,
+		bool $lockObject = false,
+		bool $auditFileChanges = false,
+	): Result
 	{
 		return $this->runLocked(
 			self::getDocumentLockName($hostDocKey),
@@ -61,19 +73,16 @@ class DocumentStateRepository
 				$file = null;
 				if ($lockObject)
 				{
-					$state = $this->getByKey($hostDocKey);
-					$file = $state ? $this->loadLockedFile((int)$state['OBJECT_ID']) : null;
+					$objectId = (int)($this->getByKey($hostDocKey)['OBJECT_ID'] ?? 0);
+					$file = $objectId > 0 ? $this->loadLockedFile($objectId) : null;
 					if (!$file)
 					{
 						return $this->failure('Vibeoffice document was not found.', 'vibeoffice_document_not_found');
 					}
 				}
 
-				$query = Models\DocumentStateTable::query()
-					->setSelect(['*'])
-					->where('HOST_DOC_KEY', $hostDocKey)
-				;
-				$state = Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch();
+				// Read after the object row lock: an external writer could have advanced the content.
+				$state = $this->getByKey($hostDocKey);
 				if (!$state)
 				{
 					return $this->failure('Vibeoffice document was not found.', 'vibeoffice_document_not_found');
@@ -81,6 +90,7 @@ class DocumentStateRepository
 
 				return $mutation($state, $file);
 			},
+			$auditFileChanges,
 		);
 	}
 
@@ -89,11 +99,70 @@ class DocumentStateRepository
 		return 'disk_vo_document_' . md5($hostDocKey);
 	}
 
+	/** Locking read of an ORM query. The whole module goes through this method instead of its own SQL. */
+	public static function fetchForUpdate(Query $query): ?array
+	{
+		return self::queryForUpdate($query)->fetch() ?: null;
+	}
+
+	/** @return array[] */
+	public static function fetchAllForUpdate(Query $query): array
+	{
+		return self::queryForUpdate($query)->fetchAll();
+	}
+
+	/**
+	 * The core keeps its nesting level private, so the state of an external transaction is only
+	 * readable through reflection. This is the single place in Vibeoffice that does it.
+	 */
+	public static function hasOpenTransaction(?Connection $connection = null): bool
+	{
+		$connection ??= Application::getConnection();
+		$reflection = new \ReflectionObject($connection);
+		do
+		{
+			if ($reflection->hasProperty('transactionLevel'))
+			{
+				return (int)$reflection->getProperty('transactionLevel')->getValue($connection) > 0;
+			}
+			$reflection = $reflection->getParentClass();
+		}
+		while ($reflection !== false);
+
+		throw new \LogicException('Cannot determine the Vibeoffice connection transaction state.');
+	}
+
 	public static function isDocumentLocked(string $hostDocKey): bool
 	{
-		$lockId = spl_object_id(Application::getConnection()) . ':' . self::getDocumentLockName($hostDocKey);
+		$lockId = self::lockId(Application::getConnection(), self::getDocumentLockName($hostDocKey));
 
 		return isset(self::$heldLocks[$lockId]);
+	}
+
+	/**
+	 * Takes the document lock and registers it, so the guards asking isDocumentLocked() see it, but
+	 * opens no transaction: the caller may need to remove a blob, which is irreversible.
+	 * Returns false when the lock belongs to somebody else.
+	 */
+	public static function runUnderDocumentLock(string $hostDocKey, callable $work, int $timeout = 0): bool
+	{
+		$connection = Application::getConnection();
+		$lockName = self::getDocumentLockName($hostDocKey);
+		if (!self::acquireLock($connection, $lockName, $timeout))
+		{
+			return false;
+		}
+
+		try
+		{
+			$work();
+		}
+		finally
+		{
+			self::releaseLock($connection, $lockName);
+		}
+
+		return true;
 	}
 
 	/** The optional source preserves a shared local hash across a user fork, including legacy mode. */
@@ -265,6 +334,11 @@ class DocumentStateRepository
 		return !$session->isView() || !$session->isOutdatedByFileContent();
 	}
 
+	private static function queryForUpdate(Query $query): \Bitrix\Main\DB\Result
+	{
+		return Application::getConnection()->query($query->getQuery() . ' FOR UPDATE');
+	}
+
 	private function findLatestStable(array $scope): ?array
 	{
 		$query = Models\DocumentStateTable::query()->setSelect(['*']);
@@ -278,14 +352,14 @@ class DocumentStateRepository
 			->setOrder(['ID' => 'DESC'])
 			->setLimit(1);
 
-		return Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch() ?: null;
+		return self::fetchForUpdate($query);
 	}
 
 	private function findStateForUpdate(string $key): ?array
 	{
 		$query = Models\DocumentStateTable::query()->setSelect(['*'])->where('HOST_DOC_KEY', $key);
 
-		return Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch() ?: null;
+		return self::fetchForUpdate($query);
 	}
 
 	private function matchesScope(array $state, array $scope): bool
@@ -354,7 +428,7 @@ class DocumentStateRepository
 	private function loadLockedFile(int $objectId): ?File
 	{
 		$query = \Bitrix\Disk\Internals\ObjectTable::query()->setSelect(['*'])->where('ID', $objectId);
-		$row = Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch();
+		$row = self::fetchForUpdate($query);
 
 		return $row ? File::buildFromArray($row) : null;
 	}
@@ -368,27 +442,83 @@ class DocumentStateRepository
 		]);
 	}
 
-	private function runLocked(string $lockName, callable $mutation): Result
+	private function runLocked(string $lockName, callable $mutation, bool $auditFileChanges = false): Result
 	{
 		$connection = Application::getConnection();
-		$lockId = spl_object_id($connection) . ':' . $lockName;
-		if (!isset(self::$heldLocks[$lockId]) && !$connection->lock($lockName, self::LOCK_TIMEOUT))
+		if (!self::acquireLock($connection, $lockName, self::LOCK_TIMEOUT))
 		{
 			return $this->failure('Could not lock the Vibeoffice document.', 'vibeoffice_lock_timeout');
 		}
-		self::$heldLocks[$lockId] = (self::$heldLocks[$lockId] ?? 0) + 1;
 
 		try
 		{
-			return $this->runTransaction($mutation);
+			// Update lines shipped without the Disk audit (26.1300.0) have no AuditTransaction class.
+			$auditable = $auditFileChanges && class_exists(AuditTransaction::class);
+
+			return $auditable ? $this->runAuditTransaction($mutation) : $this->runTransaction($mutation);
 		}
 		finally
 		{
-			if (--self::$heldLocks[$lockId] === 0)
+			self::releaseLock($connection, $lockName);
+		}
+	}
+
+	private static function lockId(Connection $connection, string $lockName): string
+	{
+		return spl_object_id($connection) . ':' . $lockName;
+	}
+
+	/** A lock already held by this connection is only counted: the core does not nest a named lock. */
+	private static function acquireLock(Connection $connection, string $lockName, int $timeout): bool
+	{
+		$lockId = self::lockId($connection, $lockName);
+		if (!isset(self::$heldLocks[$lockId]) && !$connection->lock($lockName, $timeout))
+		{
+			return false;
+		}
+		self::$heldLocks[$lockId] = (self::$heldLocks[$lockId] ?? 0) + 1;
+
+		return true;
+	}
+
+	private static function releaseLock(Connection $connection, string $lockName): void
+	{
+		$lockId = self::lockId($connection, $lockName);
+		if (--self::$heldLocks[$lockId] === 0)
+		{
+			unset(self::$heldLocks[$lockId]);
+			$connection->unlock($lockName);
+		}
+	}
+
+	private function runAuditTransaction(callable $mutation): Result
+	{
+		$transaction = new AuditTransaction(Application::getConnection());
+		try
+		{
+			$auditResult = $transaction->execute(static function () use ($mutation): AuditTransactionOutcome {
+				$result = $mutation();
+
+				return $result->isSuccess()
+					? AuditTransactionOutcome::success($result)
+					: AuditTransactionOutcome::failure($result);
+			});
+			$result = $auditResult->getOutcome()->getValue();
+			if ($result instanceof Result && ($auditResult->isSuccess()
+				|| ($auditResult->isRollbackConfirmed() && !$result->isSuccess()
+					&& $auditResult->getCallbackExceptions() === []
+					&& $auditResult->getCompensationExceptions() === [])))
 			{
-				unset(self::$heldLocks[$lockId]);
-				$connection->unlock($lockName);
+				return $result;
 			}
+
+			throw new AuditTransactionException($auditResult);
+		}
+		catch (\Throwable $exception)
+		{
+			$this->logStateException($exception);
+
+			return $this->failure('Could not persist Vibeoffice state.', 'vibeoffice_state_failed');
 		}
 	}
 
@@ -396,19 +526,19 @@ class DocumentStateRepository
 	{
 		$connection = Application::getConnection();
 		$transactionStarted = false;
-		$savepoint = 'disk_vo_' . bin2hex(random_bytes(8));
 		try
 		{
 			$connection->startTransaction();
 			$transactionStarted = true;
-			$connection->queryExecute('SAVEPOINT ' . $savepoint);
 			$result = $mutation();
-			if (!$result->isSuccess())
+			if ($result->isSuccess())
 			{
-				$connection->queryExecute('ROLLBACK TO SAVEPOINT ' . $savepoint);
+				$connection->commitTransaction();
 			}
-			$connection->queryExecute('RELEASE SAVEPOINT ' . $savepoint);
-			$connection->commitTransaction();
+			else
+			{
+				self::rollbackOwnLevel($connection);
+			}
 			$transactionStarted = false;
 
 			return $result;
@@ -417,14 +547,27 @@ class DocumentStateRepository
 		{
 			if ($transactionStarted)
 			{
-				// Core nested rollback throws after restoring its savepoint; balance our own scope instead.
-				$connection->queryExecute('ROLLBACK TO SAVEPOINT ' . $savepoint);
-				$connection->queryExecute('RELEASE SAVEPOINT ' . $savepoint);
-				$connection->commitTransaction();
+				self::rollbackOwnLevel($connection);
 			}
 			$this->logStateException($exception);
 
 			return $this->failure('Could not persist Vibeoffice state.', 'vibeoffice_state_failed');
+		}
+	}
+
+	/** The core undoes a nested level on its own and only then reports it by throwing. */
+	private static function rollbackOwnLevel(Connection $connection): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (TransactionException $exception)
+		{
+			if ($exception->getMessage() !== 'Nested rollbacks are unsupported.')
+			{
+				throw $exception;
+			}
 		}
 	}
 

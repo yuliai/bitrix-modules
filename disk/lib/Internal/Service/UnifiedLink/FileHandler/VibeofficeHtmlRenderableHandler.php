@@ -229,6 +229,15 @@ class VibeofficeHtmlRenderableHandler implements
 
 		return [
 			'DOCUMENT_SESSION' => $documentSession,
+			'TRUSTED_OPENING' => [
+				'channel' => 'unified',
+				'file' => $this->file,
+				'objectId' => (int)$this->file->getId(),
+				'attachedObjectId' => (int)$this->documentSource->getAttachedObject()?->getId(),
+				'versionId' => (int)$documentSession->getVersionId(),
+				'type' => $documentSession->getType(),
+				'editorMode' => \Bitrix\Disk\Document\OnlyOffice\Editor\ConfigBuilder::VISUAL_MODE_USUAL,
+			],
 			'RESTRICTION_OUTCOME' => $restrictionOutcome,
 			'OPENING_NOTICE_CODE' => $openingNoticeCode,
 			'LINK_TO_EDIT' => $editTransitionUrl,

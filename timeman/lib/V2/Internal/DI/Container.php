@@ -7,6 +7,7 @@ namespace Bitrix\Timeman\V2\Internal\DI;
 use Bitrix\Timeman\Repository\Worktime\WorktimeRepository;
 use Bitrix\Timeman\V2\Internal\Integration\Socialnetwork\FullReportLivefeedService;
 use Bitrix\Timeman\V2\Internal\Repository\FileRepository;
+use Bitrix\Timeman\V2\Internal\Service\UserAutomaticModeConfigurationResolver;
 use Bitrix\Timeman\V2\Internal\Repository\FullReportRepository;
 use Bitrix\Timeman\V2\Internal\Repository\InMemoryUserRepository;
 use Bitrix\Timeman\V2\Internal\Repository\Mapper\FileMapper;
@@ -31,6 +32,11 @@ use Bitrix\Timeman\V2\Internal\Service\UserService;
 
 class Container extends AbstractContainer
 {
+	public function getUserAutomaticModeConfigurationResolver(): UserAutomaticModeConfigurationResolver
+	{
+		return $this->get(UserAutomaticModeConfigurationResolver::class);
+	}
+
 	public function getRecordRepository(): RecordRepository
 	{
 		return $this->get(RecordRepository::class);

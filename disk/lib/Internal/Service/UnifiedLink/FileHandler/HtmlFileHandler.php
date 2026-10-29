@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Disk\Internal\Service\UnifiedLink\FileHandler;
 
 use Bitrix\Disk\Document\DocumentSource;
+use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
 use Bitrix\Disk\Internal\Service\HtmlViewerPageService;
 use Bitrix\Main\Application;
 use Bitrix\Main\DI\ServiceLocator;
@@ -22,8 +23,13 @@ class HtmlFileHandler implements HtmlRenderableHandler
 	private HtmlViewerPageService $pageService;
 	private ExceptionHandler $exceptionHandler;
 
+	/**
+	 * The access level is the answer the caller was already given, handed over so the page is not made to
+	 * ask the chain behind it again; a caller holding none leaves the page to ask for itself.
+	 */
 	public function __construct(
 		private readonly DocumentSource $documentSource,
+		private readonly ?UnifiedLinkAccessLevel $accessLevel = null,
 	)
 	{
 		$this->pageService = ServiceLocator::getInstance()->get(HtmlViewerPageService::class);
@@ -60,16 +66,16 @@ class HtmlFileHandler implements HtmlRenderableHandler
 		$attachedObject = $this->documentSource->getAttachedObject();
 		if ($attachedObject !== null)
 		{
-			return $this->pageService->buildParamsByAttachedObject($attachedObject);
+			return $this->pageService->buildParamsByAttachedObject($attachedObject, $this->accessLevel);
 		}
 
 		$version = $this->documentSource->getVersion();
 		if ($version !== null)
 		{
-			return $this->pageService->buildParamsByVersion($version);
+			return $this->pageService->buildParamsByVersion($version, $this->accessLevel);
 		}
 
-		return $this->pageService->buildParamsByFile($this->documentSource->getFile());
+		return $this->pageService->buildParamsByFile($this->documentSource->getFile(), $this->accessLevel);
 	}
 
 	/**

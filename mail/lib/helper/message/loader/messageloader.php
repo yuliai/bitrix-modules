@@ -7,8 +7,10 @@ use Bitrix\Mail\Helper\Config\Feature;
 use Bitrix\Mail\Helper\Message;
 use Bitrix\Mail\Internal\Service\FavoritesService;
 use Bitrix\Mail\Internals\MailMessageAttachmentTable;
+use Bitrix\Mail\Internals\MessageAccessTable;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\IO\Path;
+use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
@@ -50,12 +52,10 @@ class MessageLoader
 			return [];
 		}
 
-		$detailsQuery = QueryBuilder::buildWebMessagesDetailsQuery(
-			$itemIds,
-			$filter->getArray()
-		);
+		$detailsQuery = QueryBuilder::buildWebMessagesDetailsQuery($itemIds, $filter->getArray());
 
 		$messages = self::aggregateMessages($detailsQuery->fetchAll());
+		$messages = self::prepareBindings($messages);
 
 		return self::decorateListRows($messages, $filter->getUserId(), $filter->needsAttachmentsStack());
 	}
@@ -122,7 +122,7 @@ class MessageLoader
 		foreach($rows as $row)
 		{
 			$messageId = $row['MESSAGE_ID'];
-			$row['BIND'] = (array)$row['BIND'];
+			$row['BIND'] = (array)($row['BIND'] ?? []);
 
 			if(!array_key_exists($messageId, $messageList))
 			{
@@ -155,6 +155,94 @@ class MessageLoader
 		}
 
 		return array_values($messageList);
+	}
+
+	private static function prepareBindings(array $messages): array
+	{
+		$messageIndexes = [];
+		$mailboxIds = [];
+		foreach ($messages as $index => $message)
+		{
+			$messageIndexes[(int)$message['MESSAGE_ID']] = $index;
+			$mailboxIds[(int)$message['MAILBOX_ID']] = true;
+			$messages[$index]['BIND'] = [];
+			$messages[$index]['CRM_ACTIVITY_OWNER'] = [];
+		}
+
+		if ($messageIndexes === [])
+		{
+			return $messages;
+		}
+
+		$query = MessageAccessTable::query()
+			->setSelect([
+				'MESSAGE_ID',
+				'ENTITY_TYPE',
+				'ENTITY_ID',
+			])
+			->whereIn('MAILBOX_ID', array_keys($mailboxIds))
+			->whereIn('MESSAGE_ID', array_keys($messageIndexes))
+		;
+
+		$bindings = [];
+		$crmActivityMessages = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$messageId = (int)$row['MESSAGE_ID'];
+			$binding = "{$row['ENTITY_TYPE']}-{$row['ENTITY_ID']}";
+			$bindings[$messageId][$binding] = true;
+
+			if ($row['ENTITY_TYPE'] === MessageAccessTable::ENTITY_TYPE_CRM_ACTIVITY)
+			{
+				$crmActivityMessages[(int)$row['ENTITY_ID']][$messageId] = true;
+			}
+		}
+
+		$crmOwners = self::loadCrmOwners($crmActivityMessages);
+
+		foreach ($messageIndexes as $messageId => $index)
+		{
+			$messages[$index]['BIND'] = array_keys($bindings[$messageId] ?? []);
+			$messages[$index]['CRM_ACTIVITY_OWNER'] = array_keys($crmOwners[$messageId] ?? []);
+		}
+
+		return $messages;
+	}
+
+	private static function loadCrmOwners(array $activityMessages): array
+	{
+		if ($activityMessages === [] || !Loader::includeModule('crm'))
+		{
+			return [];
+		}
+
+		$owners = [];
+		$rows = \Bitrix\Crm\ActivityTable::query()
+			->setSelect([
+				'ID',
+				'OWNER_TYPE_ID',
+				'OWNER_ID',
+			])
+			->whereIn('ID', array_keys($activityMessages))
+			->fetchAll()
+		;
+
+		foreach ($rows as $row)
+		{
+			$ownerTypeId = (int)$row['OWNER_TYPE_ID'];
+			$ownerId = (int)$row['OWNER_ID'];
+			if ($ownerTypeId <= 0 || $ownerId <= 0)
+			{
+				continue;
+			}
+
+			foreach (array_keys($activityMessages[(int)$row['ID']]) as $messageId)
+			{
+				$owners[$messageId]["{$ownerTypeId}-{$ownerId}"] = true;
+			}
+		}
+
+		return $owners;
 	}
 
 	/**

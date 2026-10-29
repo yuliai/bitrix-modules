@@ -51,6 +51,7 @@ class MailMessage
 	public int $direction;
 	public bool $readOnly = false;
 	public ?string $body = '';
+	public bool $isBodyThemed = false;
 	public int $withAttachments = 0;
 	public array $attachments = [];
 	public string $abbreviatedText;

@@ -6,6 +6,7 @@ namespace Bitrix\Landing\Integration\AiAssistant\Tool\Site;
 
 use Bitrix\Landing\Copilot\Manager;
 use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteRuntimeAvailabilityGuard;
+use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteChatAvailabilityService;
 
 trait AiSiteRuntimeAvailabilityToolGate
 {
@@ -32,6 +33,11 @@ trait AiSiteRuntimeAvailabilityToolGate
 			: $guard->checkStatusReadProductAvailability()
 		;
 
+		if ($availability->getReasonCode() === AiSiteChatAvailabilityService::ERROR_FEATURE_LIMITED && $this->isFeatureLimitedToolVisible())
+		{
+			return true;
+		}
+
 		return $availability->isAvailable();
 	}
 
@@ -48,6 +54,11 @@ trait AiSiteRuntimeAvailabilityToolGate
 	protected function isTariffGateRequired(): bool
 	{
 		return true;
+	}
+
+	protected function isFeatureLimitedToolVisible(): bool
+	{
+		return false;
 	}
 
 	protected function isAiSitesReleaseOptionEnabled(): bool

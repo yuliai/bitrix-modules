@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Service\UnifiedLink;
@@ -57,6 +58,33 @@ readonly class UnifiedLinkAccessService
 	): UnifiedLinkAccessResult
 	{
 		return $this->accessCheckHandlerFactory->create($attachedObject, $userId)->checkAll($baseObject);
+	}
+
+	/**
+	 * @param array<int, BaseObject> $baseObjects
+	 * @param array<int, array<string, string>>|null $operationsByObjectId
+	 * @return array<int, UnifiedLinkAccessResult>
+	 */
+	public function checkAllCollection(
+		array $baseObjects,
+		?AttachedObject $attachedObject = null,
+		int $userId = 0,
+		?array $operationsByObjectId = null,
+	): array
+	{
+		if (empty($baseObjects))
+		{
+			return [];
+		}
+
+		return $this->accessCheckHandlerFactory
+			->create(
+				attachedObject: $attachedObject,
+				userId: $userId,
+				operationsByObjectId: $operationsByObjectId,
+			)
+			->checkAllCollection($baseObjects)
+		;
 	}
 
 	/**

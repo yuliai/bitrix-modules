@@ -255,6 +255,8 @@ final class File extends BaseObject
 		/** @var Disk\File $file */
 		$file = $this->get($id);
 
+		$this->assertCanDownload($file);
+
 		$fileData = $file->getFile();
 		if(!$fileData)
 		{

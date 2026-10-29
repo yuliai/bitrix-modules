@@ -9,7 +9,7 @@ use Bitrix\Mail\Internal\Service\Mailbox\SettingsWriteCoordinator;
 use Bitrix\Mail\Internals\MailboxSourceGenerationTable;
 use Bitrix\Mail\Internals\Service\Mailbox\EmailNormalizer;
 use Bitrix\Mail\MailboxTable;
-use Bitrix\Mail\Public\Service\Mailbox\AddressHistory;
+use Bitrix\Mail\Public\Service\Mailbox\Alias\AddressHistory;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\Connection;
 use Bitrix\Main\Error;

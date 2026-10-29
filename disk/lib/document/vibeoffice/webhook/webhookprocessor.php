@@ -9,6 +9,7 @@ use Bitrix\Disk\Document\Models\DocumentSessionTable;
 use Bitrix\Disk\Document\Vibeoffice\Configuration;
 use Bitrix\Disk\Document\Vibeoffice\DocumentSessionManager;
 use Bitrix\Disk\Document\Vibeoffice\DocumentStateRepository;
+use Bitrix\Disk\Document\Vibeoffice\Models\SavedSnapshotTable;
 use Bitrix\Disk\Document\Vibeoffice\Models\PlatformSessionTable;
 use Bitrix\Disk\Document\Vibeoffice\SavedDocumentWriterInterface;
 use Bitrix\Disk\Document\Vibeoffice\SavedDocumentWriter;
@@ -17,8 +18,15 @@ use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizer;
 use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizerInterface;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
+use Bitrix\Disk\Internals\ObjectTable;
+use Bitrix\Disk\Internal\Service\Audit\AuditTransaction;
+use Bitrix\Disk\Internal\Service\Audit\AuditTransactionOutcome;
+use Bitrix\Disk\Version;
+use Bitrix\Disk\Internal\Enum\WriteOperationContext;
+use Bitrix\Disk\Public\Service\Restrictions\WriteErrorTransportMap;
 use Bitrix\Disk\SystemUser;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\Connection;
 use Bitrix\Main\Data\Storage\PersistentStorageInterface;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Diag\LoggerFactory;
@@ -39,6 +47,24 @@ use Throwable;
  * controller prefilters. This processor adds idempotency by `X-VO-Delivery` and dispatches
  * by `X-VO-Event`.
  *
+ *  - `document.saved`         → download `file_url` and persist a new Disk version through
+ *                               {@see File::uploadVersion()} (P5.T2): the version becomes a
+ *                               regular Disk file in the shared `b_disk_version` chain, which
+ *                               is exactly why no migration is needed on rollback (ADR §3).
+ *  - `document.failover`      → refresh the stored vo-metadata of the session (Q-3); the
+ *                               frontend helper restores itself over SSE.
+ *  - `document.session-closed`→ deactivate the local sessions for the document key.
+ *
+ * The processor returns a {@see Result}; a successful `document.saved` carries an `ack` only
+ * after the durable delivery row proves that the version was applied. The controller responds
+ * 2xx only when that receipt is present, so every incomplete stage is retried.
+ * Acknowledging a delivery is not the same as storing a version: a write the model refuses for good
+ * is acknowledged so the platform stops retrying it, and the refusal is recorded as such; a write
+ * that merely did not go through this time is answered with an error and delivered again - see
+ * {@see self::answerRefusedWrite()}.
+ *
+ * This path never touches the OnlyOffice webhook handler; it is wholly additive.
+ *
  * Pinned document state uses the durable saved writer and exact UUID finalization.
  * Historical sessions without pinned state retain the legacy upload/finalization path.
  */
@@ -48,6 +74,19 @@ final class WebhookProcessor
 	public const EVENT_FAILOVER = 'document.failover';
 	public const EVENT_SESSION_CLOSED = 'document.session-closed';
 
+	/**
+	 * Ledger event of a delivery the write node refused. The delivery is acknowledged
+	 * under it - the platform must not re-deliver a save that would be refused identically every
+	 * time - but it is deliberately NOT recorded as {@see self::EVENT_SAVED}: a refusal must never
+	 * pass for the save confirmation {@see \Bitrix\Disk\Document\Vibeoffice\DrainService} waits
+	 * for before it drops a local session.
+	 */
+	public const EVENT_SAVE_REFUSED = 'document.saved:refused';
+
+	/** Result key a handler names the ledger event of its delivery with. */
+	private const RESULT_KEY_LEDGER_EVENT = 'ledgerEvent';
+
+	/** terminal sources that finish editing → deactivate the local session. */
 	/** Stages of a `document.saved` that is applied in several steps. */
 	private const SAVED_STAGE_VERSION_APPLIED = 'version-applied';
 	private const SAVED_STAGE_SIDE_EFFECTS_APPLIED = 'side-effects-applied';
@@ -77,6 +116,7 @@ final class WebhookProcessor
 	private SessionRegistry $registry;
 	private WebhookScopeResolver $scopeResolver;
 	private readonly SavedDocumentWriterInterface $savedDocumentWriter;
+	private readonly bool $legacyUploaderInjected;
 
 	/**
 	 * @param callable(array): Result|null $deliveryMarkerWriter Internal ORM failure seam for tests.
@@ -94,6 +134,7 @@ final class WebhookProcessor
 	{
 		$documentStateRepository ??= new DocumentStateRepository();
 		$this->savedDocumentWriter = $savedDocumentWriter ?? new SavedDocumentWriter(repository: $documentStateRepository);
+		$this->legacyUploaderInjected = $savedVersionUploader !== null;
 		$this->registry = new SessionRegistry($documentStateRepository);
 		$this->scopeResolver = new WebhookScopeResolver($documentStateRepository, $this->registry);
 		$this->terminalSessionFinalizer = $terminalSessionFinalizer ?? new TerminalSessionFinalizer(repository: $documentStateRepository);
@@ -119,6 +160,20 @@ final class WebhookProcessor
 	public function process(int $deliveryId, string $event, array $payload): Result
 	{
 		$result = $this->dispatch($deliveryId, $event, $payload);
+		if ($result->isSuccess())
+		{
+			return $event === self::EVENT_SAVED
+				? $this->attachSavedApplyAcknowledgement($result, $deliveryId, $payload)
+				: $result;
+		}
+		if ($event === self::EVENT_SAVED)
+		{
+			$refusal = $this->persistProvenSavedRefusal($deliveryId, $payload, $result);
+
+			return $refusal === null
+				? $result
+				: $this->attachSavedApplyAcknowledgement($refusal, $deliveryId, $payload);
+		}
 		if (!WebhookEventPolicy::isPermanentFailure($result))
 		{
 			return $result;
@@ -132,6 +187,92 @@ final class WebhookProcessor
 			"Vibeoffice webhook: permanent failure; event={$event}; delivery={$deliveryId}; "
 			. implode(' ', $reasons)
 		);
+	}
+
+	private function persistProvenSavedRefusal(int $deliveryId, array $payload, Result $failure): ?Result
+	{
+		$errors = $failure->getErrors();
+		if (count($errors) !== 1)
+		{
+			return null;
+		}
+		$reason = (string)$errors[0]->getCode();
+		if (!in_array($reason, ['ssrf_blocked', 'vibeoffice_file_too_large', 'format_restricted'], true))
+		{
+			return null;
+		}
+		$connection = Application::getConnection();
+		$lockName = self::LOCK_NAME_PREFIX . $deliveryId;
+		if (!$connection->lock($lockName, self::LOCK_TIMEOUT))
+		{
+			return null;
+		}
+		try
+		{
+			$delivery = $this->getDelivery($deliveryId);
+			if (!$delivery || $delivery['EVENT'] !== self::EVENT_SAVED
+				|| $delivery['HOST_DOC_KEY'] !== ($payload['host_doc_key'] ?? null)
+				|| !is_int($payload['snapshot_seq'] ?? null)
+				|| (int)$delivery['SNAPSHOT_SEQ'] !== $payload['snapshot_seq']
+				|| !in_array($delivery['STATUS'], [DeliveryTable::STATUS_PENDING, DeliveryTable::STATUS_STAGED], true))
+			{
+				return null;
+			}
+			$updated = DeliveryTable::update((int)$delivery['ID'], [
+				'STATUS' => DeliveryTable::STATUS_DONE,
+				'OUTCOME' => DeliveryTable::OUTCOME_REFUSED,
+				'REASON' => $reason,
+				'PROCESSED_TIME' => new DateTime(),
+			]);
+
+			return $updated->isSuccess() ? new Result() : null;
+		}
+		finally
+		{
+			$connection->unlock($lockName);
+		}
+	}
+
+	private function attachSavedApplyAcknowledgement(Result $result, int $deliveryId, array $payload): Result
+	{
+		$hostDocKey = $payload['host_doc_key'] ?? null;
+		$snapshotSeq = $payload['snapshot_seq'] ?? null;
+		$delivery = $this->getDelivery($deliveryId);
+		if (
+			!is_string($hostDocKey)
+			|| !is_int($snapshotSeq)
+			|| $delivery === null
+			|| $delivery['EVENT'] !== self::EVENT_SAVED
+			|| $delivery['STATUS'] !== DeliveryTable::STATUS_DONE
+			|| $delivery['HOST_DOC_KEY'] !== $hostDocKey
+			|| ($delivery['SNAPSHOT_SEQ'] === null ? null : (int)$delivery['SNAPSHOT_SEQ']) !== $snapshotSeq
+		)
+		{
+			return $result;
+		}
+
+		$outcome = $delivery['OUTCOME'] ?? null;
+		$ack = ['deliveryId' => $deliveryId, 'outcome' => $outcome];
+		if ($outcome === DeliveryTable::OUTCOME_APPLIED
+			&& (int)$delivery['RESULT_OBJECT_ID'] > 0
+			&& ($delivery['RESULT_VERSION_ID'] === null || (int)$delivery['RESULT_VERSION_ID'] > 0))
+		{
+			$ack['objectId'] = (int)$delivery['RESULT_OBJECT_ID'];
+			$ack['versionId'] = $delivery['RESULT_VERSION_ID'] === null
+				? null : (int)$delivery['RESULT_VERSION_ID'];
+		}
+		elseif (in_array($outcome, [DeliveryTable::OUTCOME_REFUSED, DeliveryTable::OUTCOME_IGNORED], true)
+			&& is_string($delivery['REASON']) && $delivery['REASON'] !== '')
+		{
+			$ack['reason'] = $delivery['REASON'];
+		}
+		else
+		{
+			return $result;
+		}
+		$ack['snapshotSeq'] = $snapshotSeq;
+
+		return $result->setData($result->getData() + ['ack' => $ack]);
 	}
 
 	private function dispatch(int $deliveryId, string $event, array $payload): Result
@@ -208,6 +349,10 @@ final class WebhookProcessor
 			{
 				return $this->processSavedDelivery($deliveryId, $payload, $policy, $scope, $delivery);
 			}
+			if ($event === self::EVENT_SAVED && !$scope['state'] && !$this->legacyUploaderInjected)
+			{
+				return $this->processLegacySavedDelivery($deliveryId, $payload, $policy, $scope, $delivery);
+			}
 			if ($event === self::EVENT_SESSION_CLOSED && !$policy['legacy'])
 			{
 				return $this->terminalSessionFinalizer->withDocumentTransaction(
@@ -259,7 +404,7 @@ final class WebhookProcessor
 			$fields = $scope['state'] || ($processed->getData()['savedContentApplied'] ?? true) === false
 				? ['HOST_DOC_KEY' => $key] : [];
 
-			return $this->markDeliveryProcessed($deliveryId, $event, $key, $fields);
+			return $this->markDeliveryProcessed($deliveryId, $this->resolveLedgerEvent($event, $processed), $key, $fields);
 		}
 		catch (Throwable $exception)
 		{
@@ -279,6 +424,22 @@ final class WebhookProcessor
 	}
 
 	/**
+	 * The event the ledger row is written with: the delivered event by default, or the one the
+	 * handler named for an outcome that must not be read as that event afterwards (a refused
+	 * write is acknowledged, but it is no `document.saved`).
+	 */
+	private function resolveLedgerEvent(string $event, Result $processResult): string
+	{
+		$ledgerEvent = $processResult->getData()[self::RESULT_KEY_LEDGER_EVENT] ?? null;
+
+		return is_string($ledgerEvent) && $ledgerEvent !== '' ? $ledgerEvent : $event;
+	}
+
+	/**
+	 * Writes the final "done" marker for a successfully applied delivery. The UNIQUE
+	 * `DELIVERY_ID` constraint remains the last-resort guard against a race; under the
+	 * per-delivery lock a duplicate here is not expected, so any error propagates to the
+	 * caller's failure path (the platform then retries and the existence check short-circuits).
 	 * `DELIVERY_ID` carries a unique index, so an existing ledger row - a saved delivery that
 	 * already reached PENDING and then took another branch on a retry - has to be updated, never
 	 * inserted a second time.
@@ -314,6 +475,10 @@ final class WebhookProcessor
 
 	private function ignoreDelivery(int $deliveryId, string $event, string $key, string $reason): Result
 	{
+		if ($event === self::EVENT_SAVED)
+		{
+			return (new Result())->addError(new Error('Saved document scope is unknown.', $reason));
+		}
 		$this->acknowledgePermanent("Vibeoffice webhook: {$reason}; event={$event}; delivery={$deliveryId}.");
 
 		return $this->markDeliveryProcessed($deliveryId, $event, null, ['HOST_DOC_KEY' => $key]);
@@ -355,6 +520,12 @@ final class WebhookProcessor
 			if (!$applied->isSuccess())
 			{
 				return $applied;
+			}
+			$delivery = $this->getDelivery($deliveryId);
+			if ($delivery && $delivery['STATUS'] === DeliveryTable::STATUS_DONE
+				&& $delivery['OUTCOME'] === DeliveryTable::OUTCOME_IGNORED)
+			{
+				return new Result();
 			}
 		}
 
@@ -431,6 +602,408 @@ final class WebhookProcessor
 		] : null;
 
 		return $this->savedDocumentWriter->complete($ledgerId, $generation);
+	}
+
+	private function processLegacySavedDelivery(
+		int $deliveryId,
+		array $payload,
+		array $policy,
+		array $scope,
+		?array $delivery,
+	): Result
+	{
+		$key = $policy['hostDocKey'];
+		$seq = $policy['snapshotSeq'];
+		if (!is_int($seq))
+		{
+			return (new Result())->addError(new Error('Legacy save requires a durable snapshot.', 'vibeoffice_audit_unavailable'));
+		}
+		$file = $this->legacyScopeFile($key, $scope['sessions']);
+		if (!$file)
+		{
+			return (new Result())->addError(new Error('Legacy saved scope is not proven.', 'scope_unknown'));
+		}
+		if ($delivery === null)
+		{
+			$created = $this->markDeliveryProcessed($deliveryId, self::EVENT_SAVED, $key, [
+				'HOST_DOC_KEY' => $key,
+				'SNAPSHOT_SEQ' => $seq,
+				'STATUS' => DeliveryTable::STATUS_PENDING,
+			]);
+			if (!$created->isSuccess())
+			{
+				return $created;
+			}
+			$delivery = $this->getDelivery($deliveryId);
+		}
+		if (!$delivery || (int)$delivery['SNAPSHOT_SEQ'] !== $seq)
+		{
+			return (new Result())->addError(new Error('Legacy saved delivery identity changed.', 'validation'));
+		}
+		if ($delivery['STATUS'] === DeliveryTable::STATUS_DONE)
+		{
+			return new Result();
+		}
+		if ($delivery['STATUS'] !== DeliveryTable::STATUS_APPLIED)
+		{
+			$ordered = $this->legacySnapshotOrder($key, $seq, $deliveryId, $file);
+			if (!$ordered->isSuccess())
+			{
+				return $ordered;
+			}
+			if (($ordered->getData()['settled'] ?? false) === false)
+			{
+				$staged = $this->stageLegacySavedFile($delivery, $payload, $file);
+				if (!$staged->isSuccess())
+				{
+					return $staged;
+				}
+			}
+			$applied = $this->applyLegacySavedFile($deliveryId, $payload, $file);
+			if (!$applied->isSuccess())
+			{
+				return $applied;
+			}
+			$delivery = $this->getDelivery($deliveryId);
+		}
+		if ($delivery['OUTCOME'] === DeliveryTable::OUTCOME_IGNORED)
+		{
+			return new Result();
+		}
+		if ($delivery['OUTCOME'] !== DeliveryTable::OUTCOME_APPLIED || (int)$delivery['RESULT_OBJECT_ID'] <= 0)
+		{
+			return (new Result())->addError(new Error('Legacy saved content is not proven.', 'vibeoffice_saved_not_applied'));
+		}
+		if (!(int)$delivery['NOTIFIED'])
+		{
+			if (in_array($policy['source'], self::TERMINAL_SOURCES, true))
+			{
+				$finalized = $this->terminalSessionFinalizer->finalizeDocument($key);
+				if (!$finalized->isSuccess())
+				{
+					return $finalized;
+				}
+			}
+			$effects = $this->dispatchSavedSideEffects(['file' => $file, 'sessions' => $scope['sessions']]);
+			if (!$effects->isSuccess())
+			{
+				return $effects;
+			}
+		}
+
+		return $this->writeDelivery([
+			'ID' => (int)$delivery['ID'],
+			'STATUS' => DeliveryTable::STATUS_DONE,
+			'NOTIFIED' => 1,
+			'PROCESSED_TIME' => new DateTime(),
+		]);
+	}
+
+	private function legacyScopeFile(string $key, array $sessions): ?File
+	{
+		$file = null;
+		$hasEditSession = false;
+		foreach ($sessions as $session)
+		{
+			if (!$session instanceof DocumentSession || $session->getExternalHash() !== $key
+				|| (int)$session->getVersionId() > 0)
+			{
+				return null;
+			}
+			$candidate = $session->getFile();
+			if (!$candidate instanceof File || $candidate->isDeleted()
+				|| ($file && (int)$candidate->getRealObjectId() !== (int)$file->getRealObjectId()))
+			{
+				return null;
+			}
+			$file ??= $candidate;
+			$hasEditSession = $hasEditSession || $session->isEdit();
+		}
+
+		return $hasEditSession ? $file : null;
+	}
+
+	private function legacySnapshotOrder(string $key, int $seq, int $deliveryId, File $file): Result
+	{
+		$exact = SavedSnapshotTable::query()->setSelect(['*'])
+			->where('HOST_DOC_KEY', $key)->where('SNAPSHOT_SEQ', $seq)->fetch();
+		$head = SavedSnapshotTable::query()->setSelect(['*'])
+			->where('HOST_DOC_KEY', $key)->setOrder(['SNAPSHOT_SEQ' => 'DESC'])->setLimit(1)->fetch();
+		if (($exact && (int)$exact['RESULT_OBJECT_ID'] !== (int)$file->getRealObjectId())
+			|| ($head && (int)$head['RESULT_OBJECT_ID'] !== (int)$file->getRealObjectId()))
+		{
+			return (new Result())->addError(new Error('Legacy snapshot object is unknown.', 'scope_unknown'));
+		}
+		if ($exact && (int)$exact['DELIVERY_ID'] === $deliveryId)
+		{
+			return (new Result())->setData(['settled' => true]);
+		}
+		if ($exact && $exact['DELIVERY_ID'] === null)
+		{
+			return (new Result())->addError(new Error('Legacy snapshot ownership is unknown.', 'snapshot_ownership_unknown'));
+		}
+		if ($head && $seq < (int)$head['SNAPSHOT_SEQ'])
+		{
+			return (new Result())->setData(['settled' => true]);
+		}
+
+		return new Result();
+	}
+
+	private function stageLegacySavedFile(array $delivery, array $payload, File $file): Result
+	{
+		$stagedId = (int)$delivery['STAGED_FILE_ID'];
+		if ($stagedId > 0 && \CFile::GetFileArray($stagedId))
+		{
+			return new Result();
+		}
+		$url = (string)($payload['file_url'] ?? '');
+		if (!$this->isAllowedFileUrl($url))
+		{
+			return (new Result())->addError(new Error('Legacy saved URL is not allowed.', 'ssrf_blocked'));
+		}
+		$download = $this->downloadFromPlatform($url);
+		if (!$download->isSuccess())
+		{
+			return $download;
+		}
+		$tmp = $download->getData()['file'];
+		try
+		{
+			$array = \CFile::MakeFileArray($tmp);
+			if (!is_array($array) || empty($array['tmp_name']))
+			{
+				return (new Result())->addError(new Error('Legacy saved file is not readable.', 'download_failed'));
+			}
+			$limit = $this->getConfiguration()->getMaxFileSize();
+			if ($limit > 0 && (int)$array['size'] > $limit)
+			{
+				return (new Result())->addError(new Error('Legacy saved file exceeds the limit.', 'vibeoffice_file_too_large'));
+			}
+			$array['name'] = $file->getName();
+			$array['MODULE_ID'] = Driver::INTERNAL_MODULE_ID;
+			$stagedId = (int)\CFile::SaveFile($array, Driver::INTERNAL_MODULE_ID, true, true);
+			if ($stagedId <= 0 || !\CFile::GetFileArray($stagedId))
+			{
+				return (new Result())->addError(new Error('Legacy saved file could not be staged.', 'vibeoffice_saved_write_failed'));
+			}
+			$updated = DeliveryTable::update((int)$delivery['ID'], [
+				'STAGED_FILE_ID' => $stagedId,
+				'STATUS' => DeliveryTable::STATUS_STAGED,
+			]);
+			if (!$updated->isSuccess())
+			{
+				\CFile::Delete($stagedId);
+
+				return (new Result())->addErrors($updated->getErrors());
+			}
+
+			return new Result();
+		}
+		finally
+		{
+			if (is_file($tmp))
+			{
+				unlink($tmp);
+			}
+		}
+	}
+
+	private function applyLegacySavedFile(int $deliveryId, array $payload, File $scopeFile): Result
+	{
+		$key = $payload['host_doc_key'];
+		$connection = Application::getConnection();
+		$lockName = DocumentStateRepository::getDocumentLockName($key);
+		if (!$connection->lock($lockName, self::LOCK_TIMEOUT))
+		{
+			return (new Result())->addError(new Error('Could not lock the legacy document.', 'vibeoffice_lock_timeout'));
+		}
+		try
+		{
+			// Update lines shipped without the Disk audit (26.1300.0) have no AuditTransaction class.
+			if (!class_exists(AuditTransaction::class))
+			{
+				return $this->applyLegacySavedFileInTransaction($connection, $deliveryId, $payload, $scopeFile);
+			}
+
+			$audit = new AuditTransaction($connection);
+			$auditResult = $audit->execute(function () use ($deliveryId, $payload, $scopeFile): AuditTransactionOutcome {
+				$result = $this->applyLegacySavedFileInAudit($deliveryId, $payload, $scopeFile);
+
+				return $result->isSuccess()
+					? AuditTransactionOutcome::success($result)
+					: AuditTransactionOutcome::failure($result);
+			});
+			$result = $auditResult->getOutcome()->getValue();
+			if ($result instanceof Result && ($auditResult->isSuccess()
+				|| ($auditResult->isRollbackConfirmed() && !$result->isSuccess()
+					&& $auditResult->getCallbackExceptions() === []
+					&& $auditResult->getCompensationExceptions() === [])))
+			{
+				return $result;
+			}
+
+			return (new Result())->addError(new Error('Legacy audit could not prove the file state.', 'vibeoffice_audit_failed'));
+		}
+		finally
+		{
+			$connection->unlock($lockName);
+		}
+	}
+
+	private function applyLegacySavedFileInTransaction(
+		Connection $connection,
+		int $deliveryId,
+		array $payload,
+		File $scopeFile,
+	): Result
+	{
+		$connection->startTransaction();
+		try
+		{
+			$result = $this->applyLegacySavedFileInAudit($deliveryId, $payload, $scopeFile);
+		}
+		catch (Throwable $exception)
+		{
+			$connection->rollbackTransaction();
+
+			throw $exception;
+		}
+		if ($result->isSuccess())
+		{
+			$connection->commitTransaction();
+		}
+		else
+		{
+			$connection->rollbackTransaction();
+		}
+
+		return $result;
+	}
+
+	private function applyLegacySavedFileInAudit(int $deliveryId, array $payload, File $scopeFile): Result
+	{
+		$key = $payload['host_doc_key'];
+		$seq = $payload['snapshot_seq'];
+		$delivery = $this->getDelivery($deliveryId);
+		if (!$delivery || $delivery['HOST_DOC_KEY'] !== $key || (int)$delivery['SNAPSHOT_SEQ'] !== $seq)
+		{
+			return (new Result())->addError(new Error('Legacy saved delivery changed.', 'validation'));
+		}
+		$locked = DocumentStateRepository::fetchForUpdate(ObjectTable::query()
+			->setSelect(['ID'])->where('ID', $scopeFile->getRealObjectId()));
+		$file = $locked ? File::loadById((int)$locked['ID']) : null;
+		if (!$file || $file->isDeleted()
+			|| (int)$file->getRealObjectId() !== (int)$scopeFile->getRealObjectId())
+		{
+			return (new Result())->addError(new Error('Legacy saved file is unavailable.', 'scope_unknown'));
+		}
+		$scope = $this->scopeResolver->resolve($key);
+		if (!$scope->isSuccess() || !$this->legacyScopeFile($key, $scope->getData()['sessions']))
+		{
+			return (new Result())->addError(new Error('Legacy saved scope changed.', 'scope_unknown'));
+		}
+		$exact = SavedSnapshotTable::query()->setSelect(['*'])
+			->where('HOST_DOC_KEY', $key)->where('SNAPSHOT_SEQ', $seq)->fetch();
+		$head = SavedSnapshotTable::query()->setSelect(['*'])
+			->where('HOST_DOC_KEY', $key)->setOrder(['SNAPSHOT_SEQ' => 'DESC'])->setLimit(1)->fetch();
+		if (($exact && (int)$exact['RESULT_OBJECT_ID'] !== (int)$file->getId())
+			|| ($head && (int)$head['RESULT_OBJECT_ID'] !== (int)$file->getId()))
+		{
+			return (new Result())->addError(new Error('Legacy snapshot belongs to another object.', 'scope_unknown'));
+		}
+		if ($exact && (int)$exact['DELIVERY_ID'] === $deliveryId)
+		{
+			return $this->markLegacyApplied($delivery, $exact);
+		}
+		if ($head && $seq < (int)$head['SNAPSHOT_SEQ'])
+		{
+			$updated = DeliveryTable::update((int)$delivery['ID'], [
+				'STATUS' => DeliveryTable::STATUS_DONE,
+				'OUTCOME' => DeliveryTable::OUTCOME_IGNORED,
+				'REASON' => 'stale_snapshot',
+			]);
+
+			return $updated->isSuccess() ? new Result() : (new Result())->addErrors($updated->getErrors());
+		}
+		$stagedId = (int)$delivery['STAGED_FILE_ID'];
+		$staged = $stagedId > 0 ? \CFile::GetFileArray($stagedId) : false;
+		if (!$staged)
+		{
+			return (new Result())->addError(new Error('Legacy staged file is unavailable.', 'vibeoffice_saved_write_failed'));
+		}
+		if ($exact)
+		{
+			$source = strtolower((string)($payload['source'] ?? ''));
+			if ($exact['DELIVERY_ID'] === null || $exact['SOURCE'] !== 'forcesave'
+				|| !in_array($source, self::TERMINAL_SOURCES, true)
+				|| !$this->sameLegacySnapshotBytes($stagedId, (int)$exact['RESULT_VERSION_ID']))
+			{
+				return (new Result())->addError(new Error('Legacy snapshot belongs to another delivery.', 'snapshot_ownership_unknown'));
+			}
+
+			return $this->markLegacyApplied($delivery, $exact);
+		}
+		$session = $scope->getData()['sessions'][0];
+		$author = WebhookEventPolicy::resolveVersionAuthorId(
+			$payload,
+			array_map(static fn(DocumentSession $item): int => $item->getUserId(), $scope->getData()['sessions']),
+			$session->getUserId() > 0 ? $session->getUserId() : SystemUser::SYSTEM_USER_ID,
+		);
+		$version = $file->addVersion($staged, $author, true, $this->getEditingSessionWriteOptions($session));
+		if (!$version || (int)$file->getFileId() !== $stagedId)
+		{
+			$finalRefusal = $this->findFinalRefusalCode($file);
+
+			return (new Result())->addError($finalRefusal !== null && $finalRefusal === File::ERROR_FORMAT_RESTRICTED
+				? new Error('Legacy saved version was refused.', 'format_restricted')
+				: new Error('Legacy saved version failed.', 'write_failed'));
+		}
+		$receipt = [
+			'HOST_DOC_KEY' => $key,
+			'SNAPSHOT_SEQ' => $seq,
+			'RESULT_OBJECT_ID' => (int)$file->getId(),
+			'RESULT_VERSION_ID' => (int)$version->getId(),
+			'DELIVERY_ID' => $deliveryId,
+			'SOURCE' => (string)($payload['source'] ?? 'legacy'),
+		];
+		$insert = SavedSnapshotTable::add($receipt);
+		if (!$insert->isSuccess())
+		{
+			return (new Result())->addErrors($insert->getErrors());
+		}
+
+		return $this->markLegacyApplied($delivery, $receipt);
+	}
+
+	private function markLegacyApplied(array $delivery, array $receipt): Result
+	{
+		$updated = DeliveryTable::update((int)$delivery['ID'], [
+			'STATUS' => DeliveryTable::STATUS_APPLIED,
+			'OUTCOME' => DeliveryTable::OUTCOME_APPLIED,
+			'RESULT_OBJECT_ID' => (int)$receipt['RESULT_OBJECT_ID'],
+			'RESULT_VERSION_ID' => $receipt['RESULT_VERSION_ID'],
+		]);
+
+		return $updated->isSuccess() ? new Result() : (new Result())->addErrors($updated->getErrors());
+	}
+
+	private function sameLegacySnapshotBytes(int $stagedId, int $versionId): bool
+	{
+		$version = $versionId > 0 ? Version::loadById($versionId) : null;
+		$versionFileId = $version ? (int)$version->getFileId() : 0;
+		$old = $versionFileId > 0 ? \CFile::GetFileArray($versionFileId) : false;
+		$new = \CFile::GetFileArray($stagedId);
+		if (!$old || !$new)
+		{
+			return false;
+		}
+		$oldPath = Application::getDocumentRoot() . $old['SRC'];
+		$newPath = Application::getDocumentRoot() . $new['SRC'];
+
+		return is_file($oldPath) && is_file($newPath)
+			&& ($oldHash = hash_file('sha256', $oldPath)) !== false
+			&& $oldHash === hash_file('sha256', $newPath);
 	}
 
 	/** Historical sessions without pinned state use the legacy source rules and cache checkpoint. */
@@ -589,9 +1162,9 @@ final class WebhookProcessor
 		$userId = $this->resolveSavingUserId($payload, $sessions, $session);
 
 		// commentAttachedObjects is run separately (on background) below, matching OnlyOffice.
-		if (!$file->uploadVersion($tmpFileArray, $userId, ['commentAttachedObjects' => false]))
+		if (!$file->uploadVersion($tmpFileArray, $userId, $this->getEditingSessionWriteOptions($session)))
 		{
-			return $result->addError(new Error('Could not upload the new document version.', 'upload_failed'));
+			return $this->answerRefusedWrite($file, $externalHash);
 		}
 
 		return $result->setData([
@@ -854,6 +1427,115 @@ final class WebhookProcessor
 	}
 
 	/**
+	 * The write node stored no version. Whether that ends the delivery is not for this channel to
+	 * decide by itself: {@see WriteErrorTransportMap} owns the answer to "would the very same bytes
+	 * be refused again", and only a refusal it names as final is acknowledged.
+	 *
+	 * Everything else - content that did not reach the storage, a limit of the portal that may be
+	 * lifted, a failure of the database - is an obstacle of this attempt alone. Such a delivery is
+	 * answered with an error, so the platform sends it again and the edits of the user keep their
+	 * chance to be stored; an acknowledgement here would lose them silently behind a 2xx.
+	 */
+	private function answerRefusedWrite(File $file, string $externalHash): Result
+	{
+		if ($this->isRefusalFinal($file))
+		{
+			return $this->acknowledgeRefusedWrite($file, $externalHash);
+		}
+
+		$reason = $this->describeRefusal($file);
+
+		return (new Result())->addError(new Error(
+			"Could not store the new version for key '{$externalHash}' ({$reason}).",
+			'write_failed',
+		));
+	}
+
+	/**
+	 * Whether the model left a refusal a retry could not get past.
+	 */
+	private function isRefusalFinal(File $file): bool
+	{
+		return $this->findFinalRefusalCode($file) !== null;
+	}
+
+	/**
+	 * Update lines shipped without the Disk format restrictions (26.1300.0) have no
+	 * WriteErrorTransportMap: no refusal is final there, every failed write is delivered again.
+	 */
+	private function findFinalRefusalCode(File $file): ?string
+	{
+		if (!class_exists(WriteErrorTransportMap::class))
+		{
+			return null;
+		}
+
+		return WriteErrorTransportMap::findFinalRefusalCode($file->getErrors());
+	}
+
+	/**
+	 * Update lines shipped without the Disk quotas (26.1300.0) have no WriteOperationContext:
+	 * the version is written without the context of the editing session.
+	 */
+	private function getEditingSessionWriteOptions(DocumentSession $session): array
+	{
+		$options = ['commentAttachedObjects' => false];
+		if (enum_exists(WriteOperationContext::class))
+		{
+			$options[WriteOperationContext::OPTION_KEY] = WriteOperationContext::EditingSession;
+			$options[WriteOperationContext::OPTION_KEY_EDITING_SESSION_STARTED_AT] = $session->getCreateTime()->getTimestamp();
+		}
+
+		return $options;
+	}
+
+	/**
+	 * The write node refused the new version for good: a format the portal forbids, or any other
+	 * verdict {@see self::isRefusalFinal()} recognizes. Delivery and write are answered apart here.
+	 *
+	 * The DELIVERY is acknowledged: the Result is successful, so {@see self::process()} writes the
+	 * ledger row and the caller answers 2xx. The refusal is a verdict on the very bytes the
+	 * platform keeps re-sending, so a retry could only end the same way - a non-2xx would buy an
+	 * endless retry-storm and nothing else.
+	 *
+	 * The WRITE is reported as refused, and nothing here says otherwise: the ledger row carries
+	 * {@see self::EVENT_SAVE_REFUSED} instead of the saved event, so neither the drain nor any
+	 * later reader takes the delivery for a stored version; the participants get no `saved` event
+	 * and no comment is written for a version that does not exist; and the local sessions are left
+	 * alone - a refused save closes no editing session, the platform's own
+	 * `document.session-closed` still does that.
+	 */
+	private function acknowledgeRefusedWrite(File $file, string $externalHash): Result
+	{
+		$reason = $this->describeRefusal($file);
+
+		return $this
+			->acknowledgePermanent(
+				"Vibeoffice webhook: the new version for key '{$externalHash}' was refused ({$reason})."
+			)
+			->setData([
+				self::RESULT_KEY_LEDGER_EVENT => self::EVENT_SAVE_REFUSED,
+				'savedContentApplied' => false,
+			])
+		;
+	}
+
+	/**
+	 * The refusal the model left behind, as one line for the log.
+	 */
+	private function describeRefusal(File $file): string
+	{
+		$reasons = [];
+		foreach ($file->getErrors() as $error)
+		{
+			$reasons[] = "{$error->getCode()}: {$error->getMessage()}";
+		}
+
+		return $reasons ? implode('; ', $reasons) : 'no reason given';
+	}
+
+	/**
+	 * Downloads the presigned platform `file_url` into a temp file, hardened against SSRF (RF-S1).
 	 * Keeps a swallowed delivery failure diagnosable: a repeating non-2xx is otherwise the only
 	 * trace of a deadlock, a lock timeout or a CFile failure. The record names the event, the
 	 * delivery and the exception, and carries neither payload nor session hash.

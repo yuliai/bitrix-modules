@@ -36,4 +36,32 @@ final class AccessService
 	{
 		return ($this->permissionsManagerResolver)()->canReadWorktime($userId);
 	}
+
+	/**
+	 * The employees among those given whose work time the current user may see: the answer of
+	 * canReadWorktime() for each of them, with the users he may read resolved once for the whole list.
+	 *
+	 * @param int[] $userIds positive ids, each once
+	 * @return int[] the readable ones, in the order given
+	 */
+	public function filterReadableWorktimeUserIds(array $userIds): array
+	{
+		if ($userIds === [])
+		{
+			return [];
+		}
+
+		$permissionsManager = ($this->permissionsManagerResolver)();
+		if ($permissionsManager->canReadWorktimeAll())
+		{
+			return array_values($userIds);
+		}
+
+		$readableUserIds = array_fill_keys($permissionsManager->getUserIdsAccessibleToRead(), true);
+
+		return array_values(array_filter(
+			$userIds,
+			static fn (int $userId): bool => isset($readableUserIds[$userId]),
+		));
+	}
 }

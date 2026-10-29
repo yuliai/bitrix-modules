@@ -10,6 +10,7 @@ use Bitrix\Mail\Internal\Async\Receiver\ScheduledMessageFailedReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\VacationAutoReplyReceiver;
 use Bitrix\Mail\Internal\Service\Draft\Contract\DraftServiceInterface;
 use Bitrix\Mail\Internal\Service\Draft\DraftService;
+use Bitrix\Mail\Internal\Service\MigrationNotice\NoticeDecisionService;
 use Bitrix\Mail\Integration\UI\EntitySelector\AddressBookProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailboxProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientProvider;
@@ -17,6 +18,9 @@ use Bitrix\Mail\Integration\UI\EntitySelector\MassConnectUserProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailUserRecipientAppearanceFilter;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientAppearanceFilter;
 use Bitrix\Mail\Integration\UI\EntitySelector\DiscussInChatAppearanceFilter;
+use Bitrix\Mail\Public\Features\MailboxAvatarFeature;
+use Bitrix\Mail\Public\Features\MobileMessageDarkThemeFeature;
+use Bitrix\Mail\Public\Features\SenderAvatarFeature;
 
 
 return array(
@@ -34,18 +38,24 @@ return array(
 			DraftServiceInterface::class => [
 				'className' => DraftService::class,
 			],
-		],
-		'readonly' => true,
-	],
-	'ui.uploader' => [
-		'value' => [
-			'allowUseControllers' => true,
+			NoticeDecisionService::class => [
+				'className' => NoticeDecisionService::class,
+			],
 		],
 		'readonly' => true,
 	],
 	'feature-flags' => [
 		'value' => [
 			'defaultNamespace' => '\\Bitrix\\Mail\\Public\\Features',
+			MailboxAvatarFeature::class,
+			MobileMessageDarkThemeFeature::class,
+			SenderAvatarFeature::class,
+		],
+		'readonly' => true,
+	],
+	'ui.uploader' => [
+		'value' => [
+			'allowUseControllers' => true,
 		],
 		'readonly' => true,
 	],

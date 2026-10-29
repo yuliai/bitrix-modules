@@ -5,6 +5,7 @@ namespace Bitrix\Disk\Controller;
 use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Controller\ActionFilter\RequiredParameter;
 use Bitrix\Disk\Document\DocumentHandler;
+use Bitrix\Disk\Document\OnlyOffice\Service\OnlyOfficeSessionTerminationService;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\Infrastructure\Controller\UnifiedLink\ActionFilter\UnifiedLinkAccessChecker;
 use Bitrix\Disk\Integration\Bitrix24Manager;
@@ -304,7 +305,16 @@ final class AccessRights extends Engine\Controller
 		{
 			if ($extLink)
 			{
-				$extLink->delete();
+				$externalLinkId = (int)$extLink->getId();
+				if ($extLink->delete())
+				{
+					Application::getInstance()->addBackgroundJob(
+						static function () use ($realObject, $externalLinkId) {
+							$service = new OnlyOfficeSessionTerminationService($realObject);
+							$service->terminateSessionsByExternalLink($externalLinkId);
+						},
+					);
+				}
 			}
 
 			return $this->getPublicLinkData(
@@ -700,7 +710,7 @@ final class AccessRights extends Engine\Controller
 		Disk\Security\SecurityContext $securityContext,
 	)
 	{
-		Driver::getInstance()->getTrackedObjectManager()->refresh($object);
+		Driver::getInstance()->getTrackedObjectManager()->refresh($object, $this->getUser()->getId());
 
 		$isBoard = $object instanceof File && $object->getTypeFile() == TypeFile::FLIPCHART;
 		$isFolder = $object instanceof Folder;

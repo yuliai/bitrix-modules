@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Internal\Service\Signature\Image;
 
 use Bitrix\Mail\Helper\Message;
+use Bitrix\Mail\Internal\Service\Signature\StyleTagSanitizer;
 use Bitrix\Main\Result;
 
 final class SignatureImageSendPreparation
@@ -28,6 +29,7 @@ final class SignatureImageSendPreparation
 
 	public function __construct(
 		private readonly SignatureImageMimeResolver $resolver = new SignatureImageMimeResolver(),
+		private readonly StyleTagSanitizer $styleTagSanitizer = new StyleTagSanitizer(),
 	)
 	{
 	}
@@ -35,8 +37,9 @@ final class SignatureImageSendPreparation
 	public function sanitizeHtml(string $html): string
 	{
 		$html = $this->normalizeTrustedMarkers($html);
+		$html = $this->removeUntrustedMarkerAttributes($html);
 
-		return Message::sanitizeHtml($this->removeUntrustedMarkerAttributes($html));
+		return $this->styleTagSanitizer->sanitize(Message::sanitizeHtml($html));
 	}
 
 	/**

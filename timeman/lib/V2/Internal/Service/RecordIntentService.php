@@ -31,6 +31,13 @@ class RecordIntentService
 	public const MODE_SMART = 'smart';
 	public const MODE_SHIFT = 'shift';
 
+	public const BASIS_HISTORY = 'history';
+	public const BASIS_SCHEDULE = 'schedule';
+	public const BASIS_SHIFT = 'shift';
+	public const BASIS_DATA_COLLECTION = 'dataCollection';
+	public const BASIS_DEFAULT = 'default';
+	public const BASIS_PERIOD = 'period';
+
 	public const MAX_SHOWS = 4;
 	public const WEEKEND_MAX_SHOWS = 1;
 	public const MAX_DISMISSES = 4;
@@ -61,6 +68,9 @@ class RecordIntentService
 
 	/**
 	 * Builds the full intent envelope for the user, persisting first-use and period resets as needed.
+	 * targetStartBasis is one of BASIS_* and names the source of the returned targetStartTimestamp, which is
+	 * persisted by the first resolve of the period: BASIS_PERIOD when the sources have changed since and no
+	 * longer give that target.
 	 *
 	 * @return array{
 	 *     mode: string,
@@ -78,6 +88,7 @@ class RecordIntentService
 	 *     suppressedUntilTimestamp: int,
 	 *     hasTargetAction: bool,
 	 *     shiftStartable: bool,
+	 *     targetStartBasis: string,
 	 *     canShowNow: bool
 	 * }
 	 */
@@ -115,6 +126,7 @@ class RecordIntentService
 					targetStartAt: 0,
 					periodEndAt: 0,
 					nowUtc: $nowUtc,
+					targetStartBasis: self::BASIS_SHIFT,
 					targetShift: null,
 					canShowNowOverride: false,
 				);
@@ -145,6 +157,7 @@ class RecordIntentService
 				targetStartAt: (int)$state['TARGET_START_AT'],
 				periodEndAt: (int)$state['PERIOD_END_AT'],
 				nowUtc: $nowUtc,
+				targetStartBasis: $this->basisOfPersistedTarget($state, $targetStartAt, self::BASIS_SHIFT),
 				targetShift: $targetShift,
 				canShowNowOverride: $shiftIsOver ? false : null,
 			);
@@ -163,6 +176,7 @@ class RecordIntentService
 		if ($historyMedian !== null)
 		{
 			$mode = self::MODE_SMART;
+			$targetStartBasis = self::BASIS_HISTORY;
 			$fromHistory = true;
 			// Not earlier than the start of the current local day.
 			$startSeconds = max(0, $historyMedian - self::HISTORY_LEAD_SECONDS);
@@ -170,16 +184,19 @@ class RecordIntentService
 		elseif ($scheduleStartSeconds !== null)
 		{
 			$mode = self::MODE_SMART;
+			$targetStartBasis = self::BASIS_SCHEDULE;
 			$startSeconds = $scheduleStartSeconds;
 		}
 		elseif ($nowUtc < (int)$state['FIRST_USE_AT'] + self::HISTORY_DAYS * self::SECONDS_PER_DAY)
 		{
 			$mode = self::MODE_DATA_COLLECTION;
+			$targetStartBasis = self::BASIS_DATA_COLLECTION;
 			$startSeconds = self::DATA_COLLECTION_START;
 		}
 		else
 		{
 			$mode = self::MODE_SMART;
+			$targetStartBasis = self::BASIS_DEFAULT;
 			$startSeconds = self::FALLBACK_START;
 		}
 
@@ -229,6 +246,7 @@ class RecordIntentService
 			targetStartAt: (int)$state['TARGET_START_AT'],
 			periodEndAt: (int)$state['PERIOD_END_AT'],
 			nowUtc: $nowUtc,
+			targetStartBasis: $this->basisOfPersistedTarget($state, $targetStartAt, $targetStartBasis),
 			targetShift: $targetShift,
 			shiftStartable: $shiftStartable,
 			canShowNowOverride: $shiftStartable ? null : false,
@@ -275,6 +293,16 @@ class RecordIntentService
 	}
 
 	/**
+	 * The basis of the persisted target start the envelope reports. The target is kept until the period ends,
+	 * so once the history or the schedule changes within the period, the source of this resolve gives another
+	 * target and no longer explains the persisted one.
+	 */
+	private function basisOfPersistedTarget(array $state, int $targetStartAt, string $targetStartBasis): string
+	{
+		return (int)$state['TARGET_START_AT'] === $targetStartAt ? $targetStartBasis : self::BASIS_PERIOD;
+	}
+
+	/**
 	 * @param array{start: int, stop: int}|null $targetShift Interval of the target shift (DTO-01); null = none.
 	 */
 	private function buildEnvelope(
@@ -285,6 +313,7 @@ class RecordIntentService
 		int $targetStartAt,
 		int $periodEndAt,
 		int $nowUtc,
+		string $targetStartBasis,
 		?array $targetShift = null,
 		bool $shiftStartable = true,
 		?bool $canShowNowOverride = null,
@@ -331,6 +360,7 @@ class RecordIntentService
 			'suppressedUntilTimestamp' => $suppressedUntil,
 			'hasTargetAction' => $hasTargetAction,
 			'shiftStartable' => $shiftStartable,
+			'targetStartBasis' => $targetStartBasis,
 			'canShowNow' => $canShowNow,
 		];
 	}

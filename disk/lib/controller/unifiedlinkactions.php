@@ -439,6 +439,22 @@ class UnifiedLinkActions extends BaseObject
 		Disk\Type\ObjectCollection $unifiedObjectCollection,
 	): array
 	{
+		$shouldCheckUnifiedLink = $this->shouldCheckUnifiedLinkForCurrentCollectionAction();
+
+		if (
+			!is_bool($shouldCheckUnifiedLink)
+			|| !$this->canDownloadArchiveObjects(
+				parentFolder: $parentFolder,
+				unifiedObjectCollection: $unifiedObjectCollection,
+				currentUser: CurrentUser::get(),
+				shouldCheckUnifiedLink: $shouldCheckUnifiedLink,
+				shouldCheckDescendants: false,
+			)
+		)
+		{
+			return [];
+		}
+
 		$uri = $this->getActionUri(
 			actionName: 'downloadArchive',
 			params: $this->unifiedLinkArchiveService->getSignedArchiveParameters(
@@ -463,6 +479,13 @@ class UnifiedLinkActions extends BaseObject
 		Disk\Type\ObjectCollection $unifiedObjectCollection,
 	): ?array
 	{
+		$shouldCheckUnifiedLink = $this->shouldCheckUnifiedLinkForCurrentCollectionAction();
+
+		if (!is_bool($shouldCheckUnifiedLink))
+		{
+			return null;
+		}
+
 		$objects = $unifiedObjectCollection->toArray();
 		$object = $objects[0] ?? null;
 
@@ -470,6 +493,17 @@ class UnifiedLinkActions extends BaseObject
 		{
 			$this->addError(new Error(Loc::getMessage('DISK_CONTROLLER_UNIFIED_LINK_ACTIONS_ERROR_MESSAGE_DENIED')));
 
+			return null;
+		}
+
+		if (!$this->canDownloadArchiveObjects(
+			parentFolder: $parentFolder,
+			unifiedObjectCollection: $unifiedObjectCollection,
+			currentUser: CurrentUser::get(),
+			shouldCheckUnifiedLink: $shouldCheckUnifiedLink,
+			shouldCheckDescendants: false,
+		))
+		{
 			return null;
 		}
 
@@ -504,6 +538,16 @@ class UnifiedLinkActions extends BaseObject
 		$shouldCheckUnifiedLink = $this->shouldCheckUnifiedLinkForCurrentCollectionAction();
 
 		if (!is_bool($shouldCheckUnifiedLink))
+		{
+			return null;
+		}
+
+		if (!$this->canDownloadArchiveObjects(
+			parentFolder: $parentFolder,
+			unifiedObjectCollection: $unifiedObjectCollection,
+			currentUser: $currentUser,
+			shouldCheckUnifiedLink: $shouldCheckUnifiedLink,
+		))
 		{
 			return null;
 		}
@@ -586,6 +630,7 @@ class UnifiedLinkActions extends BaseObject
 		Disk\Type\ObjectCollection $unifiedObjectCollection,
 		int $userId,
 		bool $shouldCheckUnifiedLink,
+		bool $shouldPreloadDownloadAccess = false,
 	): ?Disk\Security\SecurityContext
 	{
 		if (!$parentFolder)
@@ -612,6 +657,7 @@ class UnifiedLinkActions extends BaseObject
 		$parentFolder->preloadOperationsForSpecifiedObjects(
 			ids: $unifiedObjectCollection->getIds(),
 			securityContext: $securityContext,
+			shouldPreloadDownloadAccess: $shouldPreloadDownloadAccess,
 		);
 
 		return $securityContext;
@@ -670,24 +716,18 @@ class UnifiedLinkActions extends BaseObject
 			return null;
 		}
 
+		$userId = (int)$currentUser->getId();
+		if (!$this->canCopyTo($baseObject, $userId))
+		{
+			$this->addError(new Error(Loc::getMessage('DISK_CONTROLLER_UNIFIED_LINK_ACTIONS_ERROR_MESSAGE_DENIED')));
+
+			return null;
+		}
+
 		$targetFolder = $this->getTargetFolder($targetFolderId, $currentUser);
 
 		if (!$targetFolder)
 		{
-			return null;
-		}
-
-		$userId = (int)$currentUser->getId();
-
-		$securityContext = $baseObject->getStorage()?->getSecurityContext(
-			user: $userId,
-			shouldCheckUnifiedLink: true,
-		);
-
-		if (!$securityContext || !$baseObject->canRead($securityContext))
-		{
-			$this->addError(new Error(Loc::getMessage('DISK_CONTROLLER_UNIFIED_LINK_ACTIONS_ERROR_MESSAGE_DENIED')));
-
 			return null;
 		}
 
@@ -699,6 +739,17 @@ class UnifiedLinkActions extends BaseObject
 		}
 
 		return $this->get($copiedObject);
+	}
+
+	private function canCopyTo(Disk\BaseObject $baseObject, int $userId): bool
+	{
+		$securityContext = $baseObject->getStorage()?->getSecurityContext(
+			user: $userId,
+			shouldCheckUnifiedLink: true,
+		);
+
+		return $securityContext instanceof Disk\Security\SecurityContext
+			&& $baseObject->canDownload($securityContext);
 	}
 
 	/**
@@ -1020,6 +1071,49 @@ class UnifiedLinkActions extends BaseObject
 		}
 
 		return !$accessResult->isOnlyPermissionSystemAccess();
+	}
+
+	protected function canDownloadArchiveObjects(
+		?Disk\Folder $parentFolder,
+		Disk\Type\ObjectCollection $unifiedObjectCollection,
+		CurrentUser $currentUser,
+		bool $shouldCheckUnifiedLink,
+		bool $shouldCheckDescendants = true,
+	): bool
+	{
+		$securityContext = $this->preloadUnifiedLinkAccessForCollection(
+			parentFolder: $parentFolder,
+			unifiedObjectCollection: $unifiedObjectCollection,
+			userId: (int)$currentUser->getId(),
+			shouldCheckUnifiedLink: $shouldCheckUnifiedLink,
+			shouldPreloadDownloadAccess: true,
+		);
+
+		if (!$securityContext)
+		{
+			return false;
+		}
+
+		if (!$this->getArchiveDownloadAccessChecker()->canDownloadObjects(
+			objects: $unifiedObjectCollection->toArray(),
+			securityContextResolver: static fn(Disk\BaseObject $object) => $securityContext,
+			shouldCheckDescendants: $shouldCheckDescendants,
+			shouldUseRightsCheck: !$shouldCheckUnifiedLink,
+			shouldFollowFolderLinks: !$shouldCheckUnifiedLink,
+			shouldPreloadSelectedObjects: false,
+		))
+		{
+			$this->addError(new Error(Loc::getMessage('DISK_CONTROLLER_UNIFIED_LINK_ACTIONS_ERROR_MESSAGE_DENIED')));
+
+			return false;
+		}
+
+		return true;
+	}
+
+	protected function getArchiveDownloadAccessChecker(): Disk\Internal\Service\Archive\ArchiveDownloadAccessChecker
+	{
+		return new Disk\Internal\Service\Archive\ArchiveDownloadAccessChecker();
 	}
 
 	public function addSubFolderAction(

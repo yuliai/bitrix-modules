@@ -16,6 +16,10 @@ use Bitrix\Disk\Internals\SimpleRightTable;
 use Bitrix\Disk\Internals\UniqueCode;
 use Bitrix\Disk\Internals\VersionTable;
 use Bitrix\Disk\Internal\Service\Folder\DeletionRestriction;
+use Bitrix\Disk\Internal\Service\Sync\Access\PlacementAccessPublisher;
+use Bitrix\Disk\Internal\Service\Sync\Journal\ChangeRecord;
+use Bitrix\Disk\Internal\Service\Sync\Journal\ChangeType;
+use Bitrix\Disk\Internal\Service\Sync\Journal\TombstoneReason;
 use Bitrix\Disk\ProxyType\Group;
 use Bitrix\Disk\Security\SecurityContext;
 use Bitrix\Main\Application;
@@ -122,14 +126,22 @@ class Folder extends BaseObject
 		$securityContext->preloadOperationsForChildren($this->id);
 	}
 
-	public function preloadOperationsForSpecifiedObjects(array $ids, SecurityContext $securityContext)
+	public function preloadOperationsForSpecifiedObjects(
+		array $ids,
+		SecurityContext $securityContext,
+		bool $shouldPreloadDownloadAccess = false,
+	)
 	{
 		if (!$ids)
 		{
 			return;
 		}
 
-		$securityContext->preloadOperationsForSpecifiedObjects($this->id, $ids);
+		$securityContext->preloadOperationsForSpecifiedObjects(
+			$this->id,
+			$ids,
+			$shouldPreloadDownloadAccess,
+		);
 	}
 
 	/**
@@ -348,6 +360,8 @@ class Folder extends BaseObject
 		if ($fileModel)
 		{
 			Driver::getInstance()->getRightsManager()->setAsNewLeaf($fileModel, $rights);
+			// after the rights of the new object are written: they are what its audience is read from
+			$fileModel->publishToJournal(ChangeType::Created, $fileModel->getCreatedBy());
 
 			$objectEvent = $this->makeObjectEvent(
 				'objectAdded',
@@ -489,6 +503,12 @@ class Folder extends BaseObject
 
 		$driver = Driver::getInstance();
 		$driver->getRightsManager()->setAsNewLeaf($fileLinkModel, $rights);
+		// a link is a place the real object is seen at, and the journal is kept over real objects
+		$fileLinkModel->publishToJournal(
+			ChangeType::Created,
+			$fileLinkModel->getCreatedBy(),
+			['places'],
+		);
 
 		if (!$fileLinkModel->isDeleted())
 		{
@@ -659,6 +679,8 @@ class Folder extends BaseObject
 		}
 		$this->changeSelfUpdateTime();
 		Driver::getInstance()->getRightsManager()->setAsNewLeaf($folderModel, $rights);
+		// after the rights of the new object are written: they are what its audience is read from
+		$folderModel->publishToJournal(ChangeType::Created, $folderModel->getCreatedBy());
 
 		$objectEvent = $this->makeObjectEvent(
 			'objectAdded',
@@ -705,6 +727,27 @@ class Folder extends BaseObject
 		}
 		$this->changeSelfUpdateTime();
 		Driver::getInstance()->getRightsManager()->setAsNewLeaf($fileLinkModel, $rights);
+		// a link is a place the real object is seen at, and the journal is kept over real objects
+		$fileLinkModel->publishToJournal(
+			ChangeType::Created,
+			$fileLinkModel->getCreatedBy(),
+			['places'],
+		);
+
+		if (!$fileLinkModel->isDeleted())
+		{
+			// The record above carries the card of the folder and answers for the folder alone, while
+			// the link is a place of everything under it too. The pair is published on purpose: the
+			// card is what brings the folder itself into the memory of the client, and the signal
+			// below is what moves the places of its descendants.
+			//
+			// A link made straight into the trashcan is left out: the places of that subtree were
+			// told of by the record of the deletion that made it.
+			(new PlacementAccessPublisher())->publishSubtreeConnected(
+				(int)$fileLinkModel->getRealObjectId(),
+				(int)$fileLinkModel->getId(),
+			);
+		}
 
 		$objectEvent = $this->makeObjectEvent(
 			'objectAdded',
@@ -1254,6 +1297,8 @@ class Folder extends BaseObject
 			}
 
 			$object = BaseObject::buildFromArray($objectRow);
+			// the journal takes one record on the root of the restore, below
+			$object->journalCascadeChild = true;
 
 			/** @var Folder|File */
 			if($object instanceof Folder)
@@ -1321,6 +1366,18 @@ class Folder extends BaseObject
 			'order' => array('DEPTH_LEVEL' => 'DESC')
 		);
 
+		// One record on the root of the cascade. Its audience is taken here, because the rights it is
+		// read from are torn down object by object below; the record itself is published after the
+		// loop, once the tree is provably gone. A cascade that broke halfway would otherwise order the
+		// client to forget a folder the portal goes on holding; what such a cascade did take away is
+		// buried object by object instead, with the same audience.
+		$publishesTombstone = !$this->isLink();
+		$tombstoneAudience = $publishesTombstone ? $this->captureTombstoneAudience() : null;
+
+		// What the loop did take away, remembered for the records a broken cascade owes them below.
+		$goneFolderIds = [];
+		$goneFileIds = [];
+
 		$success = true;
 		$objectIterator = FolderTable::getList(static::prepareGetListParameters($parameters));
 		foreach ($objectIterator as $objectRow)
@@ -1334,17 +1391,26 @@ class Folder extends BaseObject
 			{
 				$object = BaseObject::buildFromArray($objectRow);
 			}
+			$object->journalCascadeChild = true;
 
 			/** @var Folder|File */
 			if($object instanceof Folder)
 			{
 				/** @see \Bitrix\Disk\Folder::deleteNonRecursive */
 				$success = $object->deleteNonRecursive($deletedBy, $bypassDeletionRestriction);
+				if ($success && !$object->isLink())
+				{
+					$goneFolderIds[] = (int)$object->getId();
+				}
 			}
 			elseif($object instanceof File)
 			{
 				/** @see \Bitrix\Disk\File::delete */
 				$success = $object->delete($deletedBy);
+				if ($success && !$object->isLink())
+				{
+					$goneFileIds[] = (int)$object->getId();
+				}
 			}
 
 			if (!$success)
@@ -1358,7 +1424,71 @@ class Folder extends BaseObject
 			}
 		}
 
-		return $success;
+		if (!$success)
+		{
+			$this->publishTombstonesOfTheCascadeThatBroke(
+				$goneFolderIds,
+				$goneFileIds,
+				$deletedBy,
+				$tombstoneAudience,
+			);
+
+			return false;
+		}
+
+		if ($publishesTombstone)
+		{
+			$this->publishTombstoneToJournal($deletedBy, $tombstoneAudience);
+		}
+
+		return true;
+	}
+
+	/**
+	 * The objects a broken cascade already took away, buried one by one.
+	 *
+	 * A cascade that went through says everything with the one record on its root. One that stopped
+	 * halfway has no such record to make - the root is still on the portal, and burying it would order
+	 * the client to forget a folder the portal goes on holding - while everything the loop had reached
+	 * by then is gone all the same, and nothing else in the contour goes looking for it.
+	 *
+	 * The audience is the one taken on the root before the loop: the rights these objects were visible
+	 * by are torn down together with them, so by now there is nothing left to read. A descendant that
+	 * carried rights of its own is therefore reached only as far as the audience of the root goes.
+	 * Whoever held a file of the subtree by an interaction alone is buried by a record of their own,
+	 * published row by row while the rows were still there
+	 * ({@see \Bitrix\Disk\Internal\Service\Sync\Journal\TrackedSetCleanupPublisher}).
+	 *
+	 * @param int[] $goneFolderIds
+	 * @param int[] $goneFileIds
+	 * @param string[]|null $audienceCodes
+	 */
+	private function publishTombstonesOfTheCascadeThatBroke(
+		array $goneFolderIds,
+		array $goneFileIds,
+		$deletedBy,
+		?array $audienceCodes,
+	): void
+	{
+		$writer = $this->getJournalWriter();
+		$gone = [
+			ChangeRecord::RESOURCE_FOLDER => $goneFolderIds,
+			ChangeRecord::RESOURCE_FILE => $goneFileIds,
+		];
+
+		foreach ($gone as $resourceType => $objectIds)
+		{
+			foreach ($objectIds as $objectId)
+			{
+				$writer->publishTombstoneOfGoneObject(
+					$resourceType,
+					$objectId,
+					TombstoneReason::Deleted,
+					$this->normalizeDeletedBy($deletedBy),
+					$audienceCodes,
+				);
+			}
+		}
 	}
 
 	protected function deleteNonRecursive($deletedBy, bool $bypassDeletionRestriction = false)
@@ -1369,6 +1499,19 @@ class Folder extends BaseObject
 
 			return false;
 		}
+
+		// The audience of the tombstone is taken before the rights it is read from are torn down; the
+		// record itself waits for the row of the folder to be gone. A link is not the object it points
+		// at, and the object goes on living without it.
+		$publishesTombstone = !$this->journalCascadeChild && !$this->isLink();
+		$tombstoneAudience = $publishesTombstone ? $this->captureTombstoneAudience() : null;
+
+		// The codes a link carries are taken here for the same reason and by the same rule: they come
+		// from the nearest right above it, and the rights of the link are torn down below.
+		$placementAudience = $this->isLink()
+			? (new PlacementAccessPublisher())->captureCodes((int)$this->getId())
+			: []
+		;
 
 		foreach($this->getSharingsAsReal() as $sharing)
 		{
@@ -1404,7 +1547,27 @@ class Folder extends BaseObject
 			return false;
 		}
 
-		if(!$this->isLink())
+		if ($publishesTombstone)
+		{
+			$this->publishTombstoneToJournal($deletedBy, $tombstoneAudience);
+		}
+
+		if($this->isLink())
+		{
+			// A link is a place the real object is seen at, and the journal is kept over real objects:
+			// the place went, the object behind it stayed. The record is published inside a cascade too,
+			// because the one record on the root of that cascade names an object of another audience.
+			$this->publishToJournal(ChangeType::Updated, $deletedBy, ['places']);
+
+			// What the link was a place of reaches below the folder, and the record above names the
+			// folder alone. Left unsaid, the places of the descendants go on pointing at the parent of
+			// a link that is no longer there - a path leading nowhere, which nothing else repairs.
+			(new PlacementAccessPublisher())->publishSubtreeDisconnected(
+				(int)$this->getRealObjectId(),
+				$placementAudience,
+			);
+		}
+		else
 		{
 			//todo potential - very hard operation.
 			foreach(Folder::getModelList(array('filter' => array('REAL_OBJECT_ID' => $this->id))) as $link)

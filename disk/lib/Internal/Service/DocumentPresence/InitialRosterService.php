@@ -79,9 +79,10 @@ class InitialRosterService
 
 			$scope = $this->presenceAccessService->resolveAuthorizedScope($documentSession, $userId, $accessType);
 			$snapshot = $scope === null
-				? ['revision' => 0, 'userIds' => []]
+				? ['revision' => 0, 'userIds' => [], 'confirmingUserIds' => []]
 				: $this->presenceService->snapshot($scope)
 			;
+			$confirmingUserIds = array_flip($snapshot['confirmingUserIds']);
 			$namedUserIds = array_values(array_unique(array_merge($namedUserIds, $snapshot['userIds'])));
 			if (count($namedUserIds) > self::MAX_PARTICIPANTS)
 			{
@@ -94,7 +95,12 @@ class InitialRosterService
 			}
 
 			$participants = array_map(
-				static fn(array $participant): array => $participant + ['isGuest' => false],
+				// a participant the live roster does not call confirming - one who holds no registration at
+				// all among them - is never hidden by silence, so the flag is `false` unless it is known
+				static fn(array $participant): array => $participant + [
+					'isGuest' => false,
+					'isConfirming' => isset($confirmingUserIds[$participant['id']]),
+				],
 				$this->presenceAccessService->resolveParticipants(
 					$this->presenceAccessService->filterReadable(
 						$namedUserIds,
@@ -113,6 +119,7 @@ class InitialRosterService
 					'name' => (string)GuestUser::create()->getName(),
 					'avatar' => '',
 					'isGuest' => true,
+					'isConfirming' => false,
 				];
 			}
 		}
@@ -192,7 +199,7 @@ class InitialRosterService
 
 		// The column mirrors the link named by the context of a row {@see DocumentSession::buildFromArray()},
 		// and the access type of an opening is resolved from that very link
-		// {@see \Bitrix\Disk\Internal\Service\DocumentHeader\HeaderCompositionService::resolveAccessType()}.
+		// {@see \Bitrix\Disk\Internal\Service\DocumentHeader\OpeningContextFactory::resolveAccessType()}.
 		if ($accessType === PresenceAccessService::ACCESS_TYPE_UNIFIED)
 		{
 			$filter['!=EXTERNAL_LINK_ID'] = null;

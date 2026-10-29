@@ -104,7 +104,7 @@ final readonly class MailboxDirectorySettingsService
 				$afterCommit[] = static function () use ($mailboxId, $scope): void {
 					MailboxDirectory::invalidateCache($mailboxId, $scope->getStampGenerationId());
 					MailboxTable::cleanCachesByMailboxId($mailboxId);
-					MailboxTable::getEntity()->cleanCache();
+					MailboxTable::cleanEntityCache();
 				};
 
 				return new Result();

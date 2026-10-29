@@ -32,6 +32,7 @@ final class AiSiteRestService
 	private const STATUS_FAILED = 'failed';
 
 	private const LIMIT_ERROR_TYPE = 'limit';
+	private const MODERATION_ERROR_TYPE = 'moderation';
 
 	/** Source language of the phrases: what the answer falls back to when there is no translation. */
 	private const FALLBACK_LANGUAGE = 'ru';
@@ -252,9 +253,26 @@ final class AiSiteRestService
 	 */
 	private function resolveError(array $result, string $language): string
 	{
-		if ((string)($result['errorType'] ?? '') === self::LIMIT_ERROR_TYPE)
+		$errorType = (string)($result['errorType'] ?? '');
+		if ($errorType === self::LIMIT_ERROR_TYPE)
 		{
 			return $this->getPhrase('LANDING_REST_AI_SITE_ERROR_LIMIT', $language);
+		}
+
+		// A topic the moderation refused is the one failure the client can act on: told the common
+		// reason instead, it repeats the same description until the blocks answer it with 429. The
+		// verdict of the moderation step is written for the user and already localized, so it is what
+		// leaves; the wording of the handler names the step and stays inside the module.
+		if ($errorType === self::MODERATION_ERROR_TYPE)
+		{
+			$reason = AiSiteGenerationHelper::resolveModerationBlockReason(
+				$this->resolveGenerationId($result['jobId'] ?? null),
+			);
+
+			return ($reason === null || $reason === '')
+				? $this->getPhrase('LANDING_REST_AI_SITE_ERROR_MODERATION', $language)
+				: $reason
+			;
 		}
 
 		if (!empty($result['recoverablePartial']))

@@ -2,6 +2,7 @@
 use Bitrix\Timeman\Integration\Intranet\Settings;
 use Bitrix\Timeman\Model\Schedule\ScheduleTable;
 use Bitrix\Timeman\Monitor\Report\Status;
+use Bitrix\Timeman\Repository\Query\RealUserFilter;
 use Bitrix\Timeman\V2\Infrastructure\Controller\ActionFilter\ToolEnabledFilter;
 
 define('BX_SECURITY_SHOW_MESSAGE', 1);
@@ -690,6 +691,12 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 								}
 
 								$res["INFO"]['CAN_EDIT'] = ($arUser['ID'] != $USER->GetID()) && ($bCanEditAll || in_array($arUser['ID'], $arAccessUsers['WRITE']));
+								$res["INFO"]['CAN_ADD_COMMENT'] = \Bitrix\Timeman\Security\FullReportCommentPermission::canAdd(
+									(int)$USER->GetID(),
+									$USER_ID,
+									$arAccessUsers['WRITE'],
+									CTimeMan::IsAdmin()
+								) ? 'Y' : 'N';
 								$res["INFO"]['CAN_EDIT_TEXT'] = ($report["APPROVE"] == "Y") ? "N" : "Y";
 
 								$culture = \Bitrix\Main\Application::getInstance()->getContext()->getCulture();
@@ -928,10 +935,12 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 
 							$arAccessUsers = CTimeMan::GetAccess();
 
-							$bCanEditAll = in_array('*', $arAccessUsers['WRITE']);
-							$bCanReadAll = in_array('*', $arAccessUsers['READ']);
-
-							$bCanAddComment = (in_array($OWNER, $arAccessUsers['WRITE']) || CTimeMan::IsAdmin() || $bCanEditAll || $OWNER == $CURRENT_USER);
+							$bCanAddComment = \Bitrix\Timeman\Security\FullReportCommentPermission::canAdd(
+								(int)$CURRENT_USER,
+								$OWNER,
+								$arAccessUsers['WRITE'],
+								CTimeMan::IsAdmin()
+							);
 
 							if ($_POST["add_comment"] == "Y" && $bCanAddComment)
 							{
@@ -1659,6 +1668,7 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 					case 'admin_data_report_full':
 						$bReturnRes = true;
 						$amount = 30;
+						$item_count = 0;
 						$res = ['DEPARTMENTS' => [], 'USERS' => [], 'NAV' => []];
 
 						$bShowAll = ($_REQUEST['show_all'] ?? null) == 'Y';
@@ -1743,17 +1753,68 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 								];
 							}
 
-							$arUserIDs = CIntranetUtils::GetEmployeesForSorting($page, $amount, $section_id, $bCanReadAll ? false : $arAccessUsers['READ']);
+							if ($bCanReadAll)
+							{
+								// Nothing narrows the structure for this user, so service accounts can only be
+								// dropped from the subtree itself: it is taken as a whole and both the counter
+								// and the page are cut out of the very same filtered set.
+								$arUserIDs = CIntranetUtils::GetEmployeesForSorting(1, PHP_INT_MAX, $section_id, false);
+
+								$arAllUsers = $arUserIDs ? array_merge(...array_values($arUserIDs)) : [];
+								$arServiceUsers = array_fill_keys(
+									RealUserFilter::selectServiceUserIds(array_map('intval', $arAllUsers)),
+									true
+								);
+
+								$skipCount = ($page - 1) * $amount;
+								$restCount = $amount;
+								$arPageUserIDs = [];
+								$arUsers = [];
+								foreach ($arUserIDs as $dpt_id => $arDptUsers)
+								{
+									foreach ($arDptUsers as $user_id)
+									{
+										if (isset($arServiceUsers[(int)$user_id]))
+										{
+											continue;
+										}
+
+										$item_count++;
+
+										if ($skipCount > 0)
+										{
+											$skipCount--;
+
+											continue;
+										}
+
+										if ($restCount <= 0)
+										{
+											continue;
+										}
+
+										$arPageUserIDs[$dpt_id][] = $user_id;
+										$arUsers[] = $user_id;
+										$restCount--;
+									}
+								}
+
+								$arUserIDs = $arPageUserIDs;
+							}
+							else
+							{
+								// The access list is already free of service accounts, so the page and the counter
+								// stay consistent while both keep working on a single department subtree page.
+								$arUserIDs = CIntranetUtils::GetEmployeesForSorting($page, $amount, $section_id, $arAccessUsers['READ']);
+								$item_count = CIntranetUtils::GetEmployeesCountForSorting($section_id, 0, $arAccessUsers['READ']);
+								$arUsers = $arUserIDs ? array_merge(...array_values($arUserIDs)) : [];
+							}
+
 							$arSections = array_keys($arUserIDs);
 
-							$arUsers = [];
-							foreach ($arUserIDs as $ar)
-							{
-								$arUsers = array_merge($arUsers, $ar);
-							}
 							$arFilterUser = [];
 							$arFilterUser['USER_ID'] = $arUsers;
-							$dbRes = CUser::GetList('ID', 'ASC', ['ID' => implode('|', $arUsers), 'ACTIVE' => 'Y'], ['SELECT' => ['*', 'UF_DEPARTMENT']]);
+							$dbRes = CUser::GetList('ID', 'ASC', ['ID' => count($arUsers) > 0 ? implode('|', $arUsers) : '0', 'ACTIVE' => 'Y'], ['SELECT' => ['*', 'UF_DEPARTMENT']]);
 							while ($arRes = $dbRes->GetNext())
 							{
 								$res['USERS'][$arRes['ID']] = [
@@ -2000,7 +2061,6 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 						$tm_user = new CUserReportFull($USER->GetID());
 						$res["OVERDUE"] = $tm_user->GetReportData(true);
 						$res['NAV'] = '';
-						$item_count = CIntranetUtils::GetEmployeesCountForSorting($section_id, 0, $bCanReadAll ? false : $arAccessUsers['READ']);
 						$page_count = intval($item_count / $amount) + ($item_count % $amount > 0 ? 1 : 0);
 
 						$navResult = new CDBResult();

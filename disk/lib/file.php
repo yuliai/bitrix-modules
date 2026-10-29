@@ -6,6 +6,8 @@ use Bitrix\Disk;
 use Bitrix\Disk\Document\Online\UserInfoToken;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
+use Bitrix\Disk\Internal\Service\Sync\Journal\ChangeType;
+use Bitrix\Disk\Internal\Service\Sync\Journal\TrackedSetCleanupPublisher;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkSupportService;
 use Bitrix\Disk\Internals\AttachedObjectTable;
 use Bitrix\Disk\Internals\EditSessionTable;
@@ -310,6 +312,10 @@ class File extends BaseObject
 
 		if(isset($this->file) && $this->fileId == $this->file['ID'])
 		{
+			// A record handed over by a batch read carries no public url: building one runs an event and
+			// costs a bucket per file in the clouds, so it waits until someone asks for the url.
+			$this->file['SRC'] ??= \CFile::GetFileSRC($this->file);
+
 			return $this->file;
 		}
 
@@ -321,6 +327,24 @@ class File extends BaseObject
 		}
 
 		return $this->file;
+	}
+
+	/**
+	 * Fills the cache of getFile() with a record read elsewhere, so that a batch read of b_file serves this
+	 * model too. A record of another file is ignored. The public url is not built here: getFile() builds it
+	 * when it is asked for, so a batch pays for it only on the files whose url is actually used.
+	 *
+	 * @param array $fileData Record of b_file, as CFile returns it.
+	 * @return void
+	 */
+	public function primeFileData(array $fileData): void
+	{
+		if (!$this->fileId || (int)($fileData['ID'] ?? 0) !== (int)$this->fileId)
+		{
+			return;
+		}
+
+		$this->file = $fileData;
 	}
 
 	/**
@@ -731,7 +755,7 @@ class File extends BaseObject
 			'SYNC_UPDATE_TIME' => $this->getSyncUpdateTime(),
 			'UPDATED_BY' => $updatedBy,
 		));
-		$this->updateRelated();
+		$this->updateRelated($updatedBy);
 
 		$driver = Driver::getInstance();
 		if ($this->getStorage()->isUseInternalRights())
@@ -751,6 +775,17 @@ class File extends BaseObject
 		{
 			//just update content
 			$driver->getIndexManager()->updateFileContent($this);
+		}
+
+		// The first version is the content the file was created with, and the creation of the file is
+		// published on its own: the journal would otherwise take two records for every upload.
+		if (!$this->isFirstVersion())
+		{
+			$this->publishToJournal(
+				ChangeType::ContentVersion,
+				$updatedBy,
+				['size', 'versionId', 'versionNumber', 'updatedAt', 'updatedBy'],
+			);
 		}
 
 		$objectEvent = $this->makeObjectEvent(
@@ -959,7 +994,13 @@ class File extends BaseObject
 		$versionLimitPerFile = Configuration::getVersionLimitPerFile();
 		if ($this->getGlobalContentVersion() > 1 && $versionLimitPerFile > 0)
 		{
-			foreach ($this->getVersions(['offset' => $versionLimitPerFile, 'limit' => 100]) as $oldVersion)
+			$olderVersions = $this->getVersions([
+				'order' => ['ID' => 'DESC'],
+				'offset' => $versionLimitPerFile,
+				'limit' => 100,
+			]);
+
+			foreach ($olderVersions as $oldVersion)
 			{
 				$oldVersion->delete($createdBy);
 			}
@@ -1320,6 +1361,7 @@ class File extends BaseObject
 
 		/** @var FileTable $tableClassName */
 		$tableClassName = self::getTableClassName();
+		$rightsCodesBeforeMove = Driver::getInstance()->getRightsManager()->captureCodesBeforeMove($this);
 
 		$moveResult = $tableClassName::move($this->id, $realFolderId);
 		if (!$moveResult->isSuccess())
@@ -1354,7 +1396,7 @@ class File extends BaseObject
 		}
 		//</editor-fold>
 
-		Driver::getInstance()->getRightsManager()->setAfterMove($this);
+		Driver::getInstance()->getRightsManager()->setAfterMove($this, $rightsCodesBeforeMove);
 
 		$subscribersAfterMove = Driver::getInstance()->collectSubscribers($this);
 		Driver::getInstance()->sendChangeStatus($subscribersAfterMove);
@@ -1380,6 +1422,8 @@ class File extends BaseObject
 		{
 			return null;
 		}
+
+		$this->publishToJournal(ChangeType::Moved, $movedBy, ['places']);
 
 		$event = new UserRecentsEvent(
 			(int)$movedBy,
@@ -1500,6 +1544,12 @@ class File extends BaseObject
 
 		$this->currentState = static::STATE_DELETE_PROCESS;
 
+		// The audience is taken before the rights and the interaction set it is read from are torn down;
+		// the record itself is published once the row of the file is gone, so that a deletion that broke
+		// halfway leaves the client holding a file the portal still holds too.
+		$publishesTombstone = !$this->journalCascadeChild && !$this->isLink();
+		$tombstoneAudience = $publishesTombstone ? $this->captureTombstoneAudience() : null;
+
 		$success = EditSessionTable::deleteByFilter(array(
 			'OBJECT_ID' => $this->id,
 		));
@@ -1513,9 +1563,19 @@ class File extends BaseObject
 			'OBJECT_ID' => $this->id,
 		]);
 
-		TrackedObjectTable::deleteBatch([
-			'REAL_OBJECT_ID' => $this->id,
-		]);
+		// The rows of the interaction set are the only record of who held the file by an interaction and
+		// by no right of their own. A child of a cascade publishes no tombstone the holder could be
+		// addressed by: the record of the root stands for the whole subtree, and its root is a folder
+		// they never saw. The rows go here together with the record they are addressed from, so that a
+		// cascade that broke below leaves no record naming a holder the set still carries the file to.
+		if ($this->journalCascadeChild)
+		{
+			(new TrackedSetCleanupPublisher())->publishHoldersLosingTheObject((int)$this->id);
+
+			TrackedObjectTable::deleteBatch([
+				'REAL_OBJECT_ID' => $this->id,
+			]);
+		}
 
 		$success = ExternalLinkTable::deleteByFilter(array(
 			'OBJECT_ID' => $this->id,
@@ -1601,6 +1661,22 @@ class File extends BaseObject
 		{
 			return false;
 		}
+
+		if (!$this->journalCascadeChild)
+		{
+			// Taken here and not before the gates above: several of them still answer with false, and a
+			// deletion that broke halfway would take the file from the holders who see it by their
+			// interaction alone while the portal goes on holding it.
+			TrackedObjectTable::deleteBatch([
+				'REAL_OBJECT_ID' => $this->id,
+			]);
+		}
+
+		if ($publishesTombstone)
+		{
+			$this->publishTombstoneToJournal($deletedBy, $tombstoneAudience);
+		}
+
 		Driver::getInstance()->getIndexManager()->dropIndex($this);
 
 		Application::getInstance()->getTaggedCache()->clearByTag("disk_file_{$this->id}");
@@ -1772,9 +1848,9 @@ class File extends BaseObject
 		}
 	}
 
-	private function updateRelated()
+	private function updateRelated($updatedBy)
 	{
-		Disk\Driver::getInstance()->getTrackedObjectManager()->refresh($this);
+		Disk\Driver::getInstance()->getTrackedObjectManager()->refresh($this, $updatedBy);
 	}
 
 	/**

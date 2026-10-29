@@ -133,6 +133,9 @@ class BoardHtmlRenderableFileHandler implements HtmlRenderableHandler
 					'AVATAR_URL' => $avatarUri,
 					'SHOW_TEMPLATES_MODAL' => $showTemplatesModal,
 					'EXTERNAL_LINK_MODE' => false,
+					// The chain has answered for the uniqueCode by now, so the page of the board is the
+					// proof of the link the description of its header is told about.
+					'UNIFIED_LINK_MODE' => true,
 					'FILE_UNIQUE_CODE' => $documentSession->getFile()?->getUniqueCode(),
 					'ORIGINAL_FILE' => $this->file,
 				],

@@ -5,6 +5,7 @@ namespace Bitrix\Disk;
 use Bitrix\Disk\Document\DocumentHandler;
 use Bitrix\Disk\Document\OnlyOffice\OnlyOfficeHandler;
 use Bitrix\Disk\Internal\Enum\ExternalLinkScenario;
+use Bitrix\Disk\Internal\Service\Sync\Access\LinkAccessPublisher;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Disk\Internals\Error\ErrorCollection;
 use Bitrix\Disk\Internals\ExternalLinkTable;
@@ -559,9 +560,17 @@ final class ExternalLink extends Internals\Model
 			return false;
 		}
 
-		return $this->update(array(
+		$deathTimeBefore = $this->getDeathTime();
+		$success = $this->update(array(
 			'DEATH_TIME' => null,
 		));
+
+		if ($success)
+		{
+			$this->publishLifetimeChange($deathTimeBefore, null);
+		}
+
+		return $success;
 	}
 
 	public function revokePassword()
@@ -589,9 +598,30 @@ final class ExternalLink extends Internals\Model
 			return false;
 		}
 
-		return $this->update(array(
+		$deathTimeBefore = $this->getDeathTime();
+		$success = $this->update(array(
 			'DEATH_TIME' => $dateTime,
 		));
+
+		if ($success)
+		{
+			$this->publishLifetimeChange($deathTimeBefore, $dateTime);
+		}
+
+		return $success;
+	}
+
+	/**
+	 * A lifetime that ran out switches the link off without deleting it, and one that is taken away
+	 * lights it again - both move the boundary for whoever held the object by this link alone.
+	 */
+	private function publishLifetimeChange(?DateTime $deathTimeBefore, ?DateTime $deathTimeAfter): void
+	{
+		(new LinkAccessPublisher())->publishExternalLinkLifetimeChanged(
+			(int)$this->getObjectId(),
+			$deathTimeBefore,
+			$deathTimeAfter,
+		);
 	}
 
 	/**
@@ -693,7 +723,15 @@ final class ExternalLink extends Internals\Model
 			], true));
 		}
 
-		return $this->deleteInternal();
+		$success = $this->deleteInternal();
+
+		if ($success)
+		{
+			// the object may have left the sight of whoever held it by this link and by nothing else
+			(new LinkAccessPublisher())->publishExternalLinkRevoked((int)$this->getObjectId());
+		}
+
+		return $success;
 	}
 
 	private function deleteShortUri($uri)

@@ -1,5 +1,6 @@
 <?php
 $mail_default_option = array(
+	'history_backfill_stopped' => 'Y',
 	// The rollout switch of the IMAP source generations,
 	// see Bitrix\Mail\Internal\Service\SourceGeneration\BackfillService::isFeatureEnabled()
 	'source_generations_enabled' => 'N',

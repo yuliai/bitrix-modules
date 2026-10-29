@@ -218,9 +218,11 @@ class Group extends Scope
 		if (!isset(self::$operationsCache[$siteId][$userId]))
 		{
 			$groupId = self::getGroupIdBySiteId($siteId) ?: 0;
+			$canEdit = SocialNetwork::canPerformOperation($groupId, Rights::ACCESS_TYPES['edit']);
 			$operations = [
 				'read' => false,//see below
-				'edit' => SocialNetwork::canPerformOperation($groupId, Rights::ACCESS_TYPES['edit']),
+				'edit' => $canEdit,
+				'public' => $canEdit,
 				'sett' => SocialNetwork::canPerformOperation($groupId, Rights::ACCESS_TYPES['sett']),
 				'delete' => SocialNetwork::canPerformOperation($groupId, Rights::ACCESS_TYPES['delete']),
 			];

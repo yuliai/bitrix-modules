@@ -5,9 +5,10 @@ namespace Bitrix\Mail\Helper;
 use Bitrix\Mail;
 use Bitrix\Mail\Helper\Mailbox\MailboxSyncManager;
 use Bitrix\Mail\Internal\Entity\SourceGeneration\Context;
-use Bitrix\Mail\Internal\Service\SourceGeneration\ContextResolver;
+use Bitrix\Mail\Internal\Service\Mailbox\CrmImapGateReconciler;
 use Bitrix\Mail\Internal\Service\Mailbox\MailboxEmailOccupancyService;
 use Bitrix\Mail\Internal\Service\Message\Conversation\ConversationBackfill;
+use Bitrix\Mail\Internal\Service\SourceGeneration\ContextResolver;
 use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internal\Service\SourceGeneration\Matching\MessageMatcher;
 use Bitrix\Mail\Internal\Service\SourceGeneration\MigrationMessageImporter;
@@ -15,6 +16,7 @@ use Bitrix\Mail\Internals\MessageUploadQueueTable;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Mail\MailMessageUidTable;
 use Bitrix\Mail\MailServicesTable;
+use Bitrix\Mail\Service\Message\SendFailure;
 use Bitrix\Main;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
@@ -35,6 +37,8 @@ abstract class Mailbox
 	const MESSAGE_SET_OLD_STATUS_LIMIT_AT_A_TIME = 500;
 	const NUMBER_OF_BROKEN_MESSAGES_TO_RESYNCHRONIZE = 2;
 	const NUMBER_OF_INCOMPLETE_MESSAGES_TO_REMOVE = 10;
+	private const MAX_OUTGOING_ATTEMPTS = 5;
+	private const OUTGOING_AUTHOR_OPTION = 'outgoingAuthorId';
 
 	const MAIL_SERVICES_ONLY_FOR_THE_RU_ZONE = [
 		'yandex',
@@ -1234,6 +1238,14 @@ abstract class Mailbox
 			return false;
 		}
 
+		$crmImapGateResult = $this->ensureCrmImapGateReady();
+		if (!$crmImapGateResult->isSuccess())
+		{
+			$this->registerCrmImapGateErrors($crmImapGateResult);
+
+			return false;
+		}
+
 		/*
 			The lock is taken in the database before anything of the mailbox changes, and not only asked
 			about: the value this instance holds was loaded when the instance was created, and the three
@@ -1394,6 +1406,17 @@ abstract class Mailbox
 		}
 
 		return $count;
+	}
+
+	protected function ensureCrmImapGateReady(): Main\Result
+	{
+		return (new CrmImapGateReconciler())->ensureReady((int)$this->mailbox['ID']);
+	}
+
+	protected function registerCrmImapGateErrors(Main\Result $result): void
+	{
+		$this->errors->add($result->getErrors());
+		$this->warnings->add($result->getErrors());
 	}
 
 	public function getSyncStatus()
@@ -2090,6 +2113,13 @@ abstract class Mailbox
 
 		$dirPath = $this->getDirsHelper()->getDirPathByHash($messagesForRemove[0]['DIR_MD5']);
 
+		$messagesForRemove = $this->placementsTheSourceCanBeAskedAbout($messagesForRemove, (string)$dirPath);
+
+		if (empty($messagesForRemove))
+		{
+			return [];
+		}
+
 		// an implementation of the check that knows nothing of failed requests leaves the list empty
 		$this->unansweredUidsOfLastCheck = [];
 
@@ -2107,6 +2137,15 @@ abstract class Mailbox
 		$unansweredMessages = self::selectMessagesByUids($messagesForRemove, $this->unansweredUidsOfLastCheck);
 
 		return self::selectMessagesByUids($messagesForRemove, $aliveUids);
+	}
+
+	/**
+	 * Of the rows the deletion is about to ask the source about, the ones it can still be asked about at
+	 * all. Answered by the engine, which alone knows what its source is; the base answers with all of them.
+	 */
+	protected function placementsTheSourceCanBeAskedAbout(array $messagesForRemove, string $dirPath): array
+	{
+		return $messagesForRemove;
 	}
 
 	/** @return array rows of the sample whose uid the list names */
@@ -2186,13 +2225,17 @@ abstract class Mailbox
 		return $messageId;
 	}
 
-	public function mail(array $params, ?callable $onQueued = null)
+	/**
+	 * @param int $authorId Who is told when the letter cannot be sent; without one the refusal is only shown
+	 * on the screen of the letter.
+	 */
+	public function mail(array $params, ?callable $onQueued = null, int $authorId = 0)
 	{
 		class_exists('Bitrix\Mail\Helper');
 
 		$message = new Mail\DummyMail($params);
 
-		$messageUid = $this->createMessage($message);
+		$messageUid = $this->createMessage($message, [], $authorId);
 
 		if ($onQueued === null)
 		{
@@ -2245,7 +2288,7 @@ abstract class Mailbox
 		);
 	}
 
-	protected function createMessage(Main\Mail\Mail $message, array $fields = array())
+	protected function createMessage(Main\Mail\Mail $message, array $fields = array(), int $authorId = 0)
 	{
 		$messageUid = sprintf('%x%x', time(), rand(0, 0xffffffff));
 		$body = sprintf(
@@ -2265,6 +2308,7 @@ abstract class Mailbox
 				'seen' => true,
 				'trackable' => true,
 				'origin' => true,
+				'outgoing_author_id' => $authorId,
 			)
 		);
 
@@ -2310,7 +2354,7 @@ abstract class Mailbox
 				'filter' => $this->peekGenerationScope()->apply(array(
 					'>=UPLOAD_QUEUE.SYNC_STAGE' => 0,
 					'<UPLOAD_QUEUE.SYNC_LOCK' => time() - static::getTimeout(),
-					'<UPLOAD_QUEUE.ATTEMPTS' => 5,
+					'<UPLOAD_QUEUE.ATTEMPTS' => self::MAX_OUTGOING_ATTEMPTS,
 				)),
 				'order' => array(
 					'UPLOAD_QUEUE.SYNC_LOCK' => 'ASC',
@@ -2495,7 +2539,7 @@ abstract class Mailbox
 			}
 		);
 
-		$success = Main\Mail\Mail::send(array_merge(
+		$mailParams = array_merge(
 			$outgoingParams,
 			array(
 				'TRACK_READ' => array(
@@ -2509,13 +2553,23 @@ abstract class Mailbox
 				//),
 				'CONTEXT' => $context,
 			)
-		));
+		);
+		$sendResult = null;
+		if (method_exists(Main\Mail\Mail::class, 'sendResult'))
+		{
+			$sendResult = Main\Mail\Mail::sendResult($mailParams);
+			$success = $sendResult->isSuccess();
+		}
+		else
+		{
+			$success = Main\Mail\Mail::send($mailParams);
+		}
 
 		$eventManager->removeEventHandler('main', 'OnBeforeMailSend', $eventKey);
 
 		if ($excerpt['UPLOAD_STAGE'] < 2 && !$success)
 		{
-			$sendingError = $this->getContextSendingError($context);
+			$sendingError = $this->resolvePermanentSendError($excerpt, $context, $sendResult);
 			if ($sendingError !== null)
 			{
 				$this->completeOutgoingWithError($excerpt, $sendingError);
@@ -2586,6 +2640,28 @@ abstract class Mailbox
 		return;
 	}
 
+	/**
+	 * A refusal of the sender is final at once, since a retry goes through the same record. Any other failure
+	 * is retried, and becomes final only when the last attempt fails too: past it the queue skips the letter.
+	 */
+	private function resolvePermanentSendError(array $excerpt, object $context, ?Main\Result $sendResult): ?Main\Error
+	{
+		$controlledError = SendFailure::getControlledError($sendResult) ?? $this->getContextSendingError($context);
+		if ($controlledError !== null)
+		{
+			return $controlledError;
+		}
+
+		if ((int)$excerpt['UPLOAD_ATTEMPTS'] + 1 < self::MAX_OUTGOING_ATTEMPTS)
+		{
+			return null;
+		}
+
+		$transportMessage = $sendResult?->getErrorMessages()[0] ?? '';
+
+		return new Main\Error($transportMessage ?: 'Failed to send email.', SendFailure::CODE_SEND_FAILED);
+	}
+
 	private function getContextSendingError(object $context): ?Main\Error
 	{
 		return method_exists($context, 'getSendingError') ? $context->getSendingError() : null;
@@ -2600,29 +2676,24 @@ abstract class Mailbox
 			],
 			[
 				'SYNC_LOCK' => 0,
-				'ATTEMPTS' => 5,
+				'ATTEMPTS' => self::MAX_OUTGOING_ATTEMPTS,
 			],
 		);
 
 		$options = is_array($excerpt['__OPTIONS'] ?? null) ? $excerpt['__OPTIONS'] : [];
-		$options['sendError'] = [
-			'code' => $error->getCode(),
-			'message' => $error->getMessage(),
-		];
-		Mail\MailMessageTable::update((int)$excerpt['__ID'], ['OPTIONS' => $options]);
+		SendFailure::markMessageFailed((int)$excerpt['__ID'], $options, $error);
+
+		Mail\Integration\Im\Notification::notifyUserAboutMessageSendFailed(
+			(int)($options[self::OUTGOING_AUTHOR_OPTION] ?? 0),
+			(int)$excerpt['__ID'],
+			(string)($excerpt['__SUBJECT'] ?? ''),
+			(string)$error->getCode(),
+		);
 	}
 
 	public static function getPermanentSendError(array $message): ?Main\Error
 	{
-		$options = is_array($message['OPTIONS'] ?? null) ? $message['OPTIONS'] : [];
-		$sendError = is_array($options['sendError'] ?? null) ? $options['sendError'] : [];
-		$message = trim((string)($sendError['message'] ?? ''));
-		if ($message === '')
-		{
-			return null;
-		}
-
-		return new Main\Error($message, (string)($sendError['code'] ?? ''));
+		return SendFailure::getMessageFailure($message);
 	}
 
 	/**

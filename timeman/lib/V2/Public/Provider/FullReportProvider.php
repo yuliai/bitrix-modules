@@ -194,6 +194,22 @@ final class FullReportProvider
 	}
 
 	/**
+	 * Returns whether the user has a report to submit: the report day has come or a draft is kept.
+	 * Answers as getReportToSend($userId, true, true)->isReadyForSubmit does, without building the report;
+	 * like it, is accurate in the session of the user (time zone, date formats of the site). Cheap to repeat:
+	 * the report day is read from the report info of the day timeman caches, the period is not calculated anew.
+	 * On a stale cache it may then answer true while getReportToSend() is not ready for submit; see
+	 * \CUserReportFull::hasReportDayCome() for when the cache goes stale.
+	 *
+	 * @param int $userId
+	 * @return bool
+	 */
+	public function isReportReadyForSubmit(int $userId): bool
+	{
+		return $this->fullReportFacade->isReportReadyForSubmit($userId);
+	}
+
+	/**
 	 * Path of the livefeed entry the report was published to, or null when the report has no entry,
 	 * when the viewer may not read it, or when the viewer is not the current user.
 	 */

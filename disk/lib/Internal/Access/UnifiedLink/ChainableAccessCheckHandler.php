@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Access\UnifiedLink;
@@ -28,32 +29,7 @@ abstract class ChainableAccessCheckHandler implements AccessCheckHandler
 
 	public function checkCollection(array $baseObjects): array
 	{
-		$result = [];
-		$objectsToCheck = [];
-
-		foreach ($baseObjects as $objectId => $baseObject)
-		{
-			if (isset($this->collectionCache[$objectId]))
-			{
-				$result[$objectId] = $this->collectionCache[$objectId];
-			}
-			else
-			{
-				$objectsToCheck[$objectId] = $baseObject;
-			}
-		}
-
-		if (!empty($objectsToCheck))
-		{
-			$checkedAccessLevels = $this->doCheckCollection($objectsToCheck);
-
-			foreach ($objectsToCheck as $objectId => $baseObject)
-			{
-				$accessLevel = $checkedAccessLevels[$objectId] ?? UnifiedLinkAccessLevel::Denied;
-				$this->collectionCache[$objectId] = $accessLevel;
-				$result[$objectId] = $accessLevel;
-			}
-		}
+		$result = $this->getCurrentCollectionAccessLevels($baseObjects);
 
 		if ($this->next instanceof AccessCheckHandler)
 		{
@@ -86,6 +62,70 @@ abstract class ChainableAccessCheckHandler implements AccessCheckHandler
 			);
 
 			$current = $current->next;
+		}
+
+		return $result;
+	}
+
+	public function checkAllCollection(array $baseObjects): array
+	{
+		$results = [];
+		$objectsToCheck = $baseObjects;
+		$current = $this;
+
+		foreach ($baseObjects as $objectId => $baseObject)
+		{
+			$results[$objectId] = new UnifiedLinkAccessResult();
+		}
+
+		while ($current instanceof self && !empty($objectsToCheck))
+		{
+			$accessLevels = $current->getCurrentCollectionAccessLevels($objectsToCheck);
+
+			foreach ($objectsToCheck as $objectId => $baseObject)
+			{
+				$results[$objectId]->addAccessLevel(
+					source: $current->getAccessSource(),
+					accessLevel: $accessLevels[$objectId] ?? UnifiedLinkAccessLevel::Denied,
+				);
+			}
+
+			$objectsToCheck = $current->filterNotMaxAccessLevelObjects($objectsToCheck, $accessLevels);
+			$current = $current->next;
+		}
+
+		return $results;
+	}
+
+	protected function getCurrentCollectionAccessLevels(array $baseObjects): array
+	{
+		$result = [];
+		$objectsToCheck = [];
+
+		foreach ($baseObjects as $objectId => $baseObject)
+		{
+			if (isset($this->collectionCache[$objectId]))
+			{
+				$result[$objectId] = $this->collectionCache[$objectId];
+			}
+			else
+			{
+				$objectsToCheck[$objectId] = $baseObject;
+			}
+		}
+
+		if (empty($objectsToCheck))
+		{
+			return $result;
+		}
+
+		$checkedAccessLevels = $this->doCheckCollection($objectsToCheck);
+
+		foreach ($objectsToCheck as $objectId => $baseObject)
+		{
+			$accessLevel = $checkedAccessLevels[$objectId] ?? UnifiedLinkAccessLevel::Denied;
+			$this->collectionCache[$objectId] = $accessLevel;
+			$result[$objectId] = $accessLevel;
 		}
 
 		return $result;

@@ -356,7 +356,7 @@ class Archive extends Response\Zip\Archive
 	 *
 	 * @return int
 	 */
-	private static function getMaxFilesInArchive(): int
+	public static function getMaxFilesInArchive(): int
 	{
 		return (int)Option::get('disk', 'max_files_in_archive', self::MAX_FILES_IN_ARCHIVE);
 	}

@@ -11,7 +11,6 @@ use Bitrix\Disk\Internal\Repository\UnifiedLinkAccessRepository;
 use Bitrix\Disk\Internals\ObjectTable;
 use Bitrix\Disk\RightsManager;
 use Bitrix\Disk\Ui\Text;
-use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
@@ -21,7 +20,7 @@ final class ConflictCopyService
 	/** The bound copy cannot receive the editor result any more: removed, trashed, moved or read-only. */
 	public const ERROR_STALE_COPY = 'vibeoffice_conflict_copy_stale';
 
-	/** The caller owns the document transaction and persists cleanupFileIds before commit. */
+	/** The caller owns the document transaction and commits the copy together with the receipt. */
 	public function save(File $original, array $stagedFile, int $ownerId, ?int $existingCopyId): Result
 	{
 		if ($ownerId <= 0)
@@ -38,7 +37,7 @@ final class ConflictCopyService
 		if ($existingCopyId)
 		{
 			$query = ObjectTable::query()->setSelect(['*'])->where('ID', $existingCopyId);
-			$row = Application::getConnection()->query($query->getQuery() . ' FOR UPDATE')->fetch();
+			$row = DocumentStateRepository::fetchForUpdate($query);
 			$copy = $row ? File::buildFromArray($row) : null;
 			if (
 				!$copy || $copy->isDeleted() || (int)$copy->getId() === (int)$original->getId()
@@ -48,18 +47,13 @@ final class ConflictCopyService
 			{
 				return $this->failure('The conflict copy is no longer writable.', self::ERROR_STALE_COPY);
 			}
-			$guard = new VersionCleanupGuard((int)$copy->getId(), (int)$stagedFile['ID']);
-			$version = $guard->run(fn() => $copy->addVersion($stagedFile, $ownerId, true, ['commentAttachedObjects' => false]));
+			$version = $copy->addVersion($stagedFile, $ownerId, true, ['commentAttachedObjects' => false]);
 			if (!$version || (int)$copy->getFileId() !== (int)$stagedFile['ID'])
 			{
 				return $this->failure('Could not save the conflict copy version.');
 			}
 
-			return (new Result())->setData([
-				'file' => $copy,
-				'versionId' => (int)$version->getId(),
-				'cleanupFileIds' => $guard->getCloneIds(),
-			]);
+			return (new Result())->setData(['file' => $copy, 'versionId' => (int)$version->getId()]);
 		}
 
 		$folder = $storage->getRootObject();
@@ -112,7 +106,7 @@ final class ConflictCopyService
 			return (new Result())->addErrors($access->getErrors());
 		}
 
-		return (new Result())->setData(['file' => $copy, 'versionId' => null, 'cleanupFileIds' => []]);
+		return (new Result())->setData(['file' => $copy, 'versionId' => null]);
 	}
 
 	private function failure(string $message, string $code = 'vibeoffice_conflict_copy_failed'): Result

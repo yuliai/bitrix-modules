@@ -1082,7 +1082,7 @@ class SiteTable extends Entity\DataManager
 										'ACTIVE' => 'Y',
 										'DOMAIN' => $domainName
 									));
-									$domainId = $resDomain->getId();
+									$domainId = $resDomain->isSuccess() ? $resDomain->getId() : null;
 									if ($domainId)
 									{
 										SiteTable::$disableCallback = true;

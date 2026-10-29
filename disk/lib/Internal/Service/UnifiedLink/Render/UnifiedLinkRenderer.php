@@ -12,6 +12,7 @@ use Bitrix\Disk\ExternalLink;
 use Bitrix\Disk\File;
 use Bitrix\Disk\Folder;
 use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
+use Bitrix\Disk\Internal\Service\HtmlViewer\PublicDomainAccessContext;
 use Bitrix\Disk\Internal\Service\UnifiedLink\BaseObjectResolver;
 use Bitrix\Disk\Internal\Service\UnifiedLink\FileHandler\AutomaticEditModeCapable;
 use Bitrix\Disk\Internal\Service\UnifiedLink\FileHandler\EditTransitionAware;
@@ -49,6 +50,7 @@ class UnifiedLinkRenderer
 		private readonly bool $deferred = false,
 		private readonly ?ExternalLink $externalLink = null,
 		private readonly ModeSelection $modeSelection = ModeSelection::KeepRequested,
+		private readonly ?PublicDomainAccessContext $publicDomainAccessContext = null,
 	) {
 		if ($currentUser instanceof CurrentUser && (int)$currentUser->getId() === 0)
 		{
@@ -71,6 +73,7 @@ class UnifiedLinkRenderer
 			$this->accessLevel = $this->unifiedLinkAccessService->check(
 				$baseObject,
 				$this->resolveAttachedObject(),
+				userId: $this->publicDomainAccessContext?->getUserId() ?? (int)$this->currentUser?->getId(),
 				externalLink: $this->externalLink,
 				version: $version,
 			);
@@ -95,6 +98,11 @@ class UnifiedLinkRenderer
 
 	public function shouldRenderExternal(): bool
 	{
+		if ($this->publicDomainAccessContext !== null)
+		{
+			return false;
+		}
+
 		return $this->shouldRenderExternal ??= (function (): bool {
 			if ($this->getAccessLevel() !== UnifiedLinkAccessLevel::Denied)
 			{
@@ -145,9 +153,12 @@ class UnifiedLinkRenderer
 			attachedObject: $this->resolveAttachedObject(),
 			version: $this->resolveVersion(),
 			analytics: $this->analytics,
-			currentUser: $this->currentUser,
+			currentUser: $this->currentUser ?? ($this->publicDomainAccessContext !== null ? CurrentUser::get() : null),
 			deferred: $this->deferred,
 			externalLink: $this->resolveExternalLinkForHandler(),
+			// The answer this render was already given, so a handler drawing a page off the rights of the
+			// opening is not made to walk the chain behind them a second time.
+			accessLevel: $this->getAccessLevel(),
 		);
 		if ($handler instanceof OpeningNoticeCodeAware)
 		{
@@ -224,6 +235,11 @@ class UnifiedLinkRenderer
 
 	private function shouldUseInternalPortalFlow(): bool
 	{
+		if ($this->publicDomainAccessContext !== null)
+		{
+			return true;
+		}
+
 		$userId = (int)$this->currentUser?->getId();
 		if ($userId <= 0)
 		{
@@ -242,6 +258,11 @@ class UnifiedLinkRenderer
 	private function isPublicEditorUser(?User $user): bool
 	{
 		return in_array($user?->getExternalAuthId(), ['call', DocumentEditorUser::EXTERNAL_AUTH_ID], true);
+	}
+
+	public function getPublicDomainAccessContext(): ?PublicDomainAccessContext
+	{
+		return $this->publicDomainAccessContext;
 	}
 
 	public static function renderAccessDeniedPage(array $params = []): string

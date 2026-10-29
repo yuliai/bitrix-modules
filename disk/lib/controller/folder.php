@@ -46,7 +46,7 @@ class Folder extends BaseObject
 			],
 			'+prefilters' => [
 				new ActionFilter\CloseSession(),
-			]
+			],
 		];
 
 		return $configureActions;
@@ -66,7 +66,7 @@ class Folder extends BaseObject
 
 	protected function get(Disk\BaseObject $folder)
 	{
-		if (!($folder instanceof Disk\Folder))
+		if (!$folder instanceof Disk\Folder)
 		{
 			throw new ArgumentTypeException('folder', Disk\Folder::class);
 		}
@@ -93,7 +93,7 @@ class Folder extends BaseObject
 		Disk\Folder $folder,
 		string $name,
 		CurrentUser $currentUser,
-		bool $generateUniqueName = false
+		bool $generateUniqueName = false,
 	): ?array
 	{
 		$result = (new AddSubFolderCommand(
@@ -131,12 +131,12 @@ class Folder extends BaseObject
 	public function getChildrenAction(
 		Disk\Folder $folder,
 		CurrentUser $currentUser,
-		string $search = null,
+		?string $search = null,
 		string $searchScope = 'currentFolder',
 		bool $showRights = false,
 		array $context = [],
 		array $order = [],
-		PageNavigation $pageNavigation = null
+		?PageNavigation $pageNavigation = null,
 	): ?Response\DataType\Page
 	{
 		$childrenDataProvider = new ChildrenDataProvider();
@@ -205,13 +205,12 @@ class Folder extends BaseObject
 	{
 		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
 
-		$shouldCheckUnifiedLink =
-			is_string($uls)
+		$shouldCheckUnifiedLink
+			= is_string($uls)
 			&& $this->unifiedLinkAccessService->validateUlsForObjectId(
 				objectId: $folder->getRealObjectId(),
 				uls: $uls,
-			)
-		;
+			);
 
 		return $this->getAllowedOperationsRights($folder, $shouldCheckUnifiedLink);
 	}
@@ -226,13 +225,12 @@ class Folder extends BaseObject
 		{
 			$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
 
-			$shouldCheckUnifiedLink =
-				is_string($uls)
+			$shouldCheckUnifiedLink
+				= is_string($uls)
 				&& $this->unifiedLinkAccessService->validateUlsForObjectId(
 					objectId: $folder->getRealObjectId(),
 					uls: $uls,
-				)
-			;
+				);
 
 			if (ZipNginx\Archive::isFileLimitExceededByFolder($folder, $storage->getCurrentUserSecurityContext($shouldCheckUnifiedLink)))
 			{
@@ -266,6 +264,56 @@ class Folder extends BaseObject
 			return null;
 		}
 
-		return ZipNginx\Archive::createFromFolder($folder, $storage->getCurrentUserSecurityContext());
+		$shouldCheckUnifiedLink = $this->shouldCheckUnifiedLink($folder);
+		$securityContext = $storage->getCurrentUserSecurityContext($shouldCheckUnifiedLink);
+
+		if (!$folder->canDownload($securityContext))
+		{
+			$this->addError(new Error('Could not download folder.'));
+
+			return null;
+		}
+
+		if (!$this->canDownloadFolderDescendants($folder, $securityContext, $shouldCheckUnifiedLink))
+		{
+			$this->addError(new Error('Could not download folder.'));
+
+			return null;
+		}
+
+		return ZipNginx\Archive::createFromFolder($folder, $securityContext);
+	}
+
+	private function canDownloadFolderDescendants(
+		Disk\Folder $folder,
+		Disk\Security\SecurityContext $securityContext,
+		bool $shouldCheckUnifiedLink,
+	): bool
+	{
+		$fileCount = 0;
+
+		return $this->getArchiveDownloadAccessChecker()->canDownloadFoldersDescendants(
+			folders: [$folder],
+			securityContext: $securityContext,
+			fileCount: $fileCount,
+			shouldUseRightsCheck: !$shouldCheckUnifiedLink,
+			shouldFollowFolderLinks: true,
+		);
+	}
+
+	protected function getArchiveDownloadAccessChecker(): Disk\Internal\Service\Archive\ArchiveDownloadAccessChecker
+	{
+		return new Disk\Internal\Service\Archive\ArchiveDownloadAccessChecker();
+	}
+
+	private function shouldCheckUnifiedLink(Disk\Folder $folder): bool
+	{
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+
+		return is_string($uls)
+			&& $this->unifiedLinkAccessService->validateUlsForObjectId(
+				objectId: $folder->getRealObjectId(),
+				uls: $uls,
+			);
 	}
 }

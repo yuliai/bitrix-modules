@@ -12,8 +12,6 @@ use Bitrix\Disk\Document\Vibeoffice\Webhook\WebhookEventPolicy;
 use Bitrix\Disk\Document\Vibeoffice\Webhook\WebhookScopeResolver;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
-use Bitrix\Disk\Internals\FileTable;
-use Bitrix\Disk\Internals\VersionTable;
 use Bitrix\Disk\TypeFile;
 use Bitrix\Disk\Version;
 use Bitrix\Main\Application;
@@ -24,7 +22,6 @@ use Bitrix\Main\Security\Random;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UserTable;
 use Bitrix\Main\Web\HttpClient;
-use Bitrix\Main\Web\Json;
 use Bitrix\Main\Web\MimeType;
 use Bitrix\Main\Web\Uri;
 
@@ -54,7 +51,8 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 		{
 			return $this->failure('The saved document state is unavailable.');
 		}
-		if ($this->isApplied($delivery) || $this->getPreviousSnapshot($state, $delivery))
+		if ($this->isApplied($delivery) || $this->getPreviousSnapshot($state, $delivery)
+			|| $this->isStaleSnapshot($state, $delivery))
 		{
 			return (new Result())->setData(['stagedFile' => []]);
 		}
@@ -169,12 +167,22 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 			$previous = $this->getPreviousSnapshot($state, $delivery);
 			if ($previous)
 			{
-				$unusedFileId = (int)$delivery['STAGED_FILE_ID'];
-				$cleanupIds = $unusedFileId > 0
-					&& !FileTable::getCount(['=FILE_ID' => $unusedFileId])
-					&& !VersionTable::getCount(['=FILE_ID' => $unusedFileId]) ? [$unusedFileId] : [];
-
-				return $this->markApplied($ledgerId, $previous, $cleanupIds);
+				return $this->markApplied($ledgerId, $previous);
+			}
+			if ($this->isStaleSnapshot($state, $delivery))
+			{
+				return $this->markIgnored($ledgerId, 'stale_snapshot');
+			}
+			$exact = $delivery['SNAPSHOT_SEQ'] !== null
+				? $this->repository->getSnapshot($state['HOST_DOC_KEY'], (int)$delivery['SNAPSHOT_SEQ'])
+				: null;
+			if ($exact && $this->isProvenFinalForcesave($delivery, $payload, $exact, $stagedFile))
+			{
+				return $this->markApplied($ledgerId, $exact);
+			}
+			if ($exact)
+			{
+				return $this->failure('Snapshot belongs to another delivery.', 'snapshot_ownership_unknown');
 			}
 			$fileId = (int)($stagedFile['ID'] ?? 0);
 			if ($fileId <= 0 || $fileId !== (int)$delivery['STAGED_FILE_ID'] || !($stagedFile = \CFile::GetFileArray($fileId)))
@@ -205,7 +213,6 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 				$saved = $save->getData();
 				$resultFile = $saved['file'];
 				$versionId = $saved['versionId'];
-				$cleanupIds = $saved['cleanupFileIds'];
 				$stateFields += ['CONFLICTED' => 1, 'CONFLICT_OBJECT_ID' => (int)$resultFile->getId()];
 			}
 			else
@@ -215,17 +222,13 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 					$this->participantUserIds($state),
 					$ownerId,
 				);
-				$guard = new VersionCleanupGuard((int)$file->getId(), $fileId);
-				$version = $guard->run(
-					fn() => $file->addVersion($stagedFile, $authorId, true, ['commentAttachedObjects' => false])
-				);
+				$version = $file->addVersion($stagedFile, $authorId, true, ['commentAttachedObjects' => false]);
 				if (!$version || (int)$file->getFileId() !== $fileId)
 				{
 					return $this->failure('Could not apply the saved document version.');
 				}
 				$resultFile = $file;
 				$versionId = (int)$version->getId();
-				$cleanupIds = $guard->getCloneIds();
 				$stateFields += [
 					'EXPECTED_FILE_ID' => (int)$file->getFileId(),
 					'EXPECTED_CONTENT_VERSION' => (int)$file->getGlobalContentVersion(),
@@ -237,6 +240,7 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 			{
 				$insert = SavedSnapshotTable::add($receipt + [
 					'HOST_DOC_KEY' => $state['HOST_DOC_KEY'], 'SNAPSHOT_SEQ' => (int)$delivery['SNAPSHOT_SEQ'],
+					'DELIVERY_ID' => (int)$delivery['DELIVERY_ID'],
 					'SOURCE' => $payload['source'] ?? 'legacy',
 				]);
 				if (!$insert->isSuccess())
@@ -251,8 +255,8 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 				return (new Result())->addErrors($update->getErrors());
 			}
 
-			return $this->markApplied($ledgerId, $receipt, $cleanupIds);
-		}, true);
+			return $this->markApplied($ledgerId, $receipt);
+		}, lockObject: true, auditFileChanges: true);
 	}
 
 	public function complete(int $ledgerId, ?array $generation = null): Result
@@ -357,36 +361,21 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 				return (new Result())->addErrors($update->getErrors());
 			}
 		}
-		$cleanupIds = $delivery['CLEANUP_FILE_IDS'] ? Json::decode($delivery['CLEANUP_FILE_IDS']) : [];
-		if ($cleanupIds === [])
-		{
-			return new Result();
-		}
-		foreach ($cleanupIds as $fileId)
-		{
-			if (\CFile::GetFileArray((int)$fileId))
-			{
-				\CFile::Delete((int)$fileId);
-				if (\CFile::GetFileArray((int)$fileId))
-				{
-					return $this->failure('Could not release the saved version cleanup file.');
-				}
-			}
-		}
-		$update = DeliveryTable::update($ledgerId, ['CLEANUP_FILE_IDS' => null]);
 
-		return $update->isSuccess() ? new Result() : (new Result())->addErrors($update->getErrors());
+		return new Result();
 	}
 
-	private function markApplied(int $ledgerId, array $receipt, array $cleanupIds): Result
+	private function markApplied(int $ledgerId, array $receipt): Result
 	{
-		return DeliveryTable::update($ledgerId, [
+		$update = DeliveryTable::update($ledgerId, [
 			'STATUS' => DeliveryTable::STATUS_APPLIED,
+			'OUTCOME' => DeliveryTable::OUTCOME_APPLIED,
 			'RESULT_OBJECT_ID' => (int)$receipt['RESULT_OBJECT_ID'],
 			'RESULT_VERSION_ID' => $receipt['RESULT_VERSION_ID'],
-			'CLEANUP_FILE_IDS' => $cleanupIds ? Json::encode($cleanupIds) : null,
 			'NOTIFIED' => 0,
 		]);
+
+		return $update->isSuccess() ? new Result() : (new Result())->addErrors($update->getErrors());
 	}
 
 	private function getPreviousSnapshot(array $state, array $delivery): ?array
@@ -397,12 +386,53 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 			return null;
 		}
 		$receipt = $this->repository->getSnapshot($state['HOST_DOC_KEY'], (int)$seq);
-		if (!$receipt && $state['LAST_SNAPSHOT_SEQ'] !== null && (int)$seq <= (int)$state['LAST_SNAPSHOT_SEQ'])
-		{
-			$receipt = $this->repository->getSnapshot($state['HOST_DOC_KEY'], (int)$state['LAST_SNAPSHOT_SEQ']);
-		}
 
-		return $receipt;
+		return $receipt && (int)$receipt['DELIVERY_ID'] === (int)$delivery['DELIVERY_ID'] ? $receipt : null;
+	}
+
+	private function isStaleSnapshot(array $state, array $delivery): bool
+	{
+		return $delivery['SNAPSHOT_SEQ'] !== null
+			&& $state['LAST_SNAPSHOT_SEQ'] !== null
+			&& (int)$delivery['SNAPSHOT_SEQ'] < (int)$state['LAST_SNAPSHOT_SEQ'];
+	}
+
+	private function isProvenFinalForcesave(array $delivery, array $payload, array $receipt, array $stagedFile): bool
+	{
+		if (($receipt['DELIVERY_ID'] ?? null) === null || $receipt['SOURCE'] !== 'forcesave'
+			|| !in_array(strtolower((string)($payload['source'] ?? '')), ['save', 'forgotten'], true)
+			|| (int)($receipt['RESULT_OBJECT_ID'] ?? 0) <= 0
+			|| (int)($stagedFile['ID'] ?? 0) !== (int)$delivery['STAGED_FILE_ID'])
+		{
+			return false;
+		}
+		$versionId = (int)$receipt['RESULT_VERSION_ID'];
+		$receiptFileId = $versionId > 0
+			? (int)(Version::loadById($versionId)?->getFileId() ?? 0)
+			: (int)(File::loadById((int)$receipt['RESULT_OBJECT_ID'])?->getFileId() ?? 0);
+		$previous = $receiptFileId > 0 ? \CFile::GetFileArray($receiptFileId) : false;
+		$current = \CFile::GetFileArray((int)$stagedFile['ID']);
+		if (!$previous || !$current)
+		{
+			return false;
+		}
+		$previousPath = Application::getDocumentRoot() . $previous['SRC'];
+		$currentPath = Application::getDocumentRoot() . $current['SRC'];
+
+		return is_file($previousPath) && is_file($currentPath)
+			&& ($previousHash = hash_file('sha256', $previousPath)) !== false
+			&& $previousHash === hash_file('sha256', $currentPath);
+	}
+
+	private function markIgnored(int $ledgerId, string $reason): Result
+	{
+		$update = DeliveryTable::update($ledgerId, [
+			'STATUS' => DeliveryTable::STATUS_DONE,
+			'OUTCOME' => DeliveryTable::OUTCOME_IGNORED,
+			'REASON' => $reason,
+		]);
+
+		return $update->isSuccess() ? new Result() : (new Result())->addErrors($update->getErrors());
 	}
 
 	/**
@@ -466,7 +496,7 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 	{
 		$query = DeliveryTable::query()->setSelect(['*'])->where('ID', $id);
 
-		return Application::getConnection()->query($query->getQuery() . ($lock ? ' FOR UPDATE' : ''))->fetch() ?: null;
+		return $lock ? DocumentStateRepository::fetchForUpdate($query) : ($query->fetch() ?: null);
 	}
 
 	private function matchesDelivery(?array $delivery, array $payload): bool
@@ -478,6 +508,7 @@ final class SavedDocumentWriter implements SavedDocumentWriterInterface
 	private function isApplied(array $delivery): bool
 	{
 		return in_array($delivery['STATUS'], [DeliveryTable::STATUS_APPLIED, DeliveryTable::STATUS_DONE], true)
+			&& ($delivery['OUTCOME'] ?? null) === DeliveryTable::OUTCOME_APPLIED
 			&& (int)$delivery['RESULT_OBJECT_ID'] > 0;
 	}
 

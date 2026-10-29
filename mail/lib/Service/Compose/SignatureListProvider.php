@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Service\Compose;
 
+use Bitrix\Mail\Internal\Service\Signature\SignaturePlainText;
 use Bitrix\Mail\Internal\Service\Signature\Image\SignatureImageResourceProvider;
 use Bitrix\Mail\Helper\Config\Feature;
 use Bitrix\Mail\Internal\Service\Signature\Template\Macro\SignatureMacroCatalog;
@@ -232,6 +233,7 @@ class SignatureListProvider
 		}
 
 		$seenBySender = [];
+		$seenByMailbox = [];
 		foreach ($sharedByMailbox as $mailboxId => $sharedSignatures)
 		{
 			$senderKey = $senderKeyByMailbox[$mailboxId] ?? null;
@@ -243,10 +245,12 @@ class SignatureListProvider
 			foreach ($sharedSignatures as $item)
 			{
 				$signatureId = (int)($item['signatureId'] ?? 0);
-				if ($signatureId <= 0 || isset($seenBySender[$senderKey][$signatureId]))
+				if ($signatureId <= 0 || isset($seenByMailbox[$mailboxId][$signatureId]))
 				{
 					continue;
 				}
+				$seenByMailbox[$mailboxId][$signatureId] = true;
+				$isFirstUnderSenderKey = !isset($seenBySender[$senderKey][$signatureId]);
 				$seenBySender[$senderKey][$signatureId] = true;
 
 				$signature = $this->resolveTemplate(
@@ -259,7 +263,7 @@ class SignatureListProvider
 				}
 				$assignedAt = $item['assignedAt'] ?? null;
 
-				$bySender[$senderKey][] = [
+				$entry = [
 					'full' => $signature,
 					'preview' => $this->buildPreview($signature),
 					'menuPreview' => $this->buildMenuPreview($signature),
@@ -269,10 +273,23 @@ class SignatureListProvider
 					// against it, an assignment made later wins over the choice.
 					'assignedAt' => $assignedAt === null ? null : (int)$assignedAt,
 				];
+
+				// Two connections of one address share the formatted key, so a shared signature also goes
+				// under the key of its own mailbox; the form reads that key first and keeps the sets apart.
+				$bySender[self::mailboxSenderKey($mailboxId)][] = $entry;
+				if ($isFirstUnderSenderKey)
+				{
+					$bySender[$senderKey][] = $entry;
+				}
 			}
 		}
 
 		return $bySender;
+	}
+
+	public static function mailboxSenderKey(int $mailboxId): string
+	{
+		return 'mailbox:' . $mailboxId;
 	}
 
 	private function collectMailboxIds(array $senders): array
@@ -431,12 +448,7 @@ class SignatureListProvider
 	 */
 	private function buildPreview(string $signature): string
 	{
-		$preview = mb_substr(strip_tags($signature), 0, self::PREVIEW_MAX_LENGTH);
-		$preview = (string)preg_replace('#\t#u', ' ', $preview);
-		$preview = (string)preg_replace('#\n+#u', "\n", $preview);
-		$preview = (string)preg_replace('# +#u', ' ', $preview);
-
-		return html_entity_decode(trim($preview), ENT_COMPAT, 'UTF-8');
+		return SignaturePlainText::fromHtml($signature, self::PREVIEW_MAX_LENGTH);
 	}
 
 	/**
@@ -504,6 +516,8 @@ class SignatureListProvider
 
 	protected function loadSenders(int $userId): array
 	{
-		return Sender::prepareUserMailboxes($userId);
+		// The same list the form itself reads: a mailbox missing here would lose the signatures
+		// assigned to it once the settings slider asks for them again.
+		return (new SenderListProvider())->getSenders($userId);
 	}
 }

@@ -13,6 +13,7 @@ use Bitrix\Disk\Internal\Enum\CustomServerTypes;
 use Bitrix\Disk\Internal\Enum\ServersTypesEnum;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
 use Bitrix\Main\Config\Feature;
+use Bitrix\Disk\Internal\Service\Sync\SyncFeatureOption;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UI\Viewer\Transformation\Document;
@@ -29,6 +30,10 @@ final class Configuration
 	public const OPTION_ONLYOFFICE_SERVERS_TYPE = 'disk_onlyoffice_servers_type';
 	public const OPTION_ONLYOFFICE_SWITCH_SERVERS_TYPE_STATE = 'disk_onlyoffice_switch_servers_type_state';
 	public const OPTION_DEFAULT_VIEWER_CUSTOM_CONFIG_TYPE = 'default_viewer_service_custom_config_type';
+	public const OPTION_ONLYOFFICE_INTERRUPT_THRESHOLD = 'disk_onlyoffice_interrupt_threshold';
+	public const OPTION_ONLYOFFICE_INTERRUPT_AGENT_ENABLED = 'disk_onlyoffice_interrupt_agent_enabled';
+
+	public const DEFAULT_ONLYOFFICE_INTERRUPT_THRESHOLD = 900;
 
 	public static function isEnabledDefaultEditInUf()
 	{
@@ -77,6 +82,11 @@ final class Configuration
 	public static function isEnabledFileViewerFormats(): bool
 	{
 		return Feature::isEnabled(FileViewerFormatsFlag::class);
+	}
+
+	public static function isSyncRestEnabled(): bool
+	{
+		return (new SyncFeatureOption())->isEnabled();
 	}
 
 	/**
@@ -583,6 +593,29 @@ final class Configuration
 		}
 
 		return $serversType;
+	}
+
+	/**
+	 * Seconds of silence after which an editing session of OnlyOffice counts as interrupted.
+	 */
+	public static function getOnlyOfficeInterruptThreshold(): int
+	{
+		$threshold = (int)Option::get(
+			moduleId: Driver::INTERNAL_MODULE_ID,
+			name: self::OPTION_ONLYOFFICE_INTERRUPT_THRESHOLD,
+			default: self::DEFAULT_ONLYOFFICE_INTERRUPT_THRESHOLD,
+		);
+
+		return $threshold > 0 ? $threshold : self::DEFAULT_ONLYOFFICE_INTERRUPT_THRESHOLD;
+	}
+
+	public static function isOnlyOfficeInterruptAgentEnabled(): bool
+	{
+		return Option::get(
+			moduleId: Driver::INTERNAL_MODULE_ID,
+			name: self::OPTION_ONLYOFFICE_INTERRUPT_AGENT_ENABLED,
+			default: 'Y',
+		) === 'Y';
 	}
 
 	public static function storeStateForOnlyofficeSwitchServersType(array $state): void

@@ -126,8 +126,7 @@ final class TerminalSessionFinalizer implements TerminalSessionFinalizerInterfac
 		{
 			$query = DocumentSessionTable::query()->setSelect(['*'])
 				->whereIn('ID', $chunk)->where('SERVICE', DocumentService::Vibeoffice->value);
-			$rows = Application::getConnection()->query($query->getQuery() . ' FOR UPDATE');
-			while ($row = $rows->fetch())
+			foreach (DocumentStateRepository::fetchAllForUpdate($query) as $row)
 			{
 				$session = DocumentSession::buildFromArray($row);
 				$id = (int)$session->getId();

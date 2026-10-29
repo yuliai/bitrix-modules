@@ -10,18 +10,18 @@ use Bitrix\Main\Access\AccessibleItem;
 
 final class MailboxAccessController extends BaseMailAccessController
 {
-	private ?array $batchOwnerIds = null;
+	private ?array $batchOwners = null;
 	private ?array $batchDepartmentIds = null;
 	private array $batchDepartmentOwners = [];
 
 	/** Keeps the normal rules and access events, sharing HR and mailbox access lookups within this batch. */
 	public function withMailboxBatch(array $models, callable $check): mixed
 	{
-		$previous = [$this->batchOwnerIds, $this->batchDepartmentIds, $this->batchDepartmentOwners];
-		$this->batchOwnerIds = array_values(array_unique(array_map(
-			static fn (MailboxModel $model): int => $model->getOwnerId(),
-			$models,
-		)));
+		$previous = [$this->batchOwners, $this->batchDepartmentIds, $this->batchDepartmentOwners];
+		$this->batchOwners = array_fill_keys(
+			array_map(static fn (MailboxModel $model): int => $model->getOwnerId(), $models),
+			true,
+		);
 		$this->batchDepartmentIds = null;
 		$this->batchDepartmentOwners = [];
 		try
@@ -30,14 +30,14 @@ final class MailboxAccessController extends BaseMailAccessController
 		}
 		finally
 		{
-			[$this->batchOwnerIds, $this->batchDepartmentIds, $this->batchDepartmentOwners] = $previous;
+			[$this->batchOwners, $this->batchDepartmentIds, $this->batchDepartmentOwners] = $previous;
 		}
 	}
 
 	/** Null means the caller must perform its usual individual lookup. */
 	public function getBatchDepartmentAccess(int $ownerId, bool $withSubDepartments): ?bool
 	{
-		if ($this->batchOwnerIds === null || !in_array($ownerId, $this->batchOwnerIds, true))
+		if ($this->batchOwners === null || !isset($this->batchOwners[$ownerId]))
 		{
 			return null;
 		}
@@ -48,7 +48,7 @@ final class MailboxAccessController extends BaseMailAccessController
 		{
 			$this->batchDepartmentOwners[$key] = array_fill_keys(
 				$this->batchDepartmentIds === [] ? [] : NodeMemberService::filterUsersByDepartmentIds(
-					$this->batchOwnerIds,
+					array_keys($this->batchOwners),
 					$this->batchDepartmentIds,
 					$withSubDepartments,
 				),

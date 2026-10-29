@@ -43,6 +43,7 @@ class UpdateEventHandler implements CommandHandler
 
 		$section = $this->getSection($mapperFactory, $command);
 		$event = $this->getEvent($mapperFactory, $command->getId());
+		$this->checkTargetSectionAccess($event, $section, $command->getUserId());
 		$entryFields = $this->convertToArray($event, $mapperFactory);
 		$currentFields = $entryFields;
 
@@ -74,6 +75,7 @@ class UpdateEventHandler implements CommandHandler
 			'checkLocationOccupancy' => $command->getOccupancyCheckMode(),
 			'checkLocationOccupancyPermission' => true,
 			'userId' => \CCalendar::GetUserId(),
+			'attendees' => $entryFields['ATTENDEES'] ?? null,
 		]);
 
 		if ($updatedEvent === null)
@@ -142,8 +144,28 @@ class UpdateEventHandler implements CommandHandler
 		$attendeeService = new AttendeeService();
 		$attendeeCodes = $attendeeService->getAttendeeAccessCodes($command->getAttendeesEntityList(), $command->getUserId());
 		$attendees = \CCalendar::GetDestinationUsers($attendeeCodes);
-		$isMeeting = $attendeeService->isMeeting($attendeeCodes, $section, $command->getUserId());
 		$attendeesAndCodes = $attendeeService->excludeAttendees($attendees, $attendeeCodes, $command->getExcludeUsers());
+		$notSelectableProjectCodes = $attendeeService->getNotSelectableProjectAccessCodes(
+			$entryFields['ATTENDEES_CODES'] ?? [],
+			$command->getUserId(),
+		);
+		if (!empty($notSelectableProjectCodes))
+		{
+			$attendeesAndCodes['codes'] = array_values(array_unique(array_merge(
+				$attendeesAndCodes['codes'],
+				$notSelectableProjectCodes,
+			)));
+			$attendeesAndCodes['attendees'] = \CCalendar::GetDestinationUsers($attendeesAndCodes['codes']);
+			$excludeUsers = $attendeeService->getExcludeUsers(
+				$attendeesAndCodes['attendees'],
+				$command->getExcludeUsers(),
+			);
+			$attendeesAndCodes['attendees'] = array_diff($attendeesAndCodes['attendees'], $excludeUsers);
+		}
+		$isMeeting = $attendeeService->isMeeting(array_values(array_unique(array_merge(
+			$attendeeCodes,
+			$notSelectableProjectCodes,
+		))), $section, $command->getUserId());
 
 		$entryFields['ATTENDEES_CODES'] = $attendeesAndCodes['codes'];
 		$entryFields['ATTENDEES'] = $attendeesAndCodes['attendees'];
@@ -202,6 +224,30 @@ class UpdateEventHandler implements CommandHandler
 		$this->canEditLocation = $controller->check(ActionDictionary::ACTION_EVENT_EDIT_LOCATION, $model);
 
 		if (!($this->canEdit || $this->canEditAttendees || $this->canEditLocation))
+		{
+			throw new PermissionDenied();
+		}
+	}
+
+	private function checkTargetSectionAccess(Event $event, Section $section, int $userId): void
+	{
+		// A move happens only in editBaseFields (canEdit branch) when the event
+		// calendar type matches the target section type and the section changes.
+		$isMove = $this->canEdit
+			&& $event->getCalendarType() === $section->getType()
+			&& $section->getId() !== $event->getSection()->getId();
+		if (!$isMove)
+		{
+			return;
+		}
+
+		$model = EventModel::createNew()
+			->setOwnerId($section->getOwner()?->getId() ?? 0)
+			->setSectionId($section->getId())
+			->setSectionType($section->getType() ?? '')
+		;
+
+		if (!(new EventAccessController($userId))->check(ActionDictionary::ACTION_EVENT_ADD, $model))
 		{
 			throw new PermissionDenied();
 		}
@@ -292,7 +338,8 @@ class UpdateEventHandler implements CommandHandler
 			return;
 		}
 
-		$fromTo = \CCalendarEvent::GetEventFromToForUser($entryFields, $userId);
+		// the notification goes to the meeting host, so its time must be built for the host
+		$fromTo = \CCalendarEvent::GetEventFromToForUser($entryFields, $meetingHostId);
 		\CCalendarNotify::Send([
 			'mode' => 'change_notify',
 			'name' => $entryFields['NAME'] ?? null,

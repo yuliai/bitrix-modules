@@ -63,6 +63,16 @@ class Sanitizer
 	/** The sequence read as the start of a php tag, so its two readers below cannot drift apart. */
 	private const PHP_OPEN_TAG = '<?';
 
+	/**
+	 * The comment Bitrix\Main\Web\DOM\HtmlParser leaves in place of a php slice it stored.
+	 * The parser restores the slice into any document carrying the comment, so in user content
+	 * it is a trace of somebody else's parse rather than authored text (mantis 0257122).
+	 */
+	public const PHP_SLICE_PLACEHOLDER = 'BX_DOM_DOCUMENT_PHP_SLICE_PLACEHOLDER';
+
+	/** The placeholder as the parser writes it: the token plus `_object_slice` inside a comment. */
+	private const PHP_SLICE_PLACEHOLDER_COMMENT = '/<!--\s*' . self::PHP_SLICE_PLACEHOLDER . '[^>]*-->/';
+
 	private array $sanitizers = [];
 	private array $filters = self::DEFAULT_TEXT_FILTERS;
 
@@ -120,6 +130,14 @@ class Sanitizer
 			$bad = true;
 		}
 
+		if (self::containsPhpSlicePlaceholder($text))
+		{
+			// unlike `<?` the placeholder is not authored text, so cutting it loses nothing and
+			// closes the sinks whose caller never reads the flag
+			$bad = true;
+			$text = self::removePhpSlicePlaceholders($text);
+		}
+
 		$needReverse = $this->checkFilter(self::AVAILABLE_TEXT_FILTERS['reverseSanitize']);
 		if ($needReverse)
 		{
@@ -160,6 +178,25 @@ class Sanitizer
 	public static function containsUnneutralizedPhpOpenTag(string $content): bool
 	{
 		return str_contains($content, self::PHP_OPEN_TAG);
+	}
+
+	/**
+	 * Placeholder of a php slice stored by the DOM parser, in any of its numbered forms.
+	 */
+	public static function containsPhpSlicePlaceholder(string $content): bool
+	{
+		return str_contains($content, self::PHP_SLICE_PLACEHOLDER);
+	}
+
+	/**
+	 * Drops the placeholder comment, and the bare token of a placeholder the content carries in
+	 * any other shape: left in place, it becomes a comment again for the next transformation.
+	 */
+	private static function removePhpSlicePlaceholders(string $content): string
+	{
+		$withoutComments = preg_replace(self::PHP_SLICE_PLACEHOLDER_COMMENT, '', $content);
+
+		return str_replace(self::PHP_SLICE_PLACEHOLDER, '', $withoutComments ?? $content);
 	}
 
 	/**

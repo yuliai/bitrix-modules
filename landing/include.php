@@ -270,6 +270,7 @@ $jsConfig = [
 		'js' => [
 			$pathTemplate24 . '/assets/js/helpers/gallery_cards_init.js',
 		],
+		'lang' => $pathLang . '/js/gallery.php',
 		'rel' => ['landing_core', 'landing_fancybox'],
 	],
 
@@ -284,6 +285,7 @@ $jsConfig = [
 			$pathTemplate24 . '/assets/vendor/slick-carousel/slick/slick_landing.js',
 			$pathTemplate24 . '/assets/js/components/hs.core_landing.js',
 			$pathTemplate24 . '/assets/js/components/hs.carousel.js',
+			$pathTemplate24 . '/assets/js/helpers/carousel/carousel_a11y.js',
 			$pathTemplate24 . '/assets/js/helpers/carousel/carousel_helper.js',
 			$pathTemplate24 . '/assets/js/helpers/carousel/base_carousel_init.js',
 		],
@@ -291,6 +293,7 @@ $jsConfig = [
 			$pathTemplate24 . '/assets/vendor/slick-carousel/slick/slick.css',
 			$pathTemplate24 . '/assets/vendor/slick-carousel/slick/landing-slick.css',
 		],
+		'lang' => $pathLang . '/js/carousel.php',
 		'rel' => ['landing_core','landing_jquery'],
 	],
 

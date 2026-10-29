@@ -79,7 +79,7 @@ final class SendMessageService
 		$markerEventKey = $this->subscribeToLargeAttachmentMarkers($command);
 		try
 		{
-			$command->mailbox->mail($params, $onQueued);
+			$command->mailbox->mail($params, $onQueued, $command->authorId);
 		}
 		finally
 		{

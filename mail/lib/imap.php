@@ -11,6 +11,8 @@ Loc::loadMessages(__FILE__);
 
 class Imap
 {
+	private const MESSAGE_ID_FETCH_BATCH_SIZE = 100;
+
 	const LOG_LEVEL_WRITE = 1;
 	const LOG_LEVEL_READ = 2;
 
@@ -864,6 +866,129 @@ class Imap
 		}
 
 		return $UIDs;
+	}
+
+	/**
+	 * The numbers a folder keeps a letter under right now, found by the identifier its own header
+	 * carries. A folder the server has recreated numbers its letters anew, and this is what tells the
+	 * new number of a letter whose stored one is void.
+	 *
+	 * @param string $messageId Message-ID of the letter, without the angle brackets.
+	 * @return array|false The numbers found, an empty array when the folder holds no such letter,
+	 *         false when the folder could not be asked at all.
+	 */
+	public function getUidsByMessageId(string $dirPath, string $messageId): array|false
+	{
+		$messageId = trim($messageId);
+		$uidsByMessageId = $this->getUidsByMessageIds($dirPath, [$messageId]);
+
+		return is_array($uidsByMessageId) ? ($uidsByMessageId[$messageId] ?? []) : false;
+	}
+
+	/**
+	 * Finds the current UIDs of several Message-ID values with one search and verifies exact header values.
+	 *
+	 * @param string[] $messageIds Message-ID values without angle brackets.
+	 * @return array<string, int[]>|false UIDs grouped by the requested Message-ID, or false on transport failure.
+	 */
+	public function getUidsByMessageIds(string $dirPath, array $messageIds): array|false
+	{
+		$messageIds = array_values(array_unique(array_filter(
+			array_map('trim', $messageIds),
+			static fn (string $messageId): bool => $messageId !== '',
+		)));
+		$uidsByMessageId = array_fill_keys($messageIds, []);
+
+		if ($messageIds === [])
+		{
+			return $uidsByMessageId;
+		}
+
+		$error = [];
+
+		if (!$this->select($dirPath, $error))
+		{
+			return false;
+		}
+
+		$criteria = array_map(
+			static fn (string $messageId): string => sprintf(
+				'HEADER "Message-Id" %s',
+				static::prepareString($messageId),
+			),
+			$messageIds,
+		);
+
+		$response = $this->executeCommand(
+			'UID SEARCH ' . str_repeat('OR ', count($criteria) - 1) . implode(' ', $criteria),
+			$error,
+		);
+
+		if ($error)
+		{
+			$error = $error == Imap::ERR_COMMAND_REJECTED ? null : $error;
+			$error = $this->errorMessage(array(Imap::ERR_SEARCH, $error), $response);
+
+			return false;
+		}
+
+		// RFC 3501 allows the result to span several untagged SEARCH lines
+		$uids = [];
+		$regex = '/^ \* \x20 SEARCH \x20 ( .+ ) \r\n $ /ix';
+		foreach ($this->getUntagged($regex, true) as $item)
+		{
+			if (preg_match_all('/\d+/', $item[1][1], $matches))
+			{
+				$uids = array_merge($uids, array_map('intval', $matches[0]));
+			}
+		}
+
+		$uids = array_values(array_unique($uids));
+		if ($uids === [])
+		{
+			return $uidsByMessageId;
+		}
+
+		foreach (array_chunk($uids, self::MESSAGE_ID_FETCH_BATCH_SIZE) as $uidBatch)
+		{
+			$messages = $this->fetch(
+				true,
+				$dirPath,
+				implode(',', $uidBatch),
+				['UID', 'BODY.PEEK[HEADER]'],
+				$error,
+				'list',
+			);
+
+			if ($messages === false)
+			{
+				return false;
+			}
+
+			foreach ($messages as $message)
+			{
+				$uid = (int)($message['UID'] ?? 0);
+				$header = (string)($message['BODY[HEADER]'] ?? '');
+				if ($uid <= 0 || !preg_match('/(?:^|\r?\n)Message-ID\s*:\s*([^\r\n]+)/i', $header, $matches))
+				{
+					continue;
+				}
+
+				$messageId = trim($matches[1], " \t<>");
+				if (array_key_exists($messageId, $uidsByMessageId))
+				{
+					$uidsByMessageId[$messageId][] = $uid;
+				}
+			}
+		}
+
+		foreach ($uidsByMessageId as &$matchedUids)
+		{
+			sort($matchedUids);
+		}
+		unset($matchedUids);
+
+		return $uidsByMessageId;
 	}
 
 	/**

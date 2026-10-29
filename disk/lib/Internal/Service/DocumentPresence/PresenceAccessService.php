@@ -9,6 +9,7 @@ use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Document\Models\DocumentSessionContext;
 use Bitrix\Disk\File;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
+use Bitrix\Disk\Realtime\Channels\DocumentPresenceChannel;
 use Bitrix\Disk\Ui\Avatar;
 use Bitrix\Disk\User;
 use Bitrix\Main\DI\ServiceLocator;
@@ -28,9 +29,15 @@ class PresenceAccessService
 	public const ACCESS_TYPE_INTERNAL = 'internal';
 	public const ACCESS_TYPE_UNIFIED = 'unified';
 
-	public const HEARTBEAT_INTERVAL = 30000;
+	/** How often an opening shows itself to the server, in milliseconds. */
+	public const HEARTBEAT_INTERVAL = 300000;
+	/** How often an opening confirms itself to its neighbours in the channel of its presence scope. */
+	public const CONFIRMATION_INTERVAL = 30000;
+	/** How long an opening counts a neighbour alive after its last confirmation: three missed ones. */
+	public const CONFIRMATION_TTL = 90000;
 
 	public const PULL_COMMAND = 'documentPresence';
+	public const CONFIRMATION_PULL_COMMAND = 'documentPresenceConfirm';
 
 	private const PRESENCE_CONTEXT_SALT = 'DISK_DOCUMENT_PRESENCE_V1';
 	private const SCOPE_SALT = 'DISK_DOCUMENT_PRESENCE_SCOPE_V1';
@@ -73,6 +80,8 @@ class PresenceAccessService
 				return $this->getDisabledConfig();
 			}
 
+			$confirmationChannel = $this->getConfirmationChannelConfig($scope['storageKey']);
+
 			$presenceContext = $this->signer->sign(Json::encode([
 				'sessionId' => (int)$documentSession->getId(),
 				'userId' => $userId,
@@ -89,14 +98,18 @@ class PresenceAccessService
 			'enabled' => true,
 			'presenceContext' => $presenceContext,
 			'heartbeatInterval' => self::HEARTBEAT_INTERVAL,
+			'confirmationInterval' => self::CONFIRMATION_INTERVAL,
+			'confirmationTtl' => self::CONFIRMATION_TTL,
 			'actions' => [
 				'enter' => 'presenceEnter',
 				'heartbeat' => 'presenceHeartbeat',
 				'leave' => 'presenceLeave',
 			],
 			'pullConfig' => $pullConfig,
+			'confirmationChannel' => $confirmationChannel,
 			'moduleId' => 'disk',
 			'command' => self::PULL_COMMAND,
+			'confirmationCommand' => self::CONFIRMATION_PULL_COMMAND,
 			'scope' => $scope['scope'],
 		];
 	}
@@ -342,34 +355,11 @@ class PresenceAccessService
 	}
 
 	/**
-	 * @param array{accessType: string, storageKey: string, scope: string, realObjectId: int, attachedObjectId: int} $scope
-	 * @param array{userId?: mixed, sessionId?: mixed, tabId?: mixed} $registration
-	 */
-	public function isRegistrationAuthorized(array $scope, array $registration): bool
-	{
-		$userId = $this->normalizePositiveInt($registration['userId'] ?? null);
-		$sessionId = $this->normalizePositiveInt($registration['sessionId'] ?? null);
-		$tabId = $registration['tabId'] ?? null;
-		if ($userId === null || $sessionId === null || !is_string($tabId) || !preg_match('/^[A-Za-z0-9]{16,128}$/D', $tabId))
-		{
-			return false;
-		}
-
-		$resolvedScope = $this->resolveAuthorizedScopeFromBinding([
-			'sessionId' => $sessionId,
-			'userId' => $userId,
-			'tabId' => $tabId,
-			'accessType' => $scope['accessType'],
-		], $userId);
-
-		return $resolvedScope !== null && hash_equals($scope['storageKey'], $resolvedScope['storageKey']);
-	}
-
-	/**
-	 * Batch form of isRegistrationAuthorized() with the same verdict per registration: rechecking the recipients
-	 * of a roster must not load one document session per participant tab. Every registration of a scope resolves
-	 * to the same file, attached object, version and access type, so the batch needs one session query, one user
-	 * query, one attached object, one file per session object and one read check per distinct user.
+	 * The only form the registrations of a scope are authorized by: neither the recheck of the recipients of a
+	 * roster nor the one inside the scope lock may load a document session per participant tab. Every
+	 * registration of a scope resolves to the same file, attached object, version and access type, so the batch
+	 * needs one session query, one user query, one attached object, one file per session object and one read
+	 * check per distinct user.
 	 *
 	 * @param array{accessType: string, storageKey: string, scope: string, realObjectId: int, attachedObjectId: int} $scope
 	 * @param array<array-key, array{userId?: mixed, sessionId?: mixed, tabId?: mixed}> $registrations
@@ -819,6 +809,39 @@ class PresenceAccessService
 		}
 
 		return is_array($pullConfig) ? $pullConfig : null;
+	}
+
+	/**
+	 * The channel the openings confirm themselves to each other in. It is keyed by the scope of the
+	 * presence and travels in this configuration alone, so whoever hears a confirmation is an opening the
+	 * roster of that very scope is served to - the public channel of the object, listened to by every
+	 * opening of the editor, carries no identity of a user and must not start to.
+	 *
+	 * Unlike the private channel, this one is a convenience and not a condition: an opening that cannot
+	 * subscribe to it keeps its presence and simply receives no confirmations.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	protected function getConfirmationChannelConfig(string $storageKey): ?array
+	{
+		if ($storageKey === '' || !Loader::includeModule('pull'))
+		{
+			return null;
+		}
+
+		try
+		{
+			$confirmationChannel = \Bitrix\Pull\Config::get([
+				'CHANNEL' => (new DocumentPresenceChannel($storageKey))->getPullModel(),
+				'JSON' => true,
+			]);
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		return is_array($confirmationChannel) && $confirmationChannel !== [] ? $confirmationChannel : null;
 	}
 
 	/**

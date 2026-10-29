@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Disk\Document\Vibeoffice\Clients;
 
-use Bitrix\Disk\User;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
@@ -25,11 +24,8 @@ final class ProtocolClient implements ProtocolClientInterface
 {
 	private string $baseUrl;
 	private Signer $signer;
-	private AvatarSourceResolver $avatarSourceResolver;
 	/** @var (\Closure(): HttpClient)|null */
 	private ?\Closure $httpClientFactory;
-	/** @var array<int, string|null> avatar url per user, looked up once for the lifetime of the client */
-	private array $avatarUrlByUser = [];
 
 	/**
 	 * @param (\Closure(): HttpClient)|null $httpClientFactory test seam; without it
@@ -44,82 +40,16 @@ final class ProtocolClient implements ProtocolClientInterface
 	{
 		$this->baseUrl = rtrim($baseUrl, '/');
 		$this->signer = $signer;
-		$this->avatarSourceResolver = $avatarSourceResolver ?? AvatarSourceResolver::createForCurrentPortal();
 		$this->httpClientFactory = $httpClientFactory;
 	}
 
-	public function open(string $docKey, array $body): Result
+	public function open(string $docKey, array $body, ?float $deadline = null): Result
 	{
 		$path = '/v1/documents/' . self::encodeSegment($docKey) . '/open';
 
-		return $this->send(HttpClient::HTTP_POST, $path, $this->withUserAvatar($body));
-	}
+		unset($body['user']['image']);
 
-	private function withUserAvatar(array $body): array
-	{
-		$userId = $body['user']['id'] ?? null;
-		if (
-			(!is_int($userId) && !is_string($userId))
-			|| preg_match('/^[0-9]+$/D', (string)$userId) !== 1
-			|| (int)$userId <= 0
-		)
-		{
-			return $body;
-		}
-
-		$avatarUrl = $this->lookUpAvatarUrl((int)$userId);
-		if ($avatarUrl === null)
-		{
-			return $body;
-		}
-
-		return $this->withAvatarUrl($body, $avatarUrl);
-	}
-
-	/**
-	 * The avatar of a user, looked up once per user.
-	 *
-	 * The retry cycle of the open sends the body of the first attempt again, and a lookup here would
-	 * be paid for by every attempt of it; the answer cannot change meanwhile, because a client serves
-	 * one request. A user without an avatar is remembered as readily as one with it, so a second
-	 * attempt asks about neither.
-	 */
-	private function lookUpAvatarUrl(int $userId): ?string
-	{
-		if (array_key_exists($userId, $this->avatarUrlByUser))
-		{
-			return $this->avatarUrlByUser[$userId];
-		}
-
-		$avatarUrl = null;
-		try
-		{
-			$loadedUrl = User::loadById($userId)?->getOwnAvatarSrc();
-			if ($loadedUrl !== null && $loadedUrl !== '')
-			{
-				$avatarUrl = $loadedUrl;
-			}
-		}
-		catch (\Throwable)
-		{
-		}
-
-		$this->avatarUrlByUser[$userId] = $avatarUrl;
-
-		return $avatarUrl;
-	}
-
-	private function withAvatarUrl(array $body, string $avatarUrl): array
-	{
-		$avatarSource = $this->avatarSourceResolver->resolve($avatarUrl);
-		if ($avatarSource === null)
-		{
-			return $body;
-		}
-
-		$body['user']['image'] = $avatarSource;
-
-		return $body;
+		return $this->send(HttpClient::HTTP_POST, $path, $body, $deadline, ['X-VO-Accept-Open' => 'save-refused-v1']);
 	}
 
 	public function upsertGrants(string $docKey, array $grants): Result
@@ -178,9 +108,32 @@ final class ProtocolClient implements ProtocolClientInterface
 	 * @param string $escapedPath percent-encoded path exactly as it goes on the wire
 	 * @param array|null $body payload, or null for a body-less request (e.g. DELETE)
 	 */
-	private function send(string $method, string $escapedPath, ?array $body): Result
+	private function send(
+		string $method,
+		string $escapedPath,
+		?array $body,
+		?float $deadline = null,
+		array $extraHeaders = [],
+	): Result
 	{
 		$result = new Result();
+		if ($deadline !== null && (!is_finite($deadline) || $deadline - hrtime(true) / 1e9 < 0.001))
+		{
+			return $result->addError(new Error(
+				'Vibeoffice opening deadline exceeded.',
+				'vibeoffice_open_deadline',
+				['requestSent' => false, 'responseVerified' => false],
+			));
+		}
+		if ($deadline !== null && !function_exists('curl_init'))
+		{
+			return $result->addError(new Error(
+				'Opening deadline requires cURL transport.',
+				'vibeoffice_deadline_transport',
+				['requestSent' => false, 'responseVerified' => false],
+			));
+		}
+
 
 		if ($body === null)
 		{
@@ -203,8 +156,12 @@ final class ProtocolClient implements ProtocolClientInterface
 
 		$headers = $this->signer->buildHeaders($method, $escapedPath, '', $rawBody, $ts, $nonce);
 
-		$http = $this->httpClientFactory === null ? $this->buildHttpClient() : ($this->httpClientFactory)();
+		$http = $this->httpClientFactory === null ? $this->buildHttpClient($deadline) : ($this->httpClientFactory)($deadline);
 		foreach ($headers as $name => $value)
+		{
+			$http->setHeader($name, $value);
+		}
+		foreach ($extraHeaders as $name => $value)
 		{
 			$http->setHeader($name, $value);
 		}
@@ -214,7 +171,20 @@ final class ProtocolClient implements ProtocolClientInterface
 		$entityBody = $rawBody === '' ? null : $rawBody;
 		if ($http->query($method, $url, $entityBody) === false)
 		{
-			return $result->addError(new Error('Vibeoffice server is not available.'));
+			return $result->addError(new Error(
+				'Vibeoffice server is not available.',
+				'vibeoffice_transport_unknown',
+				['responseVerified' => false],
+			));
+		}
+
+		if ($deadline !== null && hrtime(true) / 1e9 >= $deadline)
+		{
+			return $result->addError(new Error(
+				'Vibeoffice opening deadline exceeded.',
+				'vibeoffice_open_deadline',
+				['responseVerified' => false],
+			));
 		}
 
 		return $this->handleResponse($result, $http);
@@ -313,6 +283,7 @@ final class ProtocolClient implements ProtocolClientInterface
 		}
 
 		return new Error($message, $status, [
+			'responseVerified' => true,
 			'httpStatus' => $status,
 			'platformCode' => $platformCode,
 			'retryAfter' => $retryAfter,
@@ -369,13 +340,35 @@ final class ProtocolClient implements ProtocolClientInterface
 		return null;
 	}
 
-	private function buildHttpClient(): HttpClient
+	private function buildHttpClient(?float $deadline = null): HttpClient
 	{
-		$http = new HttpClient([
+		$options = [
 			'socketTimeout' => 5,
 			'streamTimeout' => 10,
 			'version' => HttpClient::HTTP_1_1,
-		]);
+		];
+		$http = $deadline === null ? new HttpClient($options) : new class($options, $deadline) extends HttpClient {
+			public function __construct(array $options, private readonly float $deadline)
+			{
+				parent::__construct($options + ['useCurl' => true]);
+			}
+
+			protected function createHandler(\Psr\Http\Message\RequestInterface $request, bool $async = false)
+			{
+				$remainingMs = (int)floor(($this->deadline - hrtime(true) / 1e9) * 1000);
+				if ($remainingMs <= 0)
+				{
+					throw new \Bitrix\Main\Web\Http\ClientException($request, 'Vibeoffice opening deadline exceeded.');
+				}
+
+				// A dedicated handle prevents the opening deadline from affecting other requests.
+				$handler = parent::createHandler($request, true);
+				curl_setopt($handler->getHandle(), CURLOPT_TIMEOUT_MS, $remainingMs);
+				curl_setopt($handler->getHandle(), CURLOPT_CONNECTTIMEOUT_MS, min(5000, $remainingMs));
+
+				return $handler;
+			}
+		};
 
 		$http->setHeader('Content-Type', 'application/json');
 		$http->setRedirect(false);

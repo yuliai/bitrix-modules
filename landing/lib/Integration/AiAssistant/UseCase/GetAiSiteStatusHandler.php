@@ -11,16 +11,18 @@ use Bitrix\Landing\Copilot\Generation\Scenario\CreateAiSiteState;
 use Bitrix\Landing\Copilot\Manager as CopilotManager;
 use Bitrix\Landing\Integration\AiAssistant\AiSiteGenerationHelper;
 use Bitrix\Landing\Integration\AiAssistant\Dto\AiSiteChatAvailabilityResult;
+use Bitrix\Landing\Integration\AiAssistant\Dto\FailedGenerationContextDto;
 use Bitrix\Landing\Integration\AiAssistant\Dto\GetAiSiteStatusDto;
 use Bitrix\Landing\Integration\AiAssistant\Exception\AiSitesDisabledException;
 use Bitrix\Landing\Integration\AiAssistant\Exception\AiSitesUnavailableException;
 use Bitrix\Landing\Integration\AiAssistant\Exception\BindingFinalizationException;
 use Bitrix\Landing\Integration\AiAssistant\Exception\GenerationAccessDeniedException;
-use Bitrix\Landing\Integration\AiAssistant\Exception\GenerationFailedException;
 use Bitrix\Landing\Integration\AiAssistant\Exception\GenerationNotFoundException;
 use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteBindingFinalizer;
 use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteBindingService;
+use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteFailedGenerationReaction;
 use Bitrix\Landing\Integration\AiAssistant\Service\AiSiteRuntimeAvailabilityGuard;
+use Bitrix\Landing\Metrika;
 
 class GetAiSiteStatusHandler
 {
@@ -34,6 +36,11 @@ class GetAiSiteStatusHandler
 	 * same 404); only the wording is shared, and GenerationAccessDeniedException carries it too.
 	 */
 	private const MESSAGE_JOB_NOT_FOUND = GenerationNotFoundException::MESSAGE;
+	private const MESSAGE_FINISHED_WITHOUT_IDS = 'Site generation finished without final site identifiers.';
+	private const WAIT_POLL_INTERVAL_SECONDS = 3;
+
+	private int $waitingGenerationId = 0;
+	private int $waitingUserId = 0;
 
 	public function handle(GetAiSiteStatusDto $dto, int $userId): array
 	{
@@ -60,6 +67,8 @@ class GetAiSiteStatusHandler
 		$descriptor = $this->loadGenerationDescriptor($generationId, $userId);
 		if ($dto->seconds > 0 && !$descriptor->isTerminal())
 		{
+			$this->waitingGenerationId = $generationId;
+			$this->waitingUserId = $userId;
 			$this->waitForSeconds($dto->seconds);
 		}
 
@@ -67,29 +76,17 @@ class GetAiSiteStatusHandler
 
 		if ($generation->isError())
 		{
-			$this->releaseDraftOnModerationBlock($generation);
+			// Resolve the errored step and its blocking verdict once, as one context: the reaction, the
+			// reason text and the classification all need them, and each would otherwise repeat the read.
+			$failedContext = FailedGenerationContextDto::forCreateGeneration($generation);
 
-			$limitError = AiSiteGenerationHelper::extractLimitError($generation);
-			$creationJournal = AiSiteGenerationHelper::extractCreationJournal($generation);
-			if ($limitError !== null || (!empty($creationJournal['recoverablePartial']) && (int)$creationJournal['siteId'] > 0))
-			{
-				$recoverablePartial = !empty($creationJournal['recoverablePartial']) && (int)$creationJournal['siteId'] > 0;
+			$this->reactToFailedGeneration($generation, $failedContext->erroredStepId);
 
-				return AiSiteGenerationHelper::buildStatusResponse(
-					jobId: $dto->jobId,
-					status: 'failed',
-					message: $recoverablePartial
-						? 'Site generation failed after creating a draft site.'
-						: 'Site generation failed.',
-					error: AiSiteGenerationHelper::resolveFailureMessage($generation),
-					creationJournal: $creationJournal,
-					limitError: $limitError,
-				);
-			}
-
-			throw new GenerationFailedException(
-				AiSiteGenerationHelper::resolveFailureMessage($generation),
-				$generationId,
+			return AiSiteGenerationHelper::buildFailedResponse(
+				generation: $generation,
+				jobId: $dto->jobId,
+				error: AiSiteGenerationHelper::resolveFailureMessage($generation, $failedContext),
+				failure: AiSiteGenerationHelper::resolveFailure($generation, $failedContext),
 			);
 		}
 
@@ -119,20 +116,46 @@ class GetAiSiteStatusHandler
 				);
 			}
 
-			throw new GenerationFailedException(
-				'Site generation finished without final site identifiers.',
-				$generationId,
+			// A generation that finished without final identifiers is a terminal failure with nothing
+			// built, so it reacts on the binding the same way the errored branch does: the reservation of
+			// a chat left without a draft is freed instead of staying occupied by a generation that will
+			// never finish. No errored step is known here - the reaction resolves it on its own.
+			$this->reactToFailedGeneration($generation);
+
+			return AiSiteGenerationHelper::buildFailedResponse(
+				generation: $generation,
+				jobId: $dto->jobId,
+				error: self::MESSAGE_FINISHED_WITHOUT_IDS,
+				failure: AiSiteGenerationHelper::buildFailure(
+					AiSiteGenerationHelper::ERROR_TYPE_TECHNICAL,
+					null,
+					Metrika\Statuses::Error->value,
+				),
 			);
 		}
 
 		return AiSiteGenerationHelper::buildStatusResponse(
 			jobId: $dto->jobId,
 			status: 'running',
-			message: 'Site is still generating. Call get_ai_site_status again immediately with the same jobId and seconds: 20. Site generation can take several minutes.',
+			message: 'Site is still generating. Call get_ai_site_status again with the same jobId as the skill polling schedule says. Site generation can take several minutes.',
 		);
 	}
 
 	protected function waitForSeconds(int $seconds): void
+	{
+		// Leave as soon as the job is over, re-reading only the light descriptor between short sleeps.
+		for ($left = $seconds; $left > 0; $left -= $step)
+		{
+			$step = min(self::WAIT_POLL_INTERVAL_SECONDS, $left);
+			$this->sleepSeconds($step);
+			if ($left > $step && $this->loadGenerationDescriptor($this->waitingGenerationId, $this->waitingUserId)->isTerminal())
+			{
+				return;
+			}
+		}
+	}
+
+	protected function sleepSeconds(int $seconds): void
 	{
 		sleep($seconds);
 	}
@@ -256,19 +279,33 @@ class GetAiSiteStatusHandler
 	}
 
 	/**
-	 * On a moderation block, free the reserved draft (so the same chat can retry) and bump the
-	 * consecutive-block counter. No-op for technical failures and for non-moderation errors.
+	 * Built on the binding seam above on purpose: the reaction writes through the same service the
+	 * doubles of this handler substitute, so the substitution point stays the one they know.
 	 */
-	protected function releaseDraftOnModerationBlock(Generation $generation): void
+	protected function getAiSiteFailedGenerationReaction(): AiSiteFailedGenerationReaction
 	{
-		if (!AiSiteGenerationHelper::isModerationBlockError($generation))
-		{
-			return;
-		}
+		return new AiSiteFailedGenerationReaction($this->getAiSiteBindingService());
+	}
 
-		$this->getAiSiteBindingService()->registerModerationBlock(
-			(int)($generation->getId() ?? 0),
-			$generation->getAuthorId(),
+	/**
+	 * Binding reaction to a terminally failed generation, run before the failed answer is built.
+	 *
+	 * The decision itself belongs to AiSiteFailedGenerationReaction, shared with the start handler:
+	 * both entry points answer the same failure and must react to it the same way. The recoverable-draft
+	 * verdict handed to it is the one AiSiteGenerationHelper::hasRecoverableDraft() gives the failed
+	 * answer as well, so the reservation is kept exactly for the draft the agent is told about.
+	 *
+	 * The errored step comes already resolved from the caller of the failed branch; a caller without
+	 * one passes null, and the reaction resolves it on its own.
+	 */
+	protected function reactToFailedGeneration(Generation $generation, ?int $erroredStepId = null): void
+	{
+		$this->getAiSiteFailedGenerationReaction()->react(
+			$generation,
+			$erroredStepId,
+			AiSiteGenerationHelper::hasRecoverableDraft(
+				AiSiteGenerationHelper::extractCreationJournal($generation),
+			),
 		);
 	}
 

@@ -25,24 +25,26 @@ class BaseSupportPolicy implements SupportPolicy
 	 */
 	public function supports(BaseObject $baseObject): bool
 	{
-		if (!Configuration::isEnabled())
+		return $this->supportsByConfiguration($baseObject) && $this->hasUniqueCode($baseObject);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	public function supportsByConfiguration(BaseObject $baseObject): bool
+	{
+		return Configuration::isEnabled()
+			&& ($baseObject instanceof File || $baseObject instanceof Folder)
+		;
+	}
+
+	private function hasUniqueCode(BaseObject $baseObject): bool
+	{
+		if ((string)$baseObject->getUniqueCode() !== '')
 		{
-			return false;
+			return true;
 		}
 
-		if (!$baseObject instanceof File && !$baseObject instanceof Folder)
-		{
-			return false;
-		}
-
-		$uniqueCode = $baseObject->getUniqueCode();
-		$isSetUniqueCode = (string)$uniqueCode !== '';
-
-		if (!$isSetUniqueCode)
-		{
-			$isSetUniqueCode = $this->uniqueCodeBackfiller->backfillUniqueCode((int)$baseObject->getId());
-		}
-
-		return $isSetUniqueCode;
+		return $this->uniqueCodeBackfiller->backfillUniqueCode((int)$baseObject->getId());
 	}
 }

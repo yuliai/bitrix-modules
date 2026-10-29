@@ -229,24 +229,30 @@ final class Cleaner
 	{
 		if ($dayLimit > 0)
 		{
-			// Lead with a recent version of the same object: it restricts the scan to objects with
-			// fresh activity instead of walking every outdated version in the table.
-			// GLOBAL_CONTENT_VERSION discards none of the rows able to lead here, since the first version
-			// of an object is also its oldest one; it is kept for the plan it produced on production data
+			// Lead with the objects that have fresh activity: it restricts the scan to them instead of walking
+			// every outdated version in the table. The objects are deduplicated before the join, so each
+			// outdated version is joined once rather than once per recent version of its object, and the
+			// result needs no DISTINCT over version ids.
+			// GLOBAL_CONTENT_VERSION discards none of the objects able to lead here, since the first version
+			// of an object is also its oldest one; it is kept from the plan proven on production data
 			// (mantis 143725).
 			return "
-				SELECT DISTINCT v.ID
-				FROM b_disk_version last_v
+				SELECT v.ID
+				FROM (
+					SELECT DISTINCT lv.OBJECT_ID
+					FROM b_disk_version lv
+					WHERE
+						lv.CREATE_TIME > {$ttlTime} AND
+						lv.GLOBAL_CONTENT_VERSION > 1
+				) fresh
 				INNER JOIN b_disk_version v
-					ON v.OBJECT_ID = last_v.OBJECT_ID
+					ON v.OBJECT_ID = fresh.OBJECT_ID
 					AND v.CREATE_TIME < {$ttlTime}
 				INNER JOIN b_disk_object obj ON obj.ID = v.OBJECT_ID
 				LEFT JOIN b_disk_attached_object atta
 					ON atta.OBJECT_ID = v.OBJECT_ID
 					AND atta.VERSION_ID = v.ID
 				WHERE
-					last_v.CREATE_TIME > {$ttlTime} AND
-					last_v.GLOBAL_CONTENT_VERSION > 1 AND
 					atta.OBJECT_ID IS NULL AND
 					v.FILE_ID <> obj.FILE_ID
 				LIMIT {$portion}

@@ -19,7 +19,7 @@ interface ProtocolClientInterface
 	 * Opens an editing session for the document.
 	 * POST /v1/documents/{docKey}/open
 	 */
-	public function open(string $docKey, array $body): Result;
+	public function open(string $docKey, array $body, ?float $deadline = null): Result;
 
 	/**
 	 * Creates or updates access grants for the document.

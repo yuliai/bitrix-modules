@@ -15,7 +15,7 @@ interface SavedDocumentWriterInterface
 	public function apply(int $ledgerId, array $payload, array $stagedFile): Result;
 
 	/**
-	 * Resume notifications and cleanup after commit, including repeated DONE deliveries.
+	 * Resume notifications after commit, including repeated DONE deliveries.
 	 * @param array{hostDocKey: string, editorKey: string, rev: int}|null $generation Classified event identity.
 	 */
 	public function complete(int $ledgerId, ?array $generation = null): Result;

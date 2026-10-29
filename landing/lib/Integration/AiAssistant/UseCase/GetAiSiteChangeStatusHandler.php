@@ -10,7 +10,9 @@ use Bitrix\Landing\Copilot\Generation\Scenario\ChangeAiSite;
 use Bitrix\Landing\Copilot\Manager as CopilotManager;
 use Bitrix\Landing\Integration\AiAssistant\AiSiteChangeGenerationHelper;
 use Bitrix\Landing\Integration\AiAssistant\AiSiteGenerationHelper;
+use Bitrix\Landing\Integration\AiAssistant\Dto\FailedGenerationContextDto;
 use Bitrix\Landing\Integration\AiAssistant\Dto\GetAiSiteChangeStatusDto;
+use Bitrix\Landing\Metrika;
 
 class GetAiSiteChangeStatusHandler
 {
@@ -24,6 +26,10 @@ class GetAiSiteChangeStatusHandler
 	private const MESSAGE_FINISHED_WITHOUT_PAGE = 'Page change generation finished without final page identifier.';
 	private const MESSAGE_COMPLETED = 'Page change generation completed.';
 	private const MESSAGE_RUNNING = 'Page change generation is running.';
+	private const WAIT_POLL_INTERVAL_SECONDS = 3;
+
+	private int $waitingGenerationId = 0;
+	private int $waitingUserId = 0;
 
 	public function handle(GetAiSiteChangeStatusDto $dto, int $userId): array
 	{
@@ -45,6 +51,8 @@ class GetAiSiteChangeStatusHandler
 		$descriptor = $this->loadGenerationDescriptor($generationId, $userId);
 		if ($dto->seconds > 0 && !$descriptor->isTerminal())
 		{
+			$this->waitingGenerationId = $generationId;
+			$this->waitingUserId = $userId;
 			$this->waitForSeconds($dto->seconds);
 		}
 
@@ -54,22 +62,21 @@ class GetAiSiteChangeStatusHandler
 		$siteId = AiSiteChangeGenerationHelper::extractSiteId($generation);
 		if ($generation->isError())
 		{
-			$limitError = AiSiteGenerationHelper::extractLimitError($generation);
-			if ($limitError !== null)
-			{
-				return AiSiteChangeGenerationHelper::buildStatusResponse(
-					jobId: $dto->jobId,
-					status: 'failed',
-					pageId: $pageId,
-					message: 'Page change generation failed.',
-					error: AiSiteChangeGenerationHelper::resolveFailureMessage($generation),
-					changeResult: AiSiteChangeGenerationHelper::extractResultState($generation),
-					siteId: $siteId,
-					limitError: $limitError,
-				);
-			}
+			// A failure before step 40 knows the page but not the site: DTO-02 wants both real.
+			$siteId = $siteId > 0 ? $siteId : $this->resolveSiteIdByPageId($pageId);
 
-			throw new \RuntimeException(AiSiteChangeGenerationHelper::resolveFailureMessage($generation));
+			// Resolve the errored step and its blocking verdict once, as one context: the reason text
+			// and the classification both need them, and each would otherwise repeat the read.
+			$failedContext = FailedGenerationContextDto::forChangeGeneration($generation);
+
+			return AiSiteChangeGenerationHelper::buildFailedResponse(
+				generation: $generation,
+				jobId: $dto->jobId,
+				pageId: $pageId,
+				siteId: $siteId,
+				error: AiSiteChangeGenerationHelper::resolveFailureMessage($generation, $failedContext),
+				failure: AiSiteChangeGenerationHelper::resolveFailure($generation, $failedContext),
+			);
 		}
 
 		if (!$generation->isFinished())
@@ -79,7 +86,18 @@ class GetAiSiteChangeStatusHandler
 
 		if ($pageId <= 0)
 		{
-			throw new \RuntimeException(self::MESSAGE_FINISHED_WITHOUT_PAGE);
+			return AiSiteChangeGenerationHelper::buildFailedResponse(
+				generation: $generation,
+				jobId: $dto->jobId,
+				pageId: $pageId,
+				siteId: $siteId,
+				error: self::MESSAGE_FINISHED_WITHOUT_PAGE,
+				failure: AiSiteGenerationHelper::buildFailure(
+					AiSiteGenerationHelper::ERROR_TYPE_TECHNICAL,
+					null,
+					Metrika\Statuses::Error->value,
+				),
+			);
 		}
 
 		return $this->buildCompletedResponse($generation, $dto->jobId, $pageId, $siteId);
@@ -110,7 +128,26 @@ class GetAiSiteChangeStatusHandler
 		);
 	}
 
+	protected function resolveSiteIdByPageId(int $pageId): int
+	{
+		return AiSiteChangeGenerationHelper::resolveSiteIdByPageId($pageId);
+	}
+
 	protected function waitForSeconds(int $seconds): void
+	{
+		// Leave as soon as the job is over, re-reading only the light descriptor between short sleeps.
+		for ($left = $seconds; $left > 0; $left -= $step)
+		{
+			$step = min(self::WAIT_POLL_INTERVAL_SECONDS, $left);
+			$this->sleepSeconds($step);
+			if ($left > $step && $this->loadGenerationDescriptor($this->waitingGenerationId, $this->waitingUserId)->isTerminal())
+			{
+				return;
+			}
+		}
+	}
+
+	protected function sleepSeconds(int $seconds): void
 	{
 		sleep($seconds);
 	}
@@ -149,7 +186,7 @@ class GetAiSiteChangeStatusHandler
 	{
 		$generation = $this->createGenerationInstance();
 		if (
-			!$generation->initById($generationId)
+			!$generation->initByIdWithoutHtmlBlocks($generationId)
 			|| !$generation->getScenario() instanceof ChangeAiSite
 			|| !$this->canAccessGeneration($generation, $userId)
 		)

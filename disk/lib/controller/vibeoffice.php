@@ -6,11 +6,11 @@ namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
 use Bitrix\Disk\Document;
-use Bitrix\Disk\Document\DocumentEditorUser;
 use Bitrix\Disk\Document\Models;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Document\Models\GuestUser;
 use Bitrix\Disk\ExternalLink;
+use Bitrix\Disk\Folder;
 use Bitrix\Disk\Document\OnlyOffice\RestrictionManager;
 use Bitrix\Disk\Document\Vibeoffice\Clients\ProtocolClientFactory;
 use Bitrix\Disk\Document\Vibeoffice\Clients\ProtocolClientInterface;
@@ -21,13 +21,16 @@ use Bitrix\Disk\Document\Vibeoffice\HostDocumentKey;
 use Bitrix\Disk\Document\Vibeoffice\OpenRetryPolicy;
 use Bitrix\Disk\Document\Vibeoffice\SessionRegistry;
 use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizer;
+use Bitrix\Disk\Document\Vibeoffice\Webhook\DeliveryTable;
 use Bitrix\Disk\Document\Vibeoffice\Webhook\WebhookProcessor;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Internal\Access\DownloadAccess;
 use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
 use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkOpenPolicy;
 use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkPasswordService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internals\Engine;
+use Bitrix\Disk\Internals\ObjectPathTable;
 use Bitrix\Disk\User;
 use Bitrix\Main\Context;
 use Bitrix\Main\DI\ServiceLocator;
@@ -62,6 +65,9 @@ final class Vibeoffice extends Engine\Controller
 {
 	/** TTL (seconds) of the host-signed egress URL the platform uses to pull the source. */
 	private const EGRESS_URL_TTL = 600;
+	private const SAVED_ACK_ACCEPT_HEADER = 'X-VO-Accept-Ack';
+	private const SAVED_ACK_PROTOCOL = 'saved-apply-v1';
+
 
 	/**
 	 * Hard cap on version descriptors accepted per signVersionUrls call. The version-history
@@ -91,11 +97,31 @@ final class Vibeoffice extends Engine\Controller
 	private const TEMPORARY_HOST_CODES = [
 		self::LOCK_TIMEOUT_ERROR_CODE,
 		'vibeoffice_state_failed',
+		'vibeoffice_transport_unknown',
 		SessionRegistry::ERROR_CODE_BUSY,
+	];
+
+	private const TERMINAL_OPEN_CODES = [
+		'open_access_revoked',
+		'open_session_expired',
+		'open_session_closed',
+		'open_identity_mismatch',
+		'save_refused',
 	];
 
 	private ?DocumentSession $openedDocumentSession = null;
 	private ?UnifiedLinkAccessLevel $unifiedLinkAccessLevel = null;
+
+	private array $trustedOpening = [];
+
+	// BX-29.1 keeps the overall opening budget parametric: only an explicit policy hands one in, and
+	// the numeric total is owned by ROL-102. Without a budget the per-open limits of OpenRetryPolicy apply.
+	private ?Document\Vibeoffice\OpeningBudget $openingBudget = null;
+
+	public function setOpeningBudget(Document\Vibeoffice\OpeningBudget $budget): void
+	{
+		$this->openingBudget ??= $budget;
+	}
 
 	public function getOpenedDocumentSession(): ?DocumentSession
 	{
@@ -116,7 +142,7 @@ final class Vibeoffice extends Engine\Controller
 						'=EXTERNAL_HASH' => $documentSessionHash,
 						'=SERVICE' => Models\DocumentService::Vibeoffice->value,
 					]);
-				}
+				},
 			),
 		];
 	}
@@ -168,6 +194,18 @@ final class Vibeoffice extends Engine\Controller
 					new HttpMethod([HttpMethod::METHOD_POST]),
 				],
 			],
+			'getSavedRefusalReason' => [
+				'+prefilters' => [
+					new HttpMethod([HttpMethod::METHOD_POST]),
+				],
+			],
+			'getSavedRefusalReasonForExternalLink' => [
+				'prefilters' => [
+					new HttpMethod([HttpMethod::METHOD_POST]),
+					new Csrf(false),
+					new Document\Vibeoffice\Filters\VibeofficeEnabled(),
+				],
+			],
 			'waitForSaved' => [
 				'+prefilters' => [
 					new HttpMethod([HttpMethod::METHOD_POST]),
@@ -208,7 +246,7 @@ final class Vibeoffice extends Engine\Controller
 				'prefilters' => [
 					new HttpMethod([HttpMethod::METHOD_GET]),
 					new EgressUrlSignatureCheck(
-						(string)$this->getConfiguration()->getApiSecret()
+						(string)$this->getConfiguration()->getApiSecret(),
 					),
 				],
 			],
@@ -236,7 +274,7 @@ final class Vibeoffice extends Engine\Controller
 					new Csrf(false),
 					new ContentType([ContentType::JSON]),
 					new Document\Vibeoffice\Filters\WebhookSignatureCheck(
-						(string)$this->getConfiguration()->getWebhookSecret()
+						(string)$this->getConfiguration()->getWebhookSecret(),
 					),
 				],
 			],
@@ -252,9 +290,10 @@ final class Vibeoffice extends Engine\Controller
 	 * ({@see Document\Vibeoffice\Filters\WebhookSignatureCheck}). Here we dispatch by
 	 * `X-VO-Event` and de-duplicate by `X-VO-Delivery` through {@see WebhookProcessor}.
 	 *
-	 * We answer 2xx (a bare `{}` JSON) only AFTER the processing succeeds — for
-	 * `document.saved` this means after the working copy was downloaded and persisted as a
-	 * new Disk version, so the platform does not retry a delivery we have already applied.
+	 * We answer 2xx only AFTER the processing succeeds — for `document.saved` this means
+	 * after the durable delivery receipt proves the working copy was persisted as a new Disk
+	 * version. A caller that sends `X-VO-Accept-Ack: saved-apply-v1` receives that receipt;
+	 * callers without the negotiation header retain the bare `{}` response.
 	 * A duplicate `X-VO-Delivery` is acknowledged with 2xx without re-processing.
 	 *
 	 * On a malformed delivery id or body we return 400; the signature failure paths return
@@ -314,6 +353,21 @@ final class Vibeoffice extends Engine\Controller
 			$this->addErrors($result->getErrors());
 
 			return null;
+		}
+		if ($event === WebhookProcessor::EVENT_SAVED)
+		{
+			$ack = $result->getData()['ack'] ?? null;
+			if (!is_array($ack))
+			{
+				$response->setStatus('500 Internal Server Error');
+				$this->addError(new Error('Saved content is not committed.', 'vibeoffice_saved_not_applied'));
+
+				return null;
+			}
+			if ((string)$request->getHeader(self::SAVED_ACK_ACCEPT_HEADER) === self::SAVED_ACK_PROTOCOL)
+			{
+				return new Response\Json(['ack' => $ack]);
+			}
 		}
 
 		return new Response\Json([]);
@@ -445,8 +499,8 @@ final class Vibeoffice extends Engine\Controller
 	}
 
 	public function loadDocumentEditorAction(
-		Disk\File $object = null,
-		Disk\AttachedObject $attachedObject = null,
+		?Disk\File $object = null,
+		?Disk\AttachedObject $attachedObject = null,
 		int $editorMode = Document\OnlyOffice\Editor\ConfigBuilder::VISUAL_MODE_USUAL,
 	): ?HttpResponse
 	{
@@ -484,9 +538,9 @@ final class Vibeoffice extends Engine\Controller
 	}
 
 	public function loadDocumentViewerAction(
-		Disk\File $object = null,
-		Disk\Version $version = null,
-		Disk\AttachedObject $attachedObject = null,
+		?Disk\File $object = null,
+		?Disk\Version $version = null,
+		?Disk\AttachedObject $attachedObject = null,
 		int $editorMode = Document\OnlyOffice\Editor\ConfigBuilder::VISUAL_MODE_USUAL,
 	): ?HttpResponse
 	{
@@ -584,7 +638,7 @@ final class Vibeoffice extends Engine\Controller
 
 		$sessionManager = $this->getSessionManager();
 		$sessionManager
-			->setUserId($this->getCurrentUser()->getId())
+			->setUserId((int)$this->getCurrentUser()->getId())
 			->setSessionType(DocumentSession::TYPE_EDIT)
 			->setSessionContext($documentSession->getContext())
 			->setFile($documentSession->getFile())
@@ -656,7 +710,7 @@ final class Vibeoffice extends Engine\Controller
 			$file = $attachedObject->getFile();
 		}
 
-		if (!($file instanceof Disk\File))
+		if (!$file instanceof Disk\File)
 		{
 			$this->addError(new Error('Could not find the file (content).'));
 
@@ -677,7 +731,7 @@ final class Vibeoffice extends Engine\Controller
 
 		$sessionManager = $this->getSessionManager();
 		$sessionManager
-			->setUserId($this->getCurrentUser()->getId())
+			->setUserId((int)$this->getCurrentUser()->getId())
 			->setSessionType($type)
 			->setSessionContext($documentSessionContext)
 			->setFile($object)
@@ -733,6 +787,17 @@ final class Vibeoffice extends Engine\Controller
 		// OnlyOffice does). The platform `open`/join and DTO-EDITORCONFIG delivery are deferred
 		// to `getEditorConfig` (below), called lazily by the shell once it loads: the `open` runs
 		// once and is idempotent for a live session (platform returns `joined:true`, no re-pull).
+		$this->trustedOpening = [
+			'channel' => 'internal',
+			'objectId' => (int)$file->getId(),
+			'attachedObjectId' => (int)$attachedObject?->getId(),
+			'versionId' => (int)$documentSession->getVersionId(),
+			'type' => $documentSession->getType(),
+			'editorMode' => $editorMode,
+			'openingBudget' => $this->openingBudget?->toArray(),
+			'budgetIssuedAt' => microtime(true),
+		];
+
 		return $this->redirectToShell($documentSession, $restrictionOutcome);
 	}
 
@@ -780,7 +845,56 @@ final class Vibeoffice extends Engine\Controller
 			return $this->showNotFoundConfig();
 		}
 
-		return $this->buildEditorConfig($documentSession);
+		return $this->buildEditorConfig($documentSession, $this->canDownloadByCurrentUser($documentSession));
+	}
+
+	public function getSavedRefusalReasonAction(int $documentSessionId, string $documentSessionHash): ?array
+	{
+		$documentSession = $this->loadExactRefusalSession($documentSessionId, $documentSessionHash);
+		$currentUserId = User::resolveUserId($this->getCurrentUser());
+		if (!$documentSession || !$documentSession->isEdit() || !$currentUserId
+			|| !$documentSession->belongsToUser($currentUserId)
+			|| $documentSession->getContext()?->getExternalLink() instanceof ExternalLink
+			|| !$documentSession->getFile()
+			|| (!$this->canAccessSession($documentSession)
+				&& !$this->resolveUnifiedLinkAccessLevel($documentSession)->canEdit()))
+		{
+			return $this->showNotFoundConfig();
+		}
+
+		return ['reason' => DeliveryTable::findLatestSafeRefusalReason(HostDocumentKey::resolve($documentSession))];
+	}
+
+	public function getSavedRefusalReasonForExternalLinkAction(
+		int $documentSessionId,
+		string $documentSessionHash,
+	): ?array
+	{
+		$documentSession = $this->loadExactRefusalSession($documentSessionId, $documentSessionHash);
+		$link = $documentSession?->getContext()?->getExternalLink();
+		if (!$documentSession?->isEdit() || !($link instanceof ExternalLink)
+			|| !$link->allowEdit() || !$this->canAccessExternalSession($documentSession, $link))
+		{
+			return $this->showNotFoundConfig();
+		}
+
+		return ['reason' => DeliveryTable::findLatestSafeRefusalReason(HostDocumentKey::resolve($documentSession))];
+	}
+
+	private function loadExactRefusalSession(int $documentSessionId, string $documentSessionHash): ?DocumentSession
+	{
+		if ($documentSessionId <= 0 || $documentSessionHash === '')
+		{
+			return null;
+		}
+		$session = DocumentSession::loadById($documentSessionId);
+		if (!$session || $session->getService() !== Models\DocumentService::Vibeoffice
+			|| !hash_equals($session->getExternalHash(), $documentSessionHash))
+		{
+			return null;
+		}
+
+		return $session;
 	}
 
 	/**
@@ -833,7 +947,10 @@ final class Vibeoffice extends Engine\Controller
 			}
 		}
 
-		return $this->buildEditorConfig($documentSession);
+		return $this->buildEditorConfig(
+			documentSession: $documentSession,
+			canDownload: $this->canDownloadByExternalLink($documentSession, $link),
+		);
 	}
 
 	/**
@@ -893,7 +1010,10 @@ final class Vibeoffice extends Engine\Controller
 		$this->unifiedLinkAccessLevel = $accessLevel;
 		try
 		{
-			return $this->buildEditorConfig($documentSession);
+			return $this->buildEditorConfig(
+				documentSession: $documentSession,
+				canDownload: $this->canDownloadByUnifiedLink($documentSession, $accessLevel),
+			);
 		}
 		finally
 		{
@@ -946,7 +1066,7 @@ final class Vibeoffice extends Engine\Controller
 	 * ({@see self::buildOpenBody()} branches on the session's external link, never forcing
 	 * a `CurrentUser`).
 	 */
-	private function buildEditorConfig(DocumentSession $documentSession): ?array
+	private function buildEditorConfig(DocumentSession $documentSession, bool $canDownload): ?array
 	{
 		$this->openedDocumentSession = null;
 
@@ -974,7 +1094,7 @@ final class Vibeoffice extends Engine\Controller
 		// behaviour is unchanged.
 		$withDocumentSource = true;
 
-		$openResult = $this->openDocumentSession($documentSession, $file, $withDocumentSource);
+		$openResult = $this->openDocumentSession($documentSession, $file, $withDocumentSource, $canDownload);
 		if (!$openResult->isSuccess())
 		{
 			if ($documentSession->isEdit() && $this->shouldDowngradeToView($openResult))
@@ -987,10 +1107,11 @@ final class Vibeoffice extends Engine\Controller
 
 				// A separate VIEW opens once, without another retry budget.
 				$openResult = $this->openDocumentSession(
-					$documentSession,
-					$file,
-					$withDocumentSource,
-					OpenRetryPolicy::singleAttempt(),
+					documentSession: $documentSession,
+					file: $file,
+					withDocumentSource: $withDocumentSource,
+					canDownload: $canDownload,
+					policy: OpenRetryPolicy::singleAttempt(),
 				);
 			}
 
@@ -1003,7 +1124,7 @@ final class Vibeoffice extends Engine\Controller
 		}
 
 		$editorConfig = $openResult->getData()['editorConfig'] ?? null;
-		if (!($editorConfig instanceof EditorConfigResponse))
+		if (!$editorConfig instanceof EditorConfigResponse)
 		{
 			return null;
 		}
@@ -1015,6 +1136,7 @@ final class Vibeoffice extends Engine\Controller
 		// counter is shared with OnlyOffice (no SERVICE split); no promo/boost upsell.
 		return $editorConfig->toArray() + [
 			'restriction' => $this->buildRestrictionData(),
+			'openingBudget' => $this->openingBudget?->toArray(),
 		];
 	}
 
@@ -1039,7 +1161,10 @@ final class Vibeoffice extends Engine\Controller
 		$manager = $this->getSessionManager();
 		$manager
 			->setSessionType(DocumentSession::TYPE_VIEW)
-			->setUserId($documentSession->getUserId())
+			->setUserId($context->getExternalLink() instanceof ExternalLink
+				? $documentSession->getUserId()
+				: (int)$this->getCurrentUser()->getId()
+			)
 			->setFile($file)
 			->setVersion($documentSession->getVersion())
 			->setAttachedObject($context->getAttachedObject())
@@ -1081,13 +1206,14 @@ final class Vibeoffice extends Engine\Controller
 	 */
 	private function canAccessExternalSession(DocumentSession $documentSession, ExternalLink $link): bool
 	{
-		$object = $link->getObject();
-		if (!$object || $object->isDeleted())
+		$file = $documentSession->getFile();
+		$externalLinkObject = $link->getObject();
+		if (!$file || $file->isDeleted() || !$externalLinkObject || $externalLinkObject->isDeleted())
 		{
 			return false;
 		}
 
-		if ((int)$documentSession->getObjectId() !== (int)$object->getRealObjectId())
+		if (!$this->isFileCoveredByExternalLink($file, $externalLinkObject))
 		{
 			return false;
 		}
@@ -1108,6 +1234,86 @@ final class Vibeoffice extends Engine\Controller
 		}
 
 		return true;
+	}
+
+	private function isFileCoveredByExternalLink(Disk\File $file, Disk\BaseObject $externalLinkObject): bool
+	{
+		$fileId = (int)$file->getRealObjectId();
+		$externalLinkObjectId = (int)$externalLinkObject->getRealObjectId();
+		if ($fileId === $externalLinkObjectId)
+		{
+			return true;
+		}
+
+		if (!$externalLinkObject instanceof Folder)
+		{
+			return false;
+		}
+
+		return (bool)ObjectPathTable::query()
+			->setSelect(['ID'])
+			->where('OBJECT_ID', $fileId)
+			->where('PARENT_ID', $externalLinkObjectId)
+			->setLimit(1)
+			->fetch()
+		;
+	}
+
+	private function canDownloadByCurrentUser(DocumentSession $documentSession): bool
+	{
+		return $this->canDownloadBySecurityContext($documentSession);
+	}
+
+	private function canDownloadByExternalLink(
+		DocumentSession $documentSession,
+		ExternalLink $externalLink,
+	): bool
+	{
+		if ($externalLink->allowEdit())
+		{
+			return true;
+		}
+
+		$file = $documentSession->getFile();
+		if (!$file)
+		{
+			return false;
+		}
+
+		return ServiceLocator::getInstance()
+			->get(DownloadAccess::class)
+			->checkExternalLink($file, $externalLink)
+		;
+	}
+
+	private function canDownloadByUnifiedLink(
+		DocumentSession $documentSession,
+		UnifiedLinkAccessLevel $accessLevel,
+	): bool
+	{
+		if ($accessLevel->canEdit())
+		{
+			return true;
+		}
+
+		return $this->canDownloadBySecurityContext($documentSession, true);
+	}
+
+	private function canDownloadBySecurityContext(
+		DocumentSession $documentSession,
+		bool $useExternalContext = false,
+	): bool
+	{
+		$file = $documentSession->getFile();
+		$storage = $file?->getStorage();
+		if (!$file || !$storage)
+		{
+			return false;
+		}
+
+		$securityContext = $storage->getCurrentUserSecurityContext($useExternalContext);
+
+		return $file->canDownload($securityContext);
 	}
 
 	/**
@@ -1202,6 +1408,7 @@ final class Vibeoffice extends Engine\Controller
 		DocumentSession $documentSession,
 		Disk\File $file,
 		bool $withDocumentSource,
+		bool $canDownload = true,
 		?OpenRetryPolicy $policy = null,
 	): Result
 	{
@@ -1213,14 +1420,14 @@ final class Vibeoffice extends Engine\Controller
 			// The body is assembled once and reused by every attempt of the cycle: the signed egress
 			// URL outlives the budget, and an open without a document source is refused by the
 			// platform with `409 session_closing`.
-			$body = $this->buildOpenBody($documentSession, $file, $withDocumentSource);
+			$body = $this->buildOpenBody($documentSession, $file, $withDocumentSource, $canDownload);
 		}
 		catch (\Throwable $e)
 		{
 			return (new Result())->addError(new Error($e->getMessage()));
 		}
 
-		return $this->openRegisteredDocumentSession($documentSession, $client, $body, $policy);
+		return $this->openRegisteredDocumentSession($documentSession, $client, $body, $policy, validateFresh: true);
 	}
 
 	/**
@@ -1235,17 +1442,27 @@ final class Vibeoffice extends Engine\Controller
 		?SessionRegistry $registry = null,
 		?callable $clock = null,
 		?callable $lockSleeper = null,
+		bool $validateFresh = false,
+		bool $restartClosedOnce = true,
 	): Result
 	{
 		$registry ??= new SessionRegistry();
 		$policy ??= OpenRetryPolicy::createFromConfiguration($this->getConfiguration());
-		$clock ??= static fn(): float => microtime(true);
+		$clock ??= static fn(): float => hrtime(true) / 1e9;
 		$lockSleeper ??= static function (int $microseconds): void
 		{
 			usleep($microseconds);
 		};
 
 		$deadline = $clock() + $policy->getBudgetSeconds();
+		if ($this->openingBudget !== null)
+		{
+			if ($this->openingBudget->remainingMs() === 0)
+			{
+				return (new Result())->addError(new Error('Opening deadline exceeded.', 'vibeoffice_open_deadline'));
+			}
+			$deadline = min($deadline, $this->openingBudget->deadlineForOpen());
+		}
 		$hostDocKey = HostDocumentKey::resolve($documentSession);
 		$beginResult = $this->beginOpenWithRetries(
 			$registry,
@@ -1262,6 +1479,7 @@ final class Vibeoffice extends Engine\Controller
 		}
 
 		$openToken = $beginResult->getData()['openToken'];
+		$body['host_open_id'] = $openToken;
 		try
 		{
 			$openResult = $this->openDocumentSessionWithRetries(
@@ -1271,6 +1489,7 @@ final class Vibeoffice extends Engine\Controller
 				$policy,
 				$clock,
 				deadline: $deadline,
+				validateFresh: $validateFresh,
 			);
 			if ($openResult->isSuccess())
 			{
@@ -1281,12 +1500,63 @@ final class Vibeoffice extends Engine\Controller
 				}
 			}
 		}
-		catch (\Throwable $exception)
+		catch (\Throwable)
 		{
-			$openResult = (new Result())->addError(new Error($exception->getMessage(), 'vibeoffice_open_failed'));
+			$openResult = (new Result())->addError(new Error(
+				'Vibeoffice transport failed before a verified response.',
+				'vibeoffice_transport_unknown',
+				['responseVerified' => false],
+			));
+		}
+		if ($restartClosedOnce && $this->hasVerifiedOpenCode($openResult, 'open_session_closed'))
+		{
+			$cancelled = $this->cancelRegisteredOpen($registry, $openToken, $hostDocKey, $openResult);
+			if (($cancelled->getData()['hostDocKey'] ?? null) !== $hostDocKey)
+			{
+				return $cancelled;
+			}
+			$fresh = $this->validateFreshOpenSession($documentSession);
+			if (!$fresh->isSuccess())
+			{
+				return $fresh;
+			}
+
+			return $this->openRegisteredDocumentSession(
+				$documentSession,
+				$client,
+				$body,
+				$policy,
+				$registry,
+				$clock,
+				$lockSleeper,
+				validateFresh: true,
+				restartClosedOnce: false,
+			);
 		}
 
-		return $this->cancelRegisteredOpen($registry, $openToken, $hostDocKey, $openResult);
+		return $this->isTerminalOpenFailure($openResult)
+			? $this->cancelRegisteredOpen($registry, $openToken, $hostDocKey, $openResult)
+			: $openResult
+		;
+	}
+
+	private function hasVerifiedOpenCode(Result $result, string $code): bool
+	{
+		foreach ($result->getErrors() as $error)
+		{
+			if (!$error instanceof Error)
+			{
+				continue;
+			}
+			$data = $error->getCustomData();
+			if (is_array($data) && ($data['responseVerified'] ?? false) === true
+				&& $this->splitErrorCode($error)[1] === $code)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -1313,7 +1583,7 @@ final class Vibeoffice extends Engine\Controller
 		while (true)
 		{
 			$attempt++;
-			$beginResult = $registry->beginOpen($documentSession, $hostDocKey);
+			$beginResult = $registry->beginOrResumeOpen($documentSession, $hostDocKey);
 			if ($beginResult->isSuccess() || !$this->isDocumentLockTimeout($beginResult))
 			{
 				return $beginResult;
@@ -1402,25 +1672,40 @@ final class Vibeoffice extends Engine\Controller
 		?callable $clock = null,
 		?callable $sleeper = null,
 		?float $deadline = null,
+		bool $validateFresh = false,
 	): Result
 	{
 		$policy ??= OpenRetryPolicy::createFromConfiguration($this->getConfiguration());
-		$clock ??= static fn(): float => microtime(true);
-		$sleeper ??= static function (int $seconds) use ($policy): void
+		$clock ??= static fn(): float => hrtime(true) / 1e9;
+		$sleeper ??= static function (int $microseconds): void
 		{
-			usleep($policy->scatterPauseMicroseconds($seconds));
+			usleep($microseconds);
 		};
 
 		$docKey = HostDocumentKey::resolve($documentSession);
 		$deadline ??= $clock() + $policy->getBudgetSeconds();
+		if ($this->openingBudget !== null)
+		{
+			$deadline = min($deadline, $this->openingBudget->deadlineForOpen());
+		}
 		$attempt = 0;
 
 		while (true)
 		{
 			$attempt++;
 			$startedAt = $clock();
+			$validation = $validateFresh ? $this->validateFreshOpenSession($documentSession) : null;
+			if ($validation !== null && !$validation->isSuccess())
+			{
+				return $validation;
+			}
 
-			$openResult = $client->open($docKey, $body);
+			if ($this->openingBudget !== null && $this->openingBudget->remainingMs() === 0)
+			{
+				return (new Result())->addError(new Error('Opening deadline exceeded.', 'vibeoffice_open_deadline'));
+			}
+
+			$openResult = $client->open($docKey, $body, $this->openingBudget?->deadlineForOpen());
 			if ($openResult->isSuccess())
 			{
 				$this->logOpenOutcome($documentSession, $attempt, null, true);
@@ -1430,21 +1715,118 @@ final class Vibeoffice extends Engine\Controller
 
 			$errors = $this->mapOpenErrors($openResult->getErrors());
 			$pause = $this->resolveRetryPause($errors, $policy, $attempt, $clock() - $startedAt);
-			if ($pause === null || !$policy->fitsIntoBudget($clock(), $deadline, $pause))
+			$pauseMicroseconds = $pause !== null ? $policy->scatterPauseMicroseconds($pause) : null;
+			if (
+				$pauseMicroseconds !== null
+				&& $policy->fitsIntoBudget($clock(), $deadline, $pauseMicroseconds / 1_000_000)
+			)
 			{
-				$error = $this->firstOpenError($errors);
-				$this->logOpenOutcome(
-					$documentSession,
-					$attempt,
-					$error !== null ? $this->splitErrorCode($error)[1] : null,
-					false,
-				);
-
-				return (new Result())->addErrors($errors);
+				$sleeper($pauseMicroseconds);
+				if ($policy->fitsIntoBudget($clock(), $deadline, 0.0))
+				{
+					continue;
+				}
 			}
 
-			$sleeper($pause);
+			$error = $this->firstOpenError($errors);
+			$this->logOpenOutcome(
+				$documentSession,
+				$attempt,
+				$error !== null ? $this->splitErrorCode($error)[1] : null,
+				false,
+			);
+
+			return (new Result())->addErrors($errors);
 		}
+	}
+
+	private function validateFreshOpenSession(DocumentSession $documentSession): Result
+	{
+		$fresh = DocumentSession::loadById($documentSession->getId());
+		$originalFile = $documentSession->getFile();
+		$freshFile = $fresh?->getFile();
+		if (
+			!$fresh
+			|| !$originalFile
+			|| !$freshFile
+			|| !$fresh->isActive()
+			|| $fresh->getService() !== Models\DocumentService::Vibeoffice
+			|| $fresh->getExternalHash() !== $documentSession->getExternalHash()
+			|| $fresh->getObjectId() !== $documentSession->getObjectId()
+			|| $fresh->getVersionId() !== $documentSession->getVersionId()
+			|| $fresh->getType() !== $documentSession->getType()
+			|| $fresh->getUserId() !== $documentSession->getUserId()
+			|| HostDocumentKey::resolve($fresh) !== HostDocumentKey::resolve($documentSession)
+			|| $freshFile->getName() !== $originalFile->getName()
+			|| $freshFile->getExtension() !== $originalFile->getExtension()
+		)
+		{
+			return (new Result())->addError(new Error(
+				'Vibeoffice open identity changed.',
+				'open_identity_mismatch',
+			));
+		}
+
+		$link = $fresh->getContext()?->getExternalLink();
+		if ($link instanceof ExternalLink)
+		{
+			$allowed = $this->canAccessExternalSession($fresh, $link)
+				&& (!$fresh->isEdit() || $link->allowEdit());
+		}
+		elseif ($this->unifiedLinkAccessLevel !== null)
+		{
+			$accessLevel = $this->resolveUnifiedLinkAccessLevel($fresh);
+			$allowed = $accessLevel->canRead() && (!$fresh->isEdit() || $accessLevel->canEdit());
+		}
+		else
+		{
+			$allowed = $this->canAccessSession($fresh);
+		}
+		if (!$allowed)
+		{
+			return (new Result())->addError(new Error('Vibeoffice access was revoked.', 'open_access_revoked'));
+		}
+
+		return new Result();
+	}
+
+	private function isTerminalOpenFailure(Result $result): bool
+	{
+		foreach ($result->getErrors() as $error)
+		{
+			if (!$error instanceof Error)
+			{
+				continue;
+			}
+
+			[, $platformCode] = $this->splitErrorCode($error);
+			if (in_array($platformCode ?? $error->getCode(), self::TERMINAL_OPEN_CODES, true))
+			{
+				return true;
+			}
+			if ($platformCode !== null && !OpenRetryPolicy::isTemporaryPlatformCode($platformCode))
+			{
+				return true;
+			}
+
+			$data = $error->getCustomData();
+			if (is_array($data) && ($data['requestSent'] ?? null) === false)
+			{
+				return true;
+			}
+			if (is_array($data) && ($data['responseVerified'] ?? null) === true)
+			{
+				if (OpenRetryPolicy::isTemporaryPlatformCode($platformCode))
+				{
+					return false;
+				}
+
+				$httpStatus = $this->normalizeHttpStatus($data['httpStatus'] ?? null);
+				return !in_array($httpStatus, [409, 429, 502, 503, 504], true);
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -1622,6 +2004,7 @@ final class Vibeoffice extends Engine\Controller
 		DocumentSession $documentSession,
 		Disk\File $file,
 		bool $withDocumentSource,
+		bool $canDownload = true,
 	): array
 	{
 		// P8.T2 (ALG-EXTERNAL-GRANT): a session reached through a public external link is
@@ -1653,6 +2036,13 @@ final class Vibeoffice extends Engine\Controller
 		$body['document'] = [
 			'title' => $file->getName(),
 		];
+		if (!$canDownload)
+		{
+			$body['document']['permissions'] = [
+				'download' => false,
+				'print' => false,
+			];
+		}
 		$body['editor'] = [
 			'lang' => (string)(Context::getCurrent()?->getLanguage() ?? 'en'),
 		];
@@ -2027,6 +2417,10 @@ final class Vibeoffice extends Engine\Controller
 			'documentSessionId' => $documentSession->getId(),
 			'documentSessionHash' => $documentSession->getExternalHash(),
 			'restrictionOutcome' => $restrictionOutcome,
+			'openingContext' => $this->trustedOpening === [] ? null : Document\Vibeoffice\RestartTarget::sign(
+				$this->trustedOpening,
+				(int)$this->getCurrentUser()->getId(),
+			),
 		]);
 
 		return $this->redirectTo($link);
@@ -2101,7 +2495,7 @@ final class Vibeoffice extends Engine\Controller
 	{
 		foreach ($openResult->getErrors() as $error)
 		{
-			if (!($error instanceof Error))
+			if (!$error instanceof Error)
 			{
 				continue;
 			}
@@ -2139,7 +2533,7 @@ final class Vibeoffice extends Engine\Controller
 		$mapped = [];
 		foreach ($errors as $error)
 		{
-			if (!($error instanceof Error))
+			if (!$error instanceof Error)
 			{
 				$mapped[] = $error;
 
@@ -2149,12 +2543,16 @@ final class Vibeoffice extends Engine\Controller
 			[$httpStatus, $platformCode] = $this->splitErrorCode($error);
 			if ($httpStatus === null)
 			{
+				$hostData = ['hostCode' => $error->getCode()];
+				$errorData = $error->getCustomData();
+				if (is_array($errorData) && is_bool($errorData['responseVerified'] ?? null))
+				{
+					$hostData['responseVerified'] = $errorData['responseVerified'];
+				}
 				// A refusal of the host itself (no HTTP status): temporary ones join the platform ones on
 				// the screen of the branch of saving, the rest are kept as they are.
 				$mapped[] = in_array($error->getCode(), self::TEMPORARY_HOST_CODES, true)
-					? new Error($error->getMessage(), self::IN_PROGRESS_ERROR_CODE, [
-						'hostCode' => $error->getCode(),
-					])
+					? new Error($error->getMessage(), self::IN_PROGRESS_ERROR_CODE, $hostData)
 					: $error
 				;
 
@@ -2163,6 +2561,7 @@ final class Vibeoffice extends Engine\Controller
 
 			$errCode = match (true)
 			{
+				$platformCode === 'save_refused' => 'ERR-SAVE-REFUSED',
 				$platformCode === 'doc_full' => 'ERR-DOC-FULL',
 				OpenRetryPolicy::isTemporaryPlatformCode($platformCode) => self::IN_PROGRESS_ERROR_CODE,
 				$httpStatus === 409 => self::IN_PROGRESS_ERROR_CODE,
@@ -2179,6 +2578,7 @@ final class Vibeoffice extends Engine\Controller
 				$error->getMessage(),
 				$errCode,
 				[
+					'responseVerified' => true,
 					'httpStatus' => $httpStatus,
 					'platformCode' => $platformCode,
 					'retryAfter' => $this->extractRetryAfter($error),

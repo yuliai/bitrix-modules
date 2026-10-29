@@ -14,6 +14,7 @@ enum DocumentHeaderElement: string
 {
 	case Logo = 'logo';
 	case Name = 'name';
+	case ContentWarning = 'contentWarning';
 	case Rename = 'rename';
 	case SaveStatus = 'saveStatus';
 	case Boost = 'boost';
@@ -21,6 +22,8 @@ enum DocumentHeaderElement: string
 	case Presence = 'presence';
 	case Access = 'access';
 	case CopyLink = 'copyLink';
+	case Download = 'download';
+	case Presentation = 'presentation';
 
 	/**
 	 * @return string[] element values in render order

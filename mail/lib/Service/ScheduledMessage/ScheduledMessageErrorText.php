@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Service\ScheduledMessage;
 
+use Bitrix\Mail\Service\Message\SendFailure;
 use Bitrix\Mail\Service\Message\SendMessageService;
 use Bitrix\Main\Localization\Loc;
 
@@ -11,9 +12,9 @@ Loc::loadMessages(__FILE__);
 
 /**
  * The only place a failed send is put into words. The messages the services keep in `LAST_ERROR` are English
- * diagnostics meant for a log, so every reader of a refusal — the notification of its author and the row of
- * the section — asks here and names the same failure the same way. A code the map does not know yet answers
- * with a phrase that still leaves the reader a next step.
+ * diagnostics meant for a log, so every reader of a refusal (the notification of its author, the row of the
+ * section and the screen of a letter the queue failed to send) asks here and names the same failure the same
+ * way. A code the map does not know yet answers with a phrase that still leaves the reader a next step.
  */
 final class ScheduledMessageErrorText
 {
@@ -44,9 +45,20 @@ final class ScheduledMessageErrorText
 			=> 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_SEND_FAILED',
 		ScheduledMessageAttachmentService::ERROR_ATTACHMENT_SIZE_LIMIT
 			=> 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_ATTACHMENT_SIZE_LIMIT',
+		SendFailure::CODE_SENDER_ADDRESS_MISMATCH
+			=> 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_SENDER_ADDRESS_MISMATCH',
+		SendFailure::CODE_SENDER_UNAVAILABLE
+			=> 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_SENDER_UNAVAILABLE',
+		SendFailure::CODE_SEND_FAILED
+			=> 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_SEND_FAILED',
 	];
 
 	private const FALLBACK_PHRASE = 'MAIL_SCHEDULED_MESSAGE_ERROR_REASON_UNKNOWN';
+
+	public static function hasReason(string $code): bool
+	{
+		return isset(self::REASON_PHRASE[$code]);
+	}
 
 	public static function getReason(string $code, ?string $languageId = null): string
 	{

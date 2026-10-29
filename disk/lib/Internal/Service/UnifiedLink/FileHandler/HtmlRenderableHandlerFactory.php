@@ -91,7 +91,7 @@ readonly class HtmlRenderableHandlerFactory
 		// leads to the grid.
 		if ($this->isHtmlViewerTarget($file, $attachedObject, $version))
 		{
-			return new HtmlFileHandler($documentSource);
+			return new HtmlFileHandler($documentSource, $accessLevel);
 		}
 
 		return match ($typeFile)

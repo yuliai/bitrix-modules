@@ -10,6 +10,7 @@ use Bitrix\Disk\Document\OnlyOffice\RestrictionManager;
 use Bitrix\Disk\Document\Vibeoffice\VibeofficeHandler;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\Integration\Baas\BaasSessionBoostService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkSupportService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internals\Engine;
@@ -261,10 +262,51 @@ final class DocumentService extends Engine\Controller
 	public function downloadDocumentAction(Document\Models\DocumentSession $documentSession): HttpResponse
 	{
 		$file = $documentSession->getFile();
+
+		$securityContext = $file?->getStorage()?->getSecurityContext(
+			user: $this->getCurrentUser(),
+			shouldCheckUnifiedLink: $this->shouldCheckUnifiedLink($documentSession),
+		);
+
+		if (!$securityContext || !$documentSession->canDownload($securityContext))
+		{
+			$this->addError(new Error('Could not download document.'));
+
+			$response = new HttpResponse();
+			$response->setStatus('403 Forbidden');
+
+			return $response;
+		}
+
 		$response = Response\BFile::createByFileId($file->getFileId(), $file->getName());
 		$response->setCacheTime(Disk\Configuration::DEFAULT_CACHE_TIME);
 
 		return $response;
+	}
+
+	private function shouldCheckUnifiedLink(Document\Models\DocumentSession $documentSession): bool
+	{
+		$file = $documentSession->getFile();
+
+		if (!$file)
+		{
+			return false;
+		}
+
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->getRequest());
+
+		if (!is_string($uls) || $uls === '')
+		{
+			return false;
+		}
+
+		/** @var UnifiedLinkAccessService $unifiedLinkAccessService */
+		$unifiedLinkAccessService = ServiceLocator::getInstance()->get(UnifiedLinkAccessService::class);
+
+		return $unifiedLinkAccessService->validateUlsForObjectId(
+			objectId: $file->getId(),
+			uls: $uls,
+		);
 	}
 
 	public function goToEditOrPreviewAction($serviceCode, $attachedObjectId = null, $objectId = null, $versionId = null)

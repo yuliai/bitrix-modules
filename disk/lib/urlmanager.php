@@ -753,6 +753,30 @@ class UrlManager implements IErrorable
 		return ($absolute ? $this->getHostUrl() : '') . '/disk/boards/' . $file->getId() . '/open' . ($c_element ? '?c_element=' . $c_element : '');
 	}
 
+	/**
+	 * Gets url to open a board on one of its elements.
+	 * @param File $file Board file.
+	 * @param string $elementId Identifier of the element the board scrolls to.
+	 * @param bool $absolute Generate absolute url with host url.
+	 * @return string
+	 */
+	public function getUrlForViewBoardElement(File $file, string $elementId, bool $absolute = true): string
+	{
+		if ($file->supportsUnifiedLink())
+		{
+			return $this->getUnifiedLink($file, [
+				'absolute' => $absolute,
+				'additionalQueryParams' => ['elementId' => $elementId],
+			]);
+		}
+
+		return
+			($absolute ? $this->getHostUrl() : '')
+			. '/disk/boards/' . $file->getId() . '/open?'
+			. http_build_query(['elementId' => $elementId])
+		;
+	}
+
 	public function getUrlForViewBoardVersion(File $file, int $versionId, $absolute = false): string
 	{
 		if ($file->supportsUnifiedLink())

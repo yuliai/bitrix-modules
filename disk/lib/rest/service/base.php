@@ -7,7 +7,9 @@ use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Disk\Internals\Error\ErrorCollection;
 use Bitrix\Disk\Internals\Error\IErrorable;
 use Bitrix\Disk\Internals\Engine;
+use Bitrix\Disk\File;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Rest\AccessException;
 use Bitrix\Main\Result;
 use Bitrix\Rest\RestException;
 
@@ -58,6 +60,16 @@ abstract class Base implements IErrorable
 	{
 		global $USER;
 		$this->userId = $USER->getId();
+	}
+
+	protected function assertCanDownload(File $file): void
+	{
+		$securityContext = $file->getStorage()?->getCurrentUserSecurityContext();
+
+		if (!$securityContext || !$file->canDownload($securityContext))
+		{
+			throw new AccessException;
+		}
 	}
 
 	/**

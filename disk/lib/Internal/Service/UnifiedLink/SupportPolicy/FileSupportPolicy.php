@@ -18,11 +18,17 @@ class FileSupportPolicy extends BaseSupportPolicy
 	 */
 	final public function supports(BaseObject $baseObject): bool
 	{
-		return
-			$this->passesConfigurationChecks($baseObject)
-			&& parent::supports($baseObject)
-			&& $this->passesSpecializedChecks($baseObject)
-		;
+		return parent::supports($baseObject) && $this->passesSpecializedChecks($baseObject);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 * The specialized checks stay out: they are judged by the stored file, which a listing must not read.
+	 * @param File $baseObject
+	 */
+	final public function supportsByConfiguration(BaseObject $baseObject): bool
+	{
+		return $this->passesConfigurationChecks($baseObject) && parent::supportsByConfiguration($baseObject);
 	}
 
 	/**

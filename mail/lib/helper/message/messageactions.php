@@ -138,6 +138,32 @@ final class MessageActions
 	}
 
 	/**
+	 * A refusal that does not depend on the mailbox repeats in every group of the same
+	 * operation, and the user has to read it once.
+	 *
+	 * @param \Bitrix\Main\Error[] $errors
+	 */
+	private static function addErrorsOncePerCode(\Bitrix\Main\Result $result, array $errors): void
+	{
+		$knownCodes = array_map(
+			static fn (\Bitrix\Main\Error $error): string => (string)$error->getCode(),
+			$result->getErrors(),
+		);
+
+		foreach ($errors as $error)
+		{
+			$code = (string)$error->getCode();
+			if ($code !== '' && in_array($code, $knownCodes, true))
+			{
+				continue;
+			}
+
+			$result->addError($error);
+			$knownCodes[] = $code;
+		}
+	}
+
+	/**
 	 * @param array $ids
 	 * @param bool $deleteImmediately
 	 * @param int|null $userId MCP: explicit user; when null — session user is used
@@ -208,7 +234,7 @@ final class MessageActions
 				}
 			}
 
-			$result->addErrors($groupResult->getErrors());
+			self::addErrorsOncePerCode($result, $groupResult->getErrors());
 		}
 
 		$result->setData(array_merge($result->getData(), ['processedIds' => $processedIds]));
@@ -575,6 +601,7 @@ final class MessageActions
 						$processedIds[] = $group->compositeIds[$index];
 					}
 				}
+
 			}
 
 			$result->addErrors($groupResult->getErrors());
@@ -584,6 +611,7 @@ final class MessageActions
 
 		return $result;
 	}
+
 
 	/**
 	 * @param array $ids
@@ -624,7 +652,10 @@ final class MessageActions
 			return $result;
 		}
 
-		if (!Integration\Crm\Permissions::getInstance()->hasAccessToCrm($userId))
+		$hasAccessToCrm = $userId === null
+			? Helper\MailboxAccess::hasCurrentUserAccessToEditMailboxIntegrationCrm()
+			: Helper\MailboxAccess::hasUserAccessToEditMailboxIntegrationCrm($userId);
+		if (!$hasAccessToCrm)
 		{
 			$result->addError(new \Bitrix\Main\Error(
 				Loc::getMessage('MAIL_MESSAGE_ACTIONS_NO_CRM_ACCESS'),
@@ -660,6 +691,8 @@ final class MessageActions
 				'MSG_HASH' => 'MESSAGE_UID.HEADER_MD5',
 				'DIR_MD5' => 'MESSAGE_UID.DIR_MD5',
 				'MSG_UID' => 'MESSAGE_UID.MSG_UID',
+				// The version of the folder the uid was written under: the lazy download reads it too
+				'DIR_UIDV' => 'MESSAGE_UID.DIR_UIDV',
 			],
 			'order' => [
 				'MESSAGE_UID.INTERNALDATE' => 'DESC',
@@ -688,6 +721,7 @@ final class MessageActions
 		$message['__forced'] = true;
 
 		self::sanitizeHtmlForOldCrmModule($message);
+		$matchedActivityId = self::findMatchedOutgoingCrmActivityId($message);
 
 		if (!\CCrmEMail::imapEmailMessageAdd($message, null, $error))
 		{
@@ -700,8 +734,57 @@ final class MessageActions
 				$result->addError(new \Bitrix\Main\Error(Loc::getMessage('MAIL_MESSAGE_ACTIONS_UNKNOWN_ERROR')));
 			}
 		}
+		elseif (!self::hasCrmActivityBinding($messageId, (int)$message['MAILBOX_ID'], $matchedActivityId))
+		{
+			$result->addError(new \Bitrix\Main\Error(Loc::getMessage('MAIL_MESSAGE_ACTIONS_UNKNOWN_ERROR')));
+		}
 
 		return $result;
+	}
+
+	private static function findMatchedOutgoingCrmActivityId(array $message): ?int
+	{
+		if (empty($message['IS_OUTCOME']) || empty($message['MSG_ID']))
+		{
+			return null;
+		}
+
+		if (!preg_match(
+			'/<crm\.activity\.((\d+)-[0-9a-z]+)@[^>]+>/i',
+			sprintf('<%s>', $message['MSG_ID']),
+			$matches,
+		))
+		{
+			return null;
+		}
+
+		$activity = \Bitrix\Crm\ActivityTable::getByPrimary((int)$matches[2], [
+			'select' => ['ID', 'URN'],
+		])->fetch();
+
+		if (!$activity || mb_strtolower((string)$activity['URN']) !== mb_strtolower($matches[1]))
+		{
+			return null;
+		}
+
+		return (int)$activity['ID'];
+	}
+
+	private static function hasCrmActivityBinding(int $messageId, int $mailboxId, ?int $activityId = null): bool
+	{
+		$query = MessageAccessTable::query()
+			->setSelect(['TOKEN'])
+			->where('MESSAGE_ID', $messageId)
+			->where('MAILBOX_ID', $mailboxId)
+			->where('ENTITY_TYPE', MessageAccessTable::ENTITY_TYPE_CRM_ACTIVITY)
+			->setLimit(1)
+		;
+		if ($activityId !== null)
+		{
+			$query->where('ENTITY_ID', $activityId);
+		}
+
+		return (bool)$query->fetch();
 	}
 
 	private static function prepareMessageForCrm(array $message): array
@@ -814,7 +897,10 @@ final class MessageActions
 			return $result;
 		}
 
-		if (!\Bitrix\Mail\Integration\Crm\Permissions::getInstance()->hasAccessToCrm($userId))
+		$hasAccessToCrm = $userId === null
+			? Helper\MailboxAccess::hasCurrentUserAccessToEditMailboxIntegrationCrm()
+			: Helper\MailboxAccess::hasUserAccessToEditMailboxIntegrationCrm($userId);
+		if (!$hasAccessToCrm)
 		{
 			$result->addError(new \Bitrix\Main\Error(
 				Loc::getMessage('MAIL_MESSAGE_ACTIONS_NO_CRM_ACCESS'),

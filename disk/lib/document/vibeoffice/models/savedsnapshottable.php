@@ -22,6 +22,7 @@ final class SavedSnapshotTable extends DataManager
 			(new IntegerField('SNAPSHOT_SEQ'))->configureSize(8)->configurePrimary(),
 			(new IntegerField('RESULT_OBJECT_ID'))->configureRequired(),
 			(new IntegerField('RESULT_VERSION_ID'))->configureNullable(),
+			(new IntegerField('DELIVERY_ID'))->configureSize(8)->configureNullable(),
 			(new StringField('SOURCE'))->configureRequired()->configureSize(16),
 		];
 	}

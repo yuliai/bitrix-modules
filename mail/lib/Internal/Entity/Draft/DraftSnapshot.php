@@ -212,9 +212,14 @@ final class DraftSnapshot
 			throw new \InvalidArgumentException('Invalid draft sender email.');
 		}
 
+		// Two connections of one address share the formatted string, so the mailbox of the draft is kept
+		// to restore the exact one the letter was written from.
+		$mailboxId = (int)($sender['mailboxId'] ?? 0);
+
 		return [
 			'name' => trim((string)($sender['name'] ?? '')),
 			'email' => $email,
+			...($mailboxId > 0 ? ['mailboxId' => $mailboxId] : []),
 		];
 	}
 

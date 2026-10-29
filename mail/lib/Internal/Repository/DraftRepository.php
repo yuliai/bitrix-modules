@@ -11,6 +11,7 @@ use Bitrix\Mail\Internal\Entity\Draft\DraftAttachmentFingerprint;
 use Bitrix\Mail\Internal\Entity\Draft\DraftPage;
 use Bitrix\Mail\Internal\Entity\Draft\DraftSnapshot;
 use Bitrix\Mail\Internal\Entity\Draft\DraftView;
+use Bitrix\Mail\Internal\Service\DateTime\UtcDateTimeFormatter;
 use Bitrix\Mail\Internals\DraftAttachmentTable;
 use Bitrix\Mail\Internals\DraftTable;
 use Bitrix\Main\Application;
@@ -523,7 +524,7 @@ class DraftRepository
 			),
 			'subject' => (string)($row['SUBJECT'] ?? ''),
 			'bodyPreview' => (string)($row['BODY_PREVIEW'] ?? ''),
-			'updatedAt' => $row['DATE_MODIFY']->format(DATE_ATOM),
+			'updatedAt' => UtcDateTimeFormatter::format($row['DATE_MODIFY']),
 			'attachmentCount' => $attachmentCount,
 		];
 	}

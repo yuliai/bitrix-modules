@@ -287,7 +287,20 @@ class MailboxAccess extends MailAccess
 
 	public static function hasCurrentUserAccessToEditMailboxIntegrationCrm(): bool
 	{
-		return self::canPerform(MailActionDictionary::ACTION_MAILBOX_INTEGRATION_CRM_EDIT);
+		return self::hasUserAccessToEditMailboxIntegrationCrm(self::getCurrentUserId());
+	}
+
+	public static function hasUserAccessToEditMailboxIntegrationCrm(int $userId): bool
+	{
+		if ($userId <= 0)
+		{
+			return false;
+		}
+
+		/** @var MailboxAccessController $controllerClass */
+		$controllerClass = static::getAccessControllerClass();
+
+		return $controllerClass::can($userId, MailActionDictionary::ACTION_MAILBOX_INTEGRATION_CRM_EDIT);
 	}
 
 	public static function hasCurrentUserAccessToViewMailboxIntegrationCrm(): bool

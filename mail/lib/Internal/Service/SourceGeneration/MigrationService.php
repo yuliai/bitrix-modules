@@ -61,7 +61,6 @@ use Bitrix\Main\Type\DateTime;
  * answer only within a bounded window, and the point in front of the switch does not reuse it
  * at all. This keeps a brake pressed between two passes visible immediately and bounds the cost
  * of repeated checks inside one pass {@see RolloutBrakeReader}.
-
  *
  * Everything that talks to a mail server sits behind the protected methods below, which
  * is where the boundary of this service really is.
@@ -2911,7 +2910,6 @@ class MigrationService
 				|| time() >= $deadline
 				|| (!$cancellationWasAccepted && $this->mustStopThePass($generationId))
 			)
-
 			{
 				return false;
 			}

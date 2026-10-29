@@ -30,6 +30,8 @@ use Bitrix\Timeman\V2\Public\Provider\Params\ListParams;
 
 class FullReport extends BaseController
 {
+	private const ERROR_ACCESS_DENIED = 'ACCESS_DENIED';
+
 	public function getAutoWiredParameters(): array
 	{
 		return [
@@ -442,7 +444,7 @@ class FullReport extends BaseController
 
 		if (!$accessManager->canUpdateWorktime($report->userId))
 		{
-			$this->addError(new Error('Access denied.'));
+			$this->addError(new Error('Access denied.', self::ERROR_ACCESS_DENIED));
 
 			return false;
 		}
@@ -484,7 +486,7 @@ class FullReport extends BaseController
 
 		if (!$accessManager->canUpdateWorktime($report->userId))
 		{
-			$this->addError(new Error('Access denied.'));
+			$this->addError(new Error('Access denied.', self::ERROR_ACCESS_DENIED));
 
 			return false;
 		}
@@ -526,7 +528,7 @@ class FullReport extends BaseController
 
 		if (!$accessManager->canUpdateWorktime($report->userId))
 		{
-			$this->addError(new Error('Access denied.'));
+			$this->addError(new Error('Access denied.', self::ERROR_ACCESS_DENIED));
 
 			return false;
 		}

@@ -177,7 +177,7 @@ abstract class BaseObject extends Internals\Engine\Controller
 		//@see \Bitrix\Disk\FileLink::restore and \Bitrix\Disk\BaseObject::restoreByLinkObject
 		//in this case the object which we want to restore is original. We can't get symlink now.
 		return $this->get(
-			$object->getRealObject()
+			$object->getRealObject(),
 		);
 	}
 
@@ -235,10 +235,10 @@ abstract class BaseObject extends Internals\Engine\Controller
 		$extLink = $this->getExternalLinkObject($object);
 		if (!$extLink)
 		{
-			$extLink = $object->getRealObject()->addExternalLink(array(
+			$extLink = $object->getRealObject()->addExternalLink([
 				'CREATED_BY' => $this->getCurrentUser()->getId(),
 				'TYPE' => ExternalLink::TYPE_MANUAL,
-			));
+			]);
 		}
 
 		if (!$extLink)
@@ -267,6 +267,7 @@ abstract class BaseObject extends Internals\Engine\Controller
 		{
 			return null;
 		}
+
 		return $this->parseExternalLinkObject($extLink, $object);
 	}
 
@@ -351,7 +352,7 @@ abstract class BaseObject extends Internals\Engine\Controller
 				'canEditDocument' => $canEditDocument,
 				'canEditSettings' => $extLink->canEditSettings(),
 				'deathTime' => $extLink->getDeathTime(),
-				'deathTimeTimestamp' => $extLink->hasDeathTime()? $extLink->getDeathTime()->getTimestamp() : null,
+				'deathTimeTimestamp' => $extLink->hasDeathTime() ? $extLink->getDeathTime()->getTimestamp() : null,
 				'isBoard' => $isBoard,
 			],
 		];

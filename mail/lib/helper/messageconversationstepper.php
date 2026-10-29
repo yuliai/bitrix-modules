@@ -41,8 +41,24 @@ class MessageConversationStepper extends Main\Update\Stepper
 		$this->backfill = $backfill ?? new ConversationBackfill();
 	}
 
+	public static function execAgent()
+	{
+		if (Main\Config\Option::get('mail', 'history_backfill_stopped') !== 'N')
+		{
+			return '';
+		}
+
+		return parent::execAgent();
+	}
+
 	public function execute(array &$option): bool
 	{
+		if (Main\Config\Option::get('mail', 'history_backfill_stopped') !== 'N')
+		{
+			// Keep the cursor: FINISH_EXECUTION would delete the saved progress.
+			return self::CONTINUE_EXECUTION;
+		}
+
 		if (!isset($option['mailboxId'], $option['stage']))
 		{
 			$this->startMailbox($option, 0);

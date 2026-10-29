@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Access\UnifiedLink;
@@ -13,5 +14,7 @@ interface AccessCheckHandler
 
 	public function checkAll(BaseObject $baseObject): UnifiedLinkAccessResult;
 
-	public function append(AccessCheckHandler $handler): AccessCheckHandler;
+	public function checkAllCollection(array $baseObjects): array;
+
+	public function append(self $handler): self;
 }

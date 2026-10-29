@@ -29,6 +29,9 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 	/** Side of the square attachment preview, shared by the mobile file info and the disk url. */
 	protected const ATTACHMENT_PREVIEW_SIZE = 120;
 
+	/** Named here because the select of a chain is the same list with this one field taken out of it. */
+	protected const BODY_FIELD = 'BODY_HTML';
+
 	protected const SELECT_MESSAGE_FIELDS = [
 		'MAILBOX_EMAIL' => 'MAILBOX.EMAIL',
 		'UID_ID' => 'MESSAGE_UID.ID',
@@ -38,7 +41,7 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		'FIELD_DATE',
 		'INTERNALDATE' => 'MESSAGE_UID.INTERNALDATE',
 		'SUBJECT',
-		'BODY_HTML',
+		self::BODY_FIELD,
 		'HEADER',
 		'OPTIONS',
 	];
@@ -594,6 +597,35 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		return $message;
 	}
 
+	/**
+	 * Fields a card of a chain is drawn from.
+	 *
+	 * The body is not among them: the reader opens one message, and the body of a card opened afterwards is
+	 * asked for by that card alone. The field stands in the list of message fields without a key of its own,
+	 * so removing a key of its name leaves it in the select and puts the body of every message of the chain,
+	 * a hundred of them at most, into the answer of the first opening.
+	 *
+	 * @return array<int|string, string>
+	 */
+	protected function getChainNodeSelect(): array
+	{
+		$select = array_merge(
+			self::SELECT_MESSAGE_FIELDS,
+			self::SELECT_RECIPIENTS_FIELDS,
+			self::SELECT_MESSAGE_ACCESS_FIELDS,
+		);
+
+		if (Main\Loader::includeModule('crm'))
+		{
+			$select = array_merge(
+				$select,
+				self::SELECT_MESSAGE_CRM_ACCESS_FIELDS,
+			);
+		}
+
+		return array_diff($select, [self::BODY_FIELD]);
+	}
+
 	protected function getMessagesRows(bool $takeParentMessages, int $threadId, int $limit = 50): array
 	{
 		$messageQuery = new Query(MailMessageTable::getEntity());
@@ -637,21 +669,6 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			QueryBuilder::generationScopeFilterOfMessages([$threadId], 'MESSAGE_UID.'),
 		);
 
-		$selectChainNodes = array_merge(
-			self::SELECT_MESSAGE_FIELDS,
-			self::SELECT_RECIPIENTS_FIELDS,
-			self::SELECT_MESSAGE_ACCESS_FIELDS,
-		);
-
-		if (Main\Loader::includeModule('crm'))
-		{
-			$selectChainNodes = array_merge(
-				$selectChainNodes,
-				self::SELECT_MESSAGE_CRM_ACCESS_FIELDS,
-			);
-		}
-		unset($selectChainNodes['BODY_HTML']);
-
 		return $messageQuery
 			->registerRuntimeField(
 				new ReferenceField(
@@ -692,7 +709,7 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 					],
 				),
 			)
-			->setSelect($selectChainNodes)
+			->setSelect($this->getChainNodeSelect())
 			->setFilter($filter)
 			->setOrder($order)
 			->setOffset(1)
@@ -736,6 +753,15 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		$allRows = self::deduplicateRowsByMessageId(
 			array_merge($childMessagesRows, [$threadMessageRow], $parentMessagesRows),
 		);
+		foreach ($allRows as $key => $row)
+		{
+			if ((int)$row['ID'] === $threadMessageRowId)
+			{
+				$allRows[$key] = array_replace($row, $threadMessageRow);
+
+				break;
+			}
+		}
 
 		$messages = [];
 

@@ -11,6 +11,7 @@ class AccessibilityManager
 {
 	/** @var string  */
 	private const TYPE = 'location';
+	private const ALIGNED_RECURRENCE_LOOKAHEAD_DAYS = 6;
 	/** @var string  */
 	public const ADDITIONAL_LOCATION_CONNECTION_OPTION = 'additional_location_connection';
 
@@ -281,16 +282,27 @@ class AccessibilityManager
 	 */
 	public static function getRoomAccessibility(array $roomIds, $from, $to): array
 	{
+		$toLimit = \CCalendar::Date(
+			\CCalendar::Timestamp($to, false) + self::ALIGNED_RECURRENCE_LOOKAHEAD_DAYS * \CCalendar::GetDayLen(),
+			false,
+		);
+
 		return \CCalendarEvent::GetList([
 			'arFilter' => [
 				'FROM_LIMIT' => $from,
-				'TO_LIMIT' => $to,
+				'TO_LIMIT' => $toLimit,
 				'CAL_TYPE' => self::TYPE,
 				'ACTIVE_SECTION' => 'Y',
 				'SECTION' => $roomIds,
 			],
 			'arSelect' => \CCalendarEvent::$defaultSelectEvent,
 			'parseRecursion' => true,
+			'recursionFromLimit' => $from,
+			'recursionToLimit' => $to,
+			'includeSplitSeriesInLookahead' => true,
+			'loadOriginalRecursion' => true,
+			'alignWeeklyRecurrenceStart' => true,
+			'alignWeeklyRecurrenceStartForSplitSeries' => true,
 			'fetchSection' => true,
 			'setDefaultLimit' => false,
 			'fetchAttendees' => false,

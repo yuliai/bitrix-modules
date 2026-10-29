@@ -489,7 +489,14 @@ final class Storage extends Internals\Model implements \JsonSerializable
 
 		if ($userId === null)
 		{
-			return $this->getProxyType()->getSecurityContextByUser($user);
+			$securityContext = $this->getProxyType()->getSecurityContextByUser($user);
+
+			if ($securityContext instanceof DiskSecurityContext)
+			{
+				$securityContext->checkUnifiedLink($shouldCheckUnifiedLink);
+			}
+
+			return $securityContext;
 		}
 
 		$cacheSecurityContextKey = "{$userId}_$shouldCheckUnifiedLink";
@@ -938,7 +945,13 @@ final class Storage extends Internals\Model implements \JsonSerializable
 			return false;
 		}
 
-		return $this->update(array('NAME' => $name));
+		$status = $this->update(array('NAME' => $name));
+		if ($status)
+		{
+			$this->clearStorageListCaches();
+		}
+
+		return $status;
 	}
 
 	public function delete($deletedBy, bool $bypassDeletionRestriction = false): bool
@@ -963,7 +976,7 @@ final class Storage extends Internals\Model implements \JsonSerializable
 		return $status;
 	}
 
-	private function clearStorageListCaches(): void
+	public function clearStorageListCaches(): void
 	{
 		$cacheTag = $this->getStorageListCacheTag();
 		if (!defined('BX_COMP_MANAGED_CACHE') || $cacheTag === null)

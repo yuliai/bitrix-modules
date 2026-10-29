@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Helper\Mailbox;
 
 use Bitrix\Mail\Helper\Enum\CrmImapFilterContext;
+use Bitrix\Mail\Internal\Repository\SqlRowLock;
 use Bitrix\Mail\MailFilterTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlQueryException;
@@ -153,11 +154,13 @@ final class CrmImapFilter
 	{
 		if ($lockFilters)
 		{
-			return Application::getConnection()->query(sprintf(
+			$connection = Application::getConnection();
+			return $connection->query(sprintf(
 				"SELECT ID, ACTIVE, WHEN_MAIL_RECEIVED FROM %s WHERE MAILBOX_ID = %u"
-				. " AND ACTION_TYPE = 'crm_imap' ORDER BY ID FOR UPDATE",
-				MailFilterTable::getTableName(),
+					. " AND ACTION_TYPE = 'crm_imap' ORDER BY ID%s",
+				SqlRowLock::table(MailFilterTable::getTableName(), $connection->getType()),
 				$mailboxId,
+				SqlRowLock::suffix($connection->getType()),
 			))->fetchAll();
 		}
 

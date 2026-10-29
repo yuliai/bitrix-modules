@@ -14,6 +14,12 @@ use Bitrix\Main\Type\DateTime;
 
 final class MigrationStatusProvider
 {
+	/** Everything {@see self::fromRow()} reads; the row itself never leaves this class. */
+	private const STATUS_FIELDS = [
+		'MAILBOX_ID', 'OPERATION_ID', 'EXEC_STATE', 'STAGE', 'SWITCH_AUTHORIZED',
+		'AUTO_RETRY', 'NEXT_RUN', 'LAST_ERROR_CODE', 'ERROR_OWNER',
+	];
+
 	public function __construct(
 		private readonly OperationTracker $tracker = new OperationTracker(),
 		private readonly MigrationOperationSchema $schema = new MigrationOperationSchema(),
@@ -78,7 +84,7 @@ final class MigrationStatusProvider
 			return [];
 		}
 
-		$rows = $this->tracker->findLatestForMailboxes($mailboxIds);
+		$rows = $this->tracker->findLatestForMailboxes($mailboxIds, self::STATUS_FIELDS);
 		$manualWaiting = $this->manualControl->findWaitingMailboxes($rows);
 
 		$statuses = [];
