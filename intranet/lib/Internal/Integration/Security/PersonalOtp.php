@@ -74,7 +74,7 @@ class PersonalOtp
 		$analyticEvent->send();
 	}
 
-	public function setupSkipDeviceConnect(): void
+	public function setupSkipDeviceConnect(?string $flowId = null): void
 	{
 		$otp = $this->getOtpByUser()
 			->regenerate(type: OtpType::Push)
@@ -85,10 +85,14 @@ class PersonalOtp
 			throw new OtpException('Push OTP is not configured as the default type');
 		}
 
+		$initParams = ['skipDeviceConnect' => true];
+		if ($flowId !== null)
+		{
+			$initParams['skipDeviceConnectFlowHash'] = hash('sha256', $flowId);
+		}
+
 		$isSaved = $otp
-			->setInitParams([
-				'skipDeviceConnect' => true,
-			])
+			->setInitParams($initParams)
 			->save()
 		;
 
@@ -180,6 +184,11 @@ class PersonalOtp
 		return ($this->getInitParams()['skipDeviceConnect'] ?? false) === true;
 	}
 
+	public function canSkipDeviceConnect(): bool
+	{
+		return !$this->isPushType() || !$this->isActivated();
+	}
+
 	public function getDeactivateUntil(): ?DateTime
 	{
 		return $this->otpInfo->dateDeactivate;
@@ -206,7 +215,7 @@ class PersonalOtp
 	{
 		$config = PushOtp::getPullConfig();
 		$config['canSkipDeviceConnect'] = Option::get('intranet', 'allow_skip_device_connect', 'Y') === 'Y'
-			&& !$this->isInitialized()
+			&& $this->canSkipDeviceConnect()
 			&& \Bitrix\Security\Mfa\Otp::isPushPossible()
 			&& (
 				(new VerifyPhoneService($this->user))->canSendSms()

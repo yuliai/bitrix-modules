@@ -43,7 +43,7 @@ class ConfigurationSettings extends AbstractSettings
 	public const TYPE = 'configuration';
 
 	private array $locationSourceRepository = [];
-	private const YANDEX_API_URL = 'https://yandex.ru/dev/commercial/doc/ru/concepts/jsapi-geocoder#jsapi-geocoder';
+	private const YANDEX_API_URL = 'https://yandex.ru/maps-api/console';
 	private const GOOGLE_API_KEY = 'https://developers.google.com/maps/documentation/javascript/get-api-key';
 	private const TIME_FORMAT_VALUE_24 = 24;
 	private const TIME_FORMAT_VALUE_12 = 12;

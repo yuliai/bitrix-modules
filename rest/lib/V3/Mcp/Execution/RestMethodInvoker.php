@@ -9,18 +9,23 @@ use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\ControllerBuilder;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\HttpRequest;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Rest\Engine\RestManager;
 use Bitrix\Rest\V3\Controller\RestController;
 use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Enum\CallChannel;
+use Bitrix\Rest\V3\Exception\Validation\InvalidRequestFieldTypeException;
 use Bitrix\Rest\V3\Interaction\Request\GetRequest;
 use Bitrix\Rest\V3\Interaction\Request\ListRequest;
+use Bitrix\Rest\V3\Interaction\Request\OffsetPaginatedListRequest;
 use Bitrix\Rest\V3\Interaction\Request\TailRequest;
 use Bitrix\Rest\V3\Interaction\Response\Response;
 use Bitrix\Rest\V3\Mcp\Access\FieldRestrictionChecker;
 use Bitrix\Rest\V3\Mcp\Access\RouteAvailabilityChecker;
 use Bitrix\Rest\V3\Schema\MethodDescription;
+use Bitrix\Rest\V3\Schema\SchemaManager;
 use Bitrix\Rest\V3\Schema\Scope;
+use Bitrix\Rest\V3\Structure\FieldsStructure;
 
 final class RestMethodInvoker
 {
@@ -43,9 +48,10 @@ final class RestMethodInvoker
 		$this->getFieldRestrictionChecker()->assertArgumentsAllowed($methodDescription, $arguments);
 
 		$payload = $this->mergeFixedQueryParamsWithArguments($methodDescription->queryParams, $arguments);
-		$payload = $this->applyReadDefaultsIfNeeded($methodDescription, $payload);
 
 		return $this->withAuthorizedUser($userId, function () use ($methodDescription, $payload, $userId): array {
+			$this->ensureGeneratedDtoClassLoaded($methodDescription);
+			$payload = $this->applyReadDefaultsIfNeeded($methodDescription, $payload);
 			$server = $this->buildInternalRestServerForUser($methodDescription, $payload, $userId);
 			$controller = $this->buildRestController($methodDescription, $server, $payload);
 
@@ -75,6 +81,14 @@ final class RestMethodInvoker
 
 			return $this->applyFieldRestrictionsToResult($methodDescription, $response->toArray());
 		});
+	}
+
+	private function ensureGeneratedDtoClassLoaded(MethodDescription $methodDescription): void
+	{
+		ServiceLocator::getInstance()
+			->get(SchemaManager::class)
+			->ensureGeneratedDtoClassesLoadedFromMethodDescriptions([$methodDescription])
+		;
 	}
 
 	/**
@@ -157,8 +171,15 @@ final class RestMethodInvoker
 				continue;
 			}
 
-			if ($key === 'fields' && array_key_exists('fields', $queryParams) && is_array($value))
+			if ($key === 'fields' && array_key_exists('fields', $queryParams))
 			{
+				// refused exactly as on the REST transport: dropping the argument would leave a write
+				// action with nothing to write and report a request the agent got wrong as completed
+				if (!is_array($value))
+				{
+					throw new InvalidRequestFieldTypeException('fields', FieldsStructure::class);
+				}
+
 				$result['fields'] = array_replace_recursive($value, $queryParams['fields']);
 
 				continue;
@@ -304,9 +325,17 @@ final class RestMethodInvoker
 
 		$dtoFieldNames = $this->getDtoFieldNames($methodDescription);
 
-		if ($this->requestUses($requestClass, ListRequest::class))
+		$isLegacyListRequest = $this->requestUses($requestClass, ListRequest::class);
+		$isPaginatedList = $isLegacyListRequest || (
+			$methodDescription->method === 'list'
+			&& $this->requestUses($requestClass, OffsetPaginatedListRequest::class)
+		);
+		if ($isPaginatedList)
 		{
-			$payload['pagination'] = $this->normalizePagination($payload['pagination'] ?? null);
+			$payload['pagination'] = $isLegacyListRequest
+				? $this->normalizePagination($payload['pagination'] ?? null)
+				: $this->normalizeSpecializedPagination($payload['pagination'] ?? null)
+			;
 		}
 
 		if ($this->requestUses($requestClass, TailRequest::class))
@@ -317,7 +346,7 @@ final class RestMethodInvoker
 		// Default to the identifier field when the agent omitted select.
 		if (
 			(
-				$this->requestUses($requestClass, ListRequest::class)
+				$isPaginatedList
 				|| $this->requestUses($requestClass, GetRequest::class)
 				|| $this->requestUses($requestClass, TailRequest::class)
 			)
@@ -387,6 +416,64 @@ final class RestMethodInvoker
 			'limit' => $limit,
 			'offset' => max(0, $offset),
 		];
+	}
+
+	private function normalizeSpecializedPagination(mixed $pagination): mixed
+	{
+		if ($pagination === null)
+		{
+			return ['limit' => self::MCP_READ_PAGE_SIZE_CEILING, 'offset' => 0];
+		}
+
+		if (!is_array($pagination))
+		{
+			return $pagination;
+		}
+
+		if (!array_key_exists('limit', $pagination))
+		{
+			$pagination['limit'] = self::MCP_READ_PAGE_SIZE_CEILING;
+		}
+		elseif (is_numeric($pagination['limit']) && $pagination['limit'] > self::MCP_READ_PAGE_SIZE_CEILING)
+		{
+			$pagination['limit'] = self::MCP_READ_PAGE_SIZE_CEILING;
+		}
+
+		if (!array_key_exists('offset', $pagination))
+		{
+			$pagination['offset'] = 0;
+		}
+		elseif (is_numeric($pagination['offset']) && $pagination['offset'] > self::MCP_READ_OFFSET_CEILING)
+		{
+			$this->throwOffsetLimitException($pagination['offset']);
+		}
+
+		if (
+			isset($pagination['page'])
+			&& is_numeric($pagination['page'])
+			&& isset($pagination['limit'])
+			&& is_numeric($pagination['limit'])
+			&& $pagination['limit'] > 0
+		)
+		{
+			$offset = (int)($pagination['page'] > 0 ? $pagination['page'] - 1 : 0)
+				* (int)$pagination['limit'];
+			if ($offset > self::MCP_READ_OFFSET_CEILING)
+			{
+				$this->throwOffsetLimitException($offset);
+			}
+		}
+
+		return $pagination;
+	}
+
+	private function throwOffsetLimitException(int|float|string $offset): never
+	{
+		throw new McpException(sprintf(
+			'Paging is limited to offset %d, requested %s. Narrow the filter or read further pages with a cursor.',
+			self::MCP_READ_OFFSET_CEILING,
+			(string)$offset,
+		));
 	}
 
 	private function normalizeCursor(mixed $cursor): array
@@ -492,6 +579,7 @@ final class RestMethodInvoker
 
 		$controller
 			->setDtoClass($methodDescription->dtoFqcn)
+			->setMethodDescription($methodDescription)
 			->setProcessedScope($this->resolveSpecificScopeWithoutFieldRestriction($methodDescription))
 			->setServer($server)
 			->setQueryParams($payload)

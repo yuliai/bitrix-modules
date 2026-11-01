@@ -7,6 +7,7 @@ use Bitrix\Crm\Item;
 use Bitrix\Crm\Kanban\Entity;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Main\UI\Filter\Options;
 
 class Quote extends Entity
 {
@@ -63,6 +64,24 @@ class Quote extends Entity
 			->setDefaultValues($this->getFilter()->getDefaultFieldIDs())
 			->getDefaultPresets()
 		;
+	}
+
+	public function getFilterOptions(): Options
+	{
+		$options = parent::getFilterOptions();
+		$presets = $options->getPresets();
+
+		foreach ($options->getDefaultPresets() as $presetId => $defaultPreset)
+		{
+			if (isset($presets[$presetId], $defaultPreset['fields']['STATUS_ID']))
+			{
+				$presets[$presetId]['fields']['STATUS_ID'] = $defaultPreset['fields']['STATUS_ID'];
+			}
+		}
+
+		$options->setPresets($presets);
+
+		return $options;
 	}
 
 	public function isCustomPriceFieldsSupported(): bool

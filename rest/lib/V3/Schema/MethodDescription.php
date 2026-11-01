@@ -7,6 +7,8 @@ use Bitrix\Rest\V3\Mcp\McpToolMetadata;
 
 class MethodDescription implements \Serializable
 {
+	private const RESOURCE_DTO_FQCN_IN_QUERY_PARAMS = true;
+
 	public function __construct(
 		public readonly string $module,
 		public readonly ?string $controllerFqcn,
@@ -21,6 +23,12 @@ class MethodDescription implements \Serializable
 		public readonly bool $isHidden = false,
 		public readonly ?McpToolMetadata $mcpTool = null,
 		public readonly bool $isDeprecated = false,
+		public readonly ?string $accessProvider = null,
+		/**
+		 * Resource the generated field methods belong to. Their own dtoFqcn is the system DTO of
+		 * the response, so this is the only property that names the guarded resource.
+		 */
+		public readonly ?string $resourceDtoFqcn = null,
 	) {
 	}
 
@@ -45,7 +53,7 @@ class MethodDescription implements \Serializable
 
 	public function __serialize(): array
 	{
-		return [
+		$data = [
 			'module' => $this->module,
 			'controllerFqcn' => $this->controllerFqcn,
 			'method' => $this->method,
@@ -60,6 +68,22 @@ class MethodDescription implements \Serializable
 			'mcpTool' => $this->mcpTool?->toArray(),
 			'isDeprecated' => $this->isDeprecated,
 		];
+
+		// most of the schema has neither of the two, and __unserialize reads both as optional
+		if ($this->accessProvider !== null)
+		{
+			$data['accessProvider'] = $this->accessProvider;
+		}
+
+		if ($this->resourceDtoFqcn !== null)
+		{
+			$data['resourceDtoFqcn'] = $this->isResourceDtoFqcnTakenFromQueryParams()
+				? self::RESOURCE_DTO_FQCN_IN_QUERY_PARAMS
+				: $this->resourceDtoFqcn
+			;
+		}
+
+		return $data;
 	}
 
 	public function __unserialize(array $data): void
@@ -77,5 +101,21 @@ class MethodDescription implements \Serializable
 		$this->isHidden = $data['isHidden'] ?? false;
 		$this->mcpTool = McpToolMetadata::fromArray($data['mcpTool'] ?? null);
 		$this->isDeprecated = $data['isDeprecated'] ?? false;
+		$this->accessProvider = $data['accessProvider'] ?? null;
+
+		$resourceDtoFqcn = $data['resourceDtoFqcn'] ?? null;
+		$this->resourceDtoFqcn = $resourceDtoFqcn === self::RESOURCE_DTO_FQCN_IN_QUERY_PARAMS
+			? ($data['queryParams']['dtoClass'] ?? null)
+			: $resourceDtoFqcn
+		;
+	}
+
+	/**
+	 * field.list and field.get already carry the resource fqcn as the dtoClass of the route, so the
+	 * marker replaces the second copy of the very same string in the schema cache.
+	 */
+	private function isResourceDtoFqcnTakenFromQueryParams(): bool
+	{
+		return $this->resourceDtoFqcn === ($this->queryParams['dtoClass'] ?? null);
 	}
 }

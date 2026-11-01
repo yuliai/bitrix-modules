@@ -6,8 +6,10 @@ use Bitrix\HumanResources\Config\Feature;
 use Bitrix\HumanResources\Config\Storage;
 use Bitrix\HumanResources\Service\Container;
 use Bitrix\HumanResources\Type\AccessCodeType;
+use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\HumanResources\Type\RelationEntitySubtype;
 use Bitrix\HumanResources\Type\RelationEntityType;
+use Bitrix\HumanResources\Type\StructureAction;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Result;
 use Bitrix\Main\Diag\LoggerFactory;
@@ -16,6 +18,24 @@ use Bitrix\Main\UI\EntitySelector\Converter;
 
 class Structure
 {
+	private const SUPPORTED_ENTITY_TYPES = ['user', 'department', 'structure-node'];
+
+	/**
+	 * The chat types the linking is offered for. The list repeats the rows of the rights matrix that
+	 * carry `Action::LinkStructureNode`: a type without such a row falls back to the guest role
+	 * (`Permission::getRoleForActionByType()`), so the prefilter lets any member of it through and
+	 * the type has to be answered by the method itself.
+	 */
+	private const SUPPORTED_CHAT_TYPES = [
+		Chat\ExtendedType::Chat->value,
+		Chat\ExtendedType::OpenChat->value,
+		Chat\ExtendedType::Channel->value,
+		Chat\ExtendedType::OpenChannel->value,
+	];
+
+	/** A trailing `:F` means "this node only", so the id is not always a number */
+	private const ENTITY_ID_PATTERN = '/^\d+(:F)?$/';
+
 	/** Hard limit of NodeRelationService::getUsersNotInRelation(), not a tuning knob */
 	private const USERS_PER_STRUCTURE_QUESTION = 500;
 
@@ -32,6 +52,39 @@ class Structure
 			&& Storage::instance()->isCompanyStructureConverted()
 			&& Feature::instance()->isCrossFunctionalTeamsAvailable()
 		;
+	}
+
+	/**
+	 * Must be called before splitEntities(): Converter::convertToFinderCodes() destructures every
+	 * element into a pair and matches the id with preg_match, so a non-scalar id ends in a TypeError
+	 * instead of a contract error.
+	 */
+	public static function isValidEntityList(array $entities): bool
+	{
+		foreach ($entities as $entity)
+		{
+			if (!is_array($entity) || count($entity) !== 2 || !isset($entity[0], $entity[1]))
+			{
+				return false;
+			}
+
+			if (!in_array($entity[0], self::SUPPORTED_ENTITY_TYPES, true))
+			{
+				return false;
+			}
+
+			if (!is_int($entity[1]) && !is_string($entity[1]))
+			{
+				return false;
+			}
+
+			if (preg_match(self::ENTITY_ID_PATTERN, (string)$entity[1]) !== 1)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	public static function splitEntities(array $entities): array
@@ -53,6 +106,21 @@ class Structure
 		}
 
 		return [$users, $structureNodes];
+	}
+
+	/**
+	 * The raw `TYPE` is not enough to tell the supported types apart: a videoconference, an
+	 * announcement, a project chat and the general chat all carry the `TYPE` of an ordinary chat and
+	 * differ from it by the entity behind them, which is exactly what the extended type reads.
+	 */
+	public static function isChatTypeSupported(Chat $chat): bool
+	{
+		return static::isExtendedTypeSupported($chat->getExtendedType(false));
+	}
+
+	public static function isExtendedTypeSupported(string $extendedType): bool
+	{
+		return in_array($extendedType, self::SUPPORTED_CHAT_TYPES, true);
 	}
 
 	public static function isSyncAvailable(): bool
@@ -187,18 +255,154 @@ class Structure
 		return static::isSyncAvailable();
 	}
 
-	public function link(array $structureNodeIds): Result
+	/**
+	 * A node kind the portal does not have is not just unusable: its access code simply resolves to
+	 * nothing, so the link would silently not be created.
+	 */
+	public static function areNodeKindsAvailable(array $accessCodes): bool
 	{
-		$result = new Result();
-
-		if (empty($structureNodeIds))
+		if (!Loader::includeModule('humanresources'))
 		{
-			return $result;
+			return false;
+		}
+
+		$hasDepartments = false;
+		$hasTeams = false;
+
+		foreach ($accessCodes as $accessCode)
+		{
+			if (static::hasAnyPrefix($accessCode, AccessCodeType::getIntranetDepartmentTypesPrefixes()))
+			{
+				$hasDepartments = true;
+			}
+			elseif (static::hasAnyPrefix($accessCode, AccessCodeType::getTeamTypesPrefixes()))
+			{
+				$hasTeams = true;
+			}
+			else
+			{
+				return false;
+			}
+		}
+
+		return (!$hasDepartments || static::isSyncAvailable())
+			&& (!$hasTeams || static::isTeamsAvailable())
+		;
+	}
+
+	/**
+	 * Server-side counterpart of the org structure data provider that fills the selector: a node the
+	 * current user does not see may not be linked.
+	 */
+	public function areNodesVisible(array $accessCodes): bool
+	{
+		if (empty($accessCodes))
+		{
+			return true;
 		}
 
 		if (!Loader::includeModule('humanresources'))
 		{
-			return $result->addError(new Error(Error::LINK_ERROR));
+			return false;
+		}
+
+		$nodeService = \Bitrix\HumanResources\Public\Service\Container::getNodeService();
+
+		try
+		{
+			$nodeIds = array_unique($nodeService->getNodeIdsByAccessCodes($accessCodes));
+
+			if (empty($nodeIds))
+			{
+				return false;
+			}
+
+			$visibleNodeIds = $nodeService->findAllByIds(
+				nodeIds: $nodeIds,
+				nodeTypes: [NodeEntityType::DEPARTMENT, NodeEntityType::TEAM],
+				structureAction: StructureAction::ViewAction,
+			)->getIds();
+		}
+		catch (\Exception)
+		{
+			return false;
+		}
+
+		return empty(array_diff($nodeIds, $visibleNodeIds));
+	}
+
+	/**
+	 * Asked about the candidates and not about the chat: reading the whole set of links of a chat and
+	 * hydrating a node per link costs as much as that chat has links, while the answer is needed for
+	 * ten codes at most. A point question per candidate keeps the work of the call bounded by the call
+	 * itself.
+	 *
+	 * @return list<string>
+	 */
+	public function filterAlreadyLinked(array $accessCodes): array
+	{
+		if (!Loader::includeModule('humanresources'))
+		{
+			return array_values(array_unique($accessCodes));
+		}
+
+		$freshAccessCodes = [];
+
+		foreach (array_unique($accessCodes) as $accessCode)
+		{
+			if (!$this->isLinked($accessCode))
+			{
+				$freshAccessCodes[] = $accessCode;
+			}
+		}
+
+		return $freshAccessCodes;
+	}
+
+	/**
+	 * A node and the same node "with everything under it" are two links and not one, so the recursion
+	 * of the code is part of the question. A code that stands for no node is not linked and not
+	 * dropped here: the refusal for it belongs to the linking, which is the only place that knows it.
+	 */
+	private function isLinked(string $accessCode): bool
+	{
+		$node = Container::getNodeRepository()->getByAccessCode($accessCode);
+		if ($node === null)
+		{
+			return false;
+		}
+
+		return Container::getNodeRelationRepository()->getByNodeIdAndEntityTypeAndEntityIdAndWithChildNodes(
+			nodeId: $node->id,
+			entityType: RelationEntityType::CHAT,
+			entityId: (int)$this->chat->getId(),
+			withChildNodes: static::isRecursiveAccessCode($accessCode),
+		) !== null;
+	}
+
+	private static function isRecursiveAccessCode(string $accessCode): bool
+	{
+		return static::hasAnyPrefix($accessCode, AccessCodeType::getRecursiveTypesPrefixes());
+	}
+
+	/**
+	 * @return Result<list<string>> the access codes a link was actually created for. The nodes are
+	 * linked one by one and a refusal on one of them leaves the earlier ones linked, so what went
+	 * through is reported apart from whether the whole call did.
+	 */
+	public function link(array $structureNodeIds): Result
+	{
+		$result = new Result();
+		$linkedAccessCodes = [];
+
+		if (empty($structureNodeIds))
+		{
+			return $result->setResult($linkedAccessCodes);
+		}
+
+		if (!Loader::includeModule('humanresources'))
+		{
+			return $result->setResult($linkedAccessCodes)->addError(new Error(Error::LINK_ERROR));
 		}
 
 		$nodeRelationService = Container::getNodeRelationService();
@@ -206,12 +410,24 @@ class Structure
 		foreach ($structureNodeIds as $structureNodeId)
 		{
 			try {
-				$nodeRelationService->linkEntityToNodeByAccessCode(
+				$relation = $nodeRelationService->linkEntityToNodeByAccessCode(
 					$structureNodeId,
 					RelationEntityType::CHAT,
 					$this->chat->getId(),
 					RelationEntitySubtype::fromChatType($this->chat->getType()),
 				);
+
+				// An access code standing for no node links nothing and raises nothing. The list is
+				// checked as a whole before the call, so a code left over from a deleted node passes
+				// that check next to a living one: unanswered here it would be reported as linked.
+				if ($relation === null)
+				{
+					$result->addError(new Error(Error::NODE_NOT_AVAILABLE));
+
+					continue;
+				}
+
+				$linkedAccessCodes[] = $structureNodeId;
 			}
 			catch (\Exception $exception)
 			{
@@ -219,7 +435,7 @@ class Structure
 			}
 		}
 
-		return $result;
+		return $result->setResult($linkedAccessCodes);
 	}
 
 	public function unlink(array $structureNodeIds): Result
@@ -342,13 +558,17 @@ class Structure
 			return false;
 		}
 
-		$prefixes = [
+		return static::hasAnyPrefix($entity, [
 			...AccessCodeType::getIntranetDepartmentTypesPrefixes(),
 			...AccessCodeType::getTeamTypesPrefixes(),
-		];
+		]);
+	}
+
+	private static function hasAnyPrefix(string $accessCode, array $prefixes): bool
+	{
 		foreach ($prefixes as $prefix)
 		{
-			if (str_starts_with($entity, $prefix))
+			if (str_starts_with($accessCode, $prefix))
 			{
 				return true;
 			}

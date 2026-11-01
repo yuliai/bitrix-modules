@@ -7,7 +7,6 @@ namespace Bitrix\Tasks\V2\Internal\Integration\Im\EventHandler\OnAfterSendMessag
 use Bitrix\Im\V2\Chat\ExternalChat;
 use Bitrix\Im\V2\Chat\ExternalChat\Event\AfterSendMessageEvent;
 use Bitrix\Tasks\Internals\UserOption\Option;
-use Bitrix\Tasks\V2\Internal\Integration\Im\AutoUnmuteFeature;
 use Bitrix\Tasks\V2\Internal\Logger;
 use Bitrix\Tasks\V2\Internal\Repository\TaskRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\TaskUserOptionRepositoryInterface;
@@ -27,11 +26,6 @@ class AutoUnmuteAuditor
 
 	public function __invoke(AfterSendMessageEvent $event): void
 	{
-		if (!AutoUnmuteFeature::isEnabled())
-		{
-			return;
-		}
-
 		$message = $event->getMessage();
 
 		if ($message->isSystem())
@@ -65,6 +59,7 @@ class AutoUnmuteAuditor
 
 			$taskId = (int)$chat->getEntityId();
 
+			// No extra load: other AfterSendMessageEvent handlers read this task through the same request cache.
 			$task = $this->tasksRepository->getById($taskId);
 			if ($task === null)
 			{

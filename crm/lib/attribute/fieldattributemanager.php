@@ -14,6 +14,7 @@ use CCrmOwnerType;
 class FieldAttributeManager
 {
 	protected const CACHE_TTL = 86400;
+	private static array $listCache = [];
 
 	/** @var Crm\Restriction\RestrictionManager */
 	private static $restrictionManager = Crm\Restriction\RestrictionManager::class;
@@ -965,10 +966,9 @@ class FieldAttributeManager
 		?int $typeId = FieldAttributeType::REQUIRED
 	): array
 	{
-		static $list = [];
-
-		$staticKey = ($entityTypeId . '-' . $entityScope . '-' . $fieldOrigin . '-' . $typeId);
-		if (!isset($list[$staticKey]))
+		$fieldOriginKey = $fieldOrigin === null ? 'origin:null' : "origin:{$fieldOrigin}";
+		$typeIdKey = $typeId === null ? 'type:null' : "type:{$typeId}";
+		if (!isset(self::$listCache[$entityTypeId][$entityScope][$fieldOriginKey][$typeIdKey]))
 		{
 			$query = new Main\Entity\Query(Entity\FieldAttributeTable::getEntity());
 			$query->addSelect('ENTITY_TYPE_ID');
@@ -990,9 +990,19 @@ class FieldAttributeManager
 
 			$query->setCacheTtl(self::CACHE_TTL);
 
-			$list[$staticKey] = $query->exec()->fetchAll();
+			self::$listCache[$entityTypeId][$entityScope][$fieldOriginKey][$typeIdKey] = $query->exec()->fetchAll();
 		}
-		return $list[$staticKey];
+
+		return self::$listCache[$entityTypeId][$entityScope][$fieldOriginKey][$typeIdKey];
+	}
+
+	public static function invalidateRuntimeCache(int $entityTypeId, string $entityScope): void
+	{
+		unset(self::$listCache[$entityTypeId][$entityScope]);
+		if ((self::$listCache[$entityTypeId] ?? []) === [])
+		{
+			unset(self::$listCache[$entityTypeId]);
+		}
 	}
 
 	/**

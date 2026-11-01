@@ -42,6 +42,7 @@ enum Action: string
 	case UnpinChat = 'UNPIN_CHAT';
 	case ReadChat = 'READ_CHAT';
 	case OpenSidebarMenu = 'OPEN_SIDEBAR_MENU';
+	case LinkStructureNode = 'LINK_STRUCTURE_NODE';
 
 	public function getRelatedGlobalAction(): ?GlobalAction
 	{
@@ -50,6 +51,7 @@ enum Action: string
 			self::ChangeMessagesAutoDeleteDelay => GlobalAction::ChangeMessagesAutoDeleteDelay,
 			self::Extend => GlobalAction::Extend,
 			self::ManageGuestLink => GlobalAction::ManageGuestLink,
+			self::LinkStructureNode => GlobalAction::LinkStructureNode,
 			default => null
 		};
 	}

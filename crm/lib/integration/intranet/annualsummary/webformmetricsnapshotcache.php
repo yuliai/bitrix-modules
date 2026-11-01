@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\Integration\Intranet\AnnualSummary;
 
+use Bitrix\Crm\WebForm\Telemetry\Recorder;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Data\Cache;
 use Bitrix\Main\Type\Date;
 use RuntimeException;
@@ -13,8 +15,9 @@ final class WebFormMetricSnapshotCache implements MetricSnapshotCacheInterface
 {
 	private const TTL = 7 * 24 * 60 * 60;
 	private const CACHE_DIRECTORY = '/crm/webform/annual_summary/metrics';
-	private const CACHE_VERSION = 1;
-	private const METRIC_KEYS = [
+	public const CACHE_VERSION = 2;
+
+	private const LEGACY_METRIC_KEYS = [
 		'createdForms',
 		'views',
 		'submissions',
@@ -73,13 +76,15 @@ final class WebFormMetricSnapshotCache implements MetricSnapshotCacheInterface
 
 	private function cacheId(Date $from, Date $to): string
 	{
-		return 'v' . self::CACHE_VERSION . '_' . sha1(
-			$from->format('Y-m-d') . '_' . $to->format('Y-m-d'),
-		);
+		return 'v' . self::CACHE_VERSION . '_' . sha1(implode('_', [
+			$from->format('Y-m-d'),
+			$to->format('Y-m-d'),
+			Option::get('crm', Recorder::TELEMETRY_START_DATE_OPTION, ''),
+		]));
 	}
 
 	/**
-	 * @return array{createdForms: int, views: int, submissions: int, abandonedFills: int}|null
+	 * @return array<string, int>|null
 	 */
 	private function normalize(mixed $metrics): ?array
 	{
@@ -89,7 +94,7 @@ final class WebFormMetricSnapshotCache implements MetricSnapshotCacheInterface
 		}
 
 		$normalized = [];
-		foreach (self::METRIC_KEYS as $key)
+		foreach (self::LEGACY_METRIC_KEYS as $key)
 		{
 			if (!isset($metrics[$key]) || !is_int($metrics[$key]))
 			{
@@ -97,6 +102,14 @@ final class WebFormMetricSnapshotCache implements MetricSnapshotCacheInterface
 			}
 
 			$normalized[$key] = $metrics[$key];
+		}
+
+		foreach (WebFormMetricCalculator::OPTIONAL_METRIC_KEYS as $key)
+		{
+			if (array_key_exists($key, $metrics) && is_int($metrics[$key]))
+			{
+				$normalized[$key] = $metrics[$key];
+			}
 		}
 
 		return $normalized;

@@ -163,7 +163,7 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			return $res;
 		}
 
-		$entry = \CCalendarEvent::getEventForViewInterface($entityId);
+		$entry = $this->readCalendarEvent($entityId);
 
 		if (!$entry)
 		{
@@ -173,13 +173,15 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		$pathToCalendar = \CCalendar::GetPathForCalendarEx($USER->GetID());
 		$pathToEvent = (string)(new Uri($pathToCalendar))->addParams(['EVENT_ID' => $entry['ID']]);
 
+		$attendeeList = $this->getCalendarAttendeeList($entry);
+
 		$notDeclinedIds = null;
-		if (is_array($entry['ATTENDEE_LIST']))
+		if (is_array($attendeeList))
 		{
 			// exclude decliners
 			$notDeclinedIds =  array_column(
 				array_filter(
-					$entry['ATTENDEE_LIST'],
+					$attendeeList,
 					static fn (array $attendee) => $attendee['status'] !== 'N'
 				),
 				'id'
@@ -197,8 +199,8 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			'DT_SKIP_TIME' => $entry['DT_SKIP_TIME'],
 			'RECURRENCE_ID' => $entry['RECURRENCE_ID'],
 			// TODO: not used if NOT_DECLINED_IDS presented
-			'USER_IDS' => is_array($entry['ATTENDEE_LIST'])
-				? array_column($entry['ATTENDEE_LIST'], 'id')
+			'USER_IDS' => is_array($attendeeList)
+				? array_column($attendeeList, 'id')
 				: [$entry['CREATED_BY']]
 			,
 			'NOT_DECLINED_IDS' => $notDeclinedIds ?: [$entry['CREATED_BY']],
@@ -210,6 +212,53 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		$this->checkUsers($res['NOT_DECLINED_IDS']);
 
 		return $res;
+	}
+
+	protected function readCalendarEvent($entityId): array|false
+	{
+		return \CCalendarEvent::getEventForViewInterface($entityId);
+	}
+
+	private function getCalendarAttendeeList(array $entry): ?array
+	{
+		$attendeeList = $entry['ATTENDEE_LIST'] ?? null;
+		if (!is_array($attendeeList))
+		{
+			return null;
+		}
+
+		if (!empty($attendeeList) || !$this->isOwnPlainEventHost($entry))
+		{
+			return $attendeeList;
+		}
+
+		$status = in_array($entry['MEETING_STATUS'] ?? null, ['Y', 'N', 'Q', 'H'], true)
+			? $entry['MEETING_STATUS']
+			: 'H'
+		;
+
+		return [
+			[
+				'id' => (int)$entry['MEETING_HOST'],
+				'entryId' => $entry['ID'],
+				'status' => $status,
+			],
+		];
+	}
+
+	/**
+	 * MEETING_HOST comes from the client, so it is trusted only when it matches the calendar owner.
+	 */
+	private function isOwnPlainEventHost(array $entry): bool
+	{
+		$hostId = (int)($entry['MEETING_HOST'] ?? 0);
+
+		return
+			empty($entry['IS_MEETING'])
+			&& ($entry['CAL_TYPE'] ?? null) === 'user'
+			&& $hostId > 0
+			&& $hostId === (int)($entry['OWNER_ID'] ?? 0)
+		;
 	}
 
 	private function getTaskChat($entityId)
@@ -496,6 +545,74 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 
 	public function getVideoCallChatAction($entityType, $entityId, $entityData = [])
 	{
+		$userCount = $this->getVideoCallUserCount($entityType, $entityId, $entityData);
+		if ($userCount === null)
+		{
+			return null;
+		}
+
+		if ($userCount === 1)
+		{
+			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_VIDEOCALL_SELF_ERROR')));
+			return null;
+		}
+
+		return $this->getChatAction($entityType, $entityId);
+	}
+
+	public function getVideoCallStartAction($entityType, $entityId, $entityData = []): ?array
+	{
+		$userCount = $this->getVideoCallUserCount($entityType, $entityId, $entityData);
+		if ($userCount === null)
+		{
+			return null;
+		}
+
+		$callOptions = [];
+		if ($userCount === 1)
+		{
+			if ($entityType !== 'calendar_event')
+			{
+				$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_VIDEOCALL_SELF_ERROR')));
+				return null;
+			}
+
+			// a meeting may be started by its only employee, guests are invited by link and need time to join;
+			// an older call module has no such period, then the call waits for the usual time
+			if ($this->isSyncCallInvitePeriodAvailable())
+			{
+				$callOptions = ['invitePeriod' => \Bitrix\Call\Settings::getSyncCallInvitePeriod()];
+			}
+		}
+
+		$chatId = (int)$this->getChatAction($entityType, $entityId);
+		if (!$this->errorCollection->isEmpty())
+		{
+			return null;
+		}
+
+		// without a chat there is no call, and the options would reveal to a non-member that the event is personal
+		if ($chatId <= 0)
+		{
+			$callOptions = [];
+		}
+
+		return [
+			'chatId' => $chatId,
+			'callOptions' => $callOptions,
+		];
+	}
+
+	protected function isSyncCallInvitePeriodAvailable(): bool
+	{
+		return method_exists(\Bitrix\Call\Settings::class, 'getSyncCallInvitePeriod');
+	}
+
+	/**
+	 * Returns null when the request is rejected, the error is already added.
+	 */
+	private function getVideoCallUserCount($entityType, $entityId, $entityData): ?int
+	{
 		if (!$entityType || !$entityId)
 		{
 			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_ENTITY_ERROR')));
@@ -508,6 +625,26 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			return null;
 		}
 
+		$userCount = $this->countVideoCallUsers((string)$entityType, $entityId, $entityData);
+		if ($userCount === null)
+		{
+			return null;
+		}
+
+		if ($userCount > \Bitrix\Call\Call::getMaxParticipants())
+		{
+			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_VIDEOCALL_LIMIT')));
+			return null;
+		}
+
+		return $userCount;
+	}
+
+	/**
+	 * Returns null when access is denied, the error is already added.
+	 */
+	protected function countVideoCallUsers(string $entityType, $entityId, $entityData): ?int
+	{
 		$userCount = 0;
 
 		if ($entityType === 'task')
@@ -540,19 +677,7 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			$userCount = Workgroup::getNumberOfMembers($groupId);
 		}
 
-		if ($userCount > \Bitrix\Call\Call::getMaxParticipants())
-		{
-			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_VIDEOCALL_LIMIT')));
-			return null;
-		}
-
-		if ($userCount === 1)
-		{
-			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_VIDEOCALL_SELF_ERROR')));
-			return null;
-		}
-
-		return $this->getChatAction($entityType, $entityId);
+		return $userCount;
 	}
 
 	public function getTaskLinkAction($entityType, $entityId, $postEntityType = '', $entityData = []): array

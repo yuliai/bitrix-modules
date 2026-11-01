@@ -23,18 +23,34 @@ final class FeatureTag
 	private const PREFIX = 'ai';
 	private const UNKNOWN = 'unknown';
 
+	/** The two dots between the three parts: they are spent from the same cap as the parts. */
+	private const SEPARATORS = 2;
+
 	private function __construct(
 		public readonly string $value,
 	)
 	{
 	}
 
+	/**
+	 * The module part is normalized first and keeps a budget of its own; the scenario part is
+	 * given everything the module part left of the cap, because a module id is a short word from
+	 * a known set while a context id carries the scenario together with the ids inside it.
+	 *
+	 * Splitting the cap in equal halves instead would cut a scenario the whole label still has
+	 * room for, and two scenarios that differ only past that cut would reach the receiver as one.
+	 * The remainder is never smaller than the module budget, so the substitution for an empty
+	 * part fits under any module id.
+	 */
 	public static function fromContext(Context $context): self
 	{
+		$module = self::normalizePart($context->getModuleId(), self::modulePartMax());
+		$contextMax = ContextHeaders::FEATURE_MAX_LENGTH - strlen(self::PREFIX) - self::SEPARATORS - strlen($module);
+
 		return new self(
 			self::PREFIX
-			. '.' . self::normalizePart($context->getModuleId())
-			. '.' . self::normalizePart($context->getContextId())
+			. '.' . $module
+			. '.' . self::normalizePart($context->getContextId(), $contextMax)
 		);
 	}
 
@@ -46,9 +62,9 @@ final class FeatureTag
 	 * becomes exactly one underscore, so the value is the same either way and the work no
 	 * longer follows the length of a context id that arrives unbounded.
 	 */
-	private static function normalizePart(string $raw): string
+	private static function normalizePart(string $raw, int $max): string
 	{
-		$clean = (string)preg_replace('/[^A-Za-z0-9_-]/', '_', substr($raw, 0, self::partMax()));
+		$clean = (string)preg_replace('/[^A-Za-z0-9_-]/', '_', substr($raw, 0, $max));
 		if ($clean === '')
 		{
 			$clean = self::UNKNOWN;
@@ -58,10 +74,11 @@ final class FeatureTag
 	}
 
 	/**
-	 * Derived rather than assigned, so no part can outgrow the cap the header check applies.
+	 * Derived rather than assigned, so the module part cannot outgrow the cap the header check
+	 * applies even when it is the only part that has to be cut.
 	 */
-	private static function partMax(): int
+	private static function modulePartMax(): int
 	{
-		return intdiv(ContextHeaders::FEATURE_MAX_LENGTH - strlen(self::PREFIX) - 2, 2);
+		return intdiv(ContextHeaders::FEATURE_MAX_LENGTH - strlen(self::PREFIX) - self::SEPARATORS, 2);
 	}
 }

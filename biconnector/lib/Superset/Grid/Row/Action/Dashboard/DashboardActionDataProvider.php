@@ -6,7 +6,9 @@ use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Repository\DashboardGroupRepository;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
+use Bitrix\BIConnector\Internal\Digest\Service\DigestSetupAvailabilityService;
 use Bitrix\BIConnector\Superset\Grid\Settings\DashboardSettings;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Grid\Row\Action\BaseAction;
 use Bitrix\Main\Grid\Row\Action\DataProvider;
 
@@ -15,9 +17,27 @@ use Bitrix\Main\Grid\Row\Action\DataProvider;
  */
 class DashboardActionDataProvider extends DataProvider
 {
+	private ?DigestSetupAvailabilityService $digestSetupAvailabilityService = null;
+
 	public function __construct(?DashboardSettings $settings = null)
 	{
 		parent::__construct($settings);
+	}
+
+	/**
+	 * Every row of the grid asks the same service, so the portal half of its answer is resolved once per
+	 * request instead of once per row.
+	 */
+	protected function createDigestSetupAvailabilityService(): DigestSetupAvailabilityService
+	{
+		return ServiceLocator::getInstance()->get(DigestSetupAvailabilityService::class);
+	}
+
+	private function createConfigureDigestAction(): ConfigureDigestAction
+	{
+		$this->digestSetupAvailabilityService ??= $this->createDigestSetupAvailabilityService();
+
+		return new ConfigureDigestAction($this->digestSetupAvailabilityService);
 	}
 
 	public function prepareActions(): array
@@ -32,6 +52,7 @@ class DashboardActionDataProvider extends DataProvider
 	{
 		return [
 			new OpenSettingsAction(),
+			$this->createConfigureDigestAction(),
 			new CopyAction(),
 			new ExportAction(),
 			new SetDraftAction(),
@@ -119,6 +140,7 @@ class DashboardActionDataProvider extends DataProvider
 			return [];
 		}
 
+		// A synced report without an edit link is broken: it can only be deleted, a digest of it would never run.
 		if ($rawFields['EXTERNAL_ID'] && $rawFields['EDIT_URL'] === '')
 		{
 			return [

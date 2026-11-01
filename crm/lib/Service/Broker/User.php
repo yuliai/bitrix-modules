@@ -62,7 +62,7 @@ class User extends Broker
 			->setSelect(['ID', 'EMAIL'])
 			->whereIn('EMAIL', $emails)
 			->where('ACTIVE', 'Y')
-			->where('IS_REAL_USER', 'Y')
+			->where('REAL_USER', 'expr', true)
 			->exec()
 		;
 		$userIdsByEmail = [];

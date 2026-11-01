@@ -14,6 +14,9 @@ use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\Relations\CascadePolicy;
 use Bitrix\Main\ORM\Fields\Relations\OneToMany;
 use Bitrix\Main\ORM\Fields\StringField;
+use Bitrix\Main\ORM\Fields\TextField;
+use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\DateTime;
 
 /**
@@ -122,6 +125,14 @@ class AutomatedSolutionTable extends DataManager
 
 			(new StringField('VIBE_CREATION_TOKEN'))
 				->configureSize(36)
+			,
+
+			(new TextField('DESCRIPTION'))
+				->configureNullable()
+				->addValidator(new LengthValidator(null, 1000))
+				// Emoji::encode() and Emoji::decode() turn null into an empty string
+				->addSaveDataModifier(static fn(?string $value): ?string => $value === null ? null : Emoji::encode($value))
+				->addFetchDataModifier(static fn(?string $value): ?string => $value === null ? null : Emoji::decode($value))
 			,
 		];
 	}

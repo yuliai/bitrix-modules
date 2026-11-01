@@ -118,6 +118,7 @@ final class LegacyTimelineItemFactory
 			Provider\Bizproc\Task::getId() => Item\Activity\Bizproc\Task::class,
 			Provider\RepeatSale::getId() => Item\Activity\RepeatSale::class,
 			Provider\EntityExclusion::getId() => Item\Activity\EntityExclusion::class,
+			Provider\Sync::getId() => Item\Activity\Sync::class,
 		];
 	}
 
@@ -129,11 +130,6 @@ final class LegacyTimelineItemFactory
 	 */
 	private function itemClassNameOfSwitchableProvider(string $providerId): ?string
 	{
-		if ($providerId === Provider\Document::getId())
-		{
-			return Provider\Document::isActive() ? Item\Activity\Document::class : Item\NotAvailable::class;
-		}
-
 		if ($providerId === Provider\SignDocument::getId())
 		{
 			return Provider\SignDocument::isActive()

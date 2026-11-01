@@ -40,6 +40,26 @@ class ApacheSuperset extends MicrosoftPowerBI
 	}
 
 	/**
+	 * Adds the full table description as the third element of a table-list row.
+	 *
+	 * Only this service reads it: the description travels to Superset through the table comment the
+	 * Trino connector builds out of this row. The external services (Google Data Studio, Power BI)
+	 * read the row by index and expect the two elements they have always got, so the description is
+	 * published here rather than in the shared row.
+	 *
+	 * @param Connector\Base $connector
+	 *
+	 * @return array
+	 */
+	protected function buildTableListRow(Connector\Base $connector): array
+	{
+		$row = parent::buildTableListRow($connector);
+		$row[] = $connector->rawInfo['TABLE_DESCRIPTION_FULL'] ?? '';
+
+		return $row;
+	}
+
+	/**
 	 * @param string $fieldName
 	 * @param array $fieldInfo
 	 *
@@ -142,7 +162,7 @@ class ApacheSuperset extends MicrosoftPowerBI
 
 		foreach ($dataSources as $source)
 		{
-			if ($source instanceof Connector\Base)
+			if ($source instanceof Connector\Base && !isset($dataSourceConnectors[$source->getName()]))
 			{
 				$dataSourceConnectors[$source->getName()] = $source;
 			}

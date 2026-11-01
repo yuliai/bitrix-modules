@@ -1937,6 +1937,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $stage['STATUS_ID'],
 				'name' => $stage['NAME'],
+				'description' => (string)($stage['DESCRIPTION'] ?? ''),
 				'sort' => intval($stage['SORT']),
 				'color' => isset($stage['COLOR']) ? $stage['COLOR'] : '',
 				'stagesToMove' => $stage['STAGES_TO_MOVE'] ?? [],
@@ -2054,6 +2055,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => isset($status['COLOR']) ? $status['COLOR'] : '',
 				'stagesToMove' => $status['STAGES_TO_MOVE'] ?? [],
@@ -2124,6 +2126,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => isset($status['COLOR']) ? $status['COLOR'] : ''
 			);
@@ -2334,7 +2337,14 @@ class CCrmViewHelper
 			return '';
 		}
 
-		Extension::load(['crm.stage.permission-checker', 'intranet.old-interface.intranet-common']);
+		$lazyLoadFinalTransition = ($arParams['LAZY_LOAD_FINAL_TRANSITION'] ?? true) === true;
+		$extensions = ['crm.stage.permission-checker'];
+		if (!$lazyLoadFinalTransition)
+		{
+			$extensions[] = 'crm.stage.final-transition';
+		}
+		$extensions[] = 'intranet.old-interface.intranet-common';
+		Extension::load($extensions);
 		\Bitrix\Main\Page\Asset::getInstance()->addJs('/bitrix/js/crm/progress_control.js');
 		\Bitrix\Main\Page\Asset::getInstance()->addJs('/bitrix/js/crm/partial_entity_editor.js');
 		\Bitrix\Main\Page\Asset::getInstance()->addCss('/bitrix/js/crm/css/crm.css');
@@ -2564,6 +2574,10 @@ class CCrmViewHelper
 
 		$prefix = isset($arParams['PREFIX']) ? $arParams['PREFIX'] : '';
 		$entityID = isset($arParams['ENTITY_ID']) ? intval($arParams['ENTITY_ID']) : 0;
+		$entityTitle = isset($arParams['ENTITY_TITLE']) && is_string($arParams['ENTITY_TITLE'])
+			? $arParams['ENTITY_TITLE']
+			: ''
+		;
 		$controlID = isset($arParams['CONTROL_ID']) ? $arParams['CONTROL_ID'] : '';
 
 		if($controlID === '')
@@ -2622,6 +2636,7 @@ class CCrmViewHelper
 			.', BX.CrmParamBag.create({"containerId": "'.CUtil::JSEscape($controlID).'"'
 			.', "entityType":"'.CUtil::JSEscape($entityTypeName).'"'
 			.', "entityId":"'.CUtil::JSEscape($entityID).'"'
+			.', "entityTitle":"'.CUtil::JSEscape($entityTitle).'"'
 			.', "legendContainerId":"'.CUtil::JSEscape($legendContainerID).'"'
 			.', "serviceUrl":"'.(isset($arParams['SERVICE_URL']) ? CUtil::JSEscape($arParams['SERVICE_URL']) : '').'"'
 			.', "finalUrl":"'.(isset($arParams['FINAL_URL']) ? CUtil::JSEscape($arParams['FINAL_URL']) : '').'"'
@@ -2633,6 +2648,7 @@ class CCrmViewHelper
 			.', "infoTypeId":"'.CUtil::JSEscape("category_{$categoryID}").'"'
 			.', "readOnly":'.($isReadOnly ? 'true' : 'false')
 			.', "enableCustomColors":'.($enableCustomColors ? 'true' : 'false')
+			.', "lazyLoadFinalTransition":'.($lazyLoadFinalTransition ? 'true' : 'false')
 			.', "converterId":"' . CUtil::JSEscape($converterId) . '"'
 			.', "loadingNotificationMessage":"' . CUtil::JSEscape($loadingMessage) . '"'
 			.' }));})})</script>'
@@ -2942,6 +2958,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => isset($status['COLOR']) ? $status['COLOR'] : '',
 				'stagesToMove' => $status['STAGES_TO_MOVE'] ?? [],
@@ -2997,6 +3014,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => isset($status['COLOR']) ? $status['COLOR'] : '',
 				'stagesToMove' => $status['STAGES_TO_MOVE'] ?? [],
@@ -3064,6 +3082,7 @@ class CCrmViewHelper
 			$info = array(
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => isset($status['COLOR']) ? $status['COLOR'] : '',
 				'stagesToMove' => $status['STAGES_TO_MOVE'] ?? [],
@@ -3123,6 +3142,7 @@ class CCrmViewHelper
 			$info = [
 				'id' => $status['STATUS_ID'],
 				'name' => $status['NAME'],
+				'description' => (string)($status['DESCRIPTION'] ?? ''),
 				'sort' => intval($status['SORT']),
 				'color' => $status['COLOR'] ?? '',
 				'semantics' => $status['SEMANTICS'],

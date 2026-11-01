@@ -296,7 +296,7 @@ final class LegacyCountersAdapter
 				$result['TYPE']['VIBECODE_APP'] += $count;
 			}
 
-			if ($inChat || $inLines || $inTasksTask || $inVibecodeApp)
+			if ($inChat || $inLines || $inTasksTask)
 			{
 				$result['TYPE']['MESSENGER'] += $count;
 			}
@@ -334,7 +334,7 @@ final class LegacyCountersAdapter
 				$countsInTypes = true;
 			}
 
-			if ($countsInTypes && ($inChat || $inTasksTask || $inVibecodeApp))
+			if ($countsInTypes && ($inChat || $inTasksTask))
 			{
 				$result['TYPE']['MESSENGER']++;
 			}

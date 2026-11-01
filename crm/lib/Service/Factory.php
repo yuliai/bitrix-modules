@@ -221,6 +221,16 @@ abstract class Factory
 			$item->refreshCategoryDependentDisabledFields();
 		}
 
+		$item->addImplementation(
+			new Item\FieldImplementation\Comments($item, $entityObject, $this->getFlexibleContentTypeFields()),
+		);
+	}
+
+	/**
+	 * Text fields in BB code: their content type is stored per item in FieldContentTypeTable.
+	 */
+	public function getFlexibleContentTypeFields(): Field\Collection
+	{
 		$flexibleContentTypeFields = [];
 		foreach ($this->getFieldsCollection()->getFieldsByType(Field::TYPE_TEXT) as $field)
 		{
@@ -229,9 +239,8 @@ abstract class Factory
 				$flexibleContentTypeFields[] = $field;
 			}
 		}
-		$item->addImplementation(
-			new Item\FieldImplementation\Comments($item, $entityObject, new Field\Collection($flexibleContentTypeFields)),
-		);
+
+		return new Field\Collection($flexibleContentTypeFields);
 	}
 
 	/**

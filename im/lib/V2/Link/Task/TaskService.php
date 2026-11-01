@@ -6,6 +6,7 @@ use Bitrix\Disk\Uf\FileUserType;
 use Bitrix\Im\Model\LinkTaskTable;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Chat\ChannelChat;
+use Bitrix\Im\V2\Chat\ExtendedType;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Integration\AI\CopilotNameResolver;
 use Bitrix\Im\V2\Link\File\TemporaryFileService;
@@ -25,12 +26,15 @@ use Bitrix\Main\Web\Json;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Tasks\Slider\Path\PathMaker;
 use Bitrix\Tasks\Slider\Path\TaskPathMaker;
+use Bitrix\Tasks\V2\Internal\Integration\Im\Chat as TasksV2Chat;
 
 class TaskService
 {
 	use ContextCustomer;
 
 	protected const SIGNATURE_SALT = 'task_service_salt';
+	protected const ANALYTICS_SECTION_CHAT = 'chat';
+	protected const ANALYTICS_SECTION_TASKS_CHAT = 'chat_tasks';
 	protected const ADD_TASK_EVENT = 'taskAdd';
 	protected const UPDATE_TASK_EVENT = 'taskUpdate';
 	protected const DELETE_TASK_EVENT = 'taskDelete';
@@ -221,11 +225,12 @@ class TaskService
 		$chat->setContext($this->context);
 
 		$data = ['PARAMS' => []];
+		$analyticsSection = $this->getAnalyticsSection($chat);
 
 		$taskPath = (new TaskPathMaker(0, PathMaker::EDIT_ACTION, $userId))->makeEntityPath();
 		$link = new Uri($taskPath);
 		$link->addParams([
-			'ta_sec' => 'chat',
+			'ta_sec' => $analyticsSection,
 			'ta_el' => 'chat_context_menu',
 		]);
 
@@ -289,7 +294,7 @@ class TaskService
 				...$data['PARAMS'],
 				'entityId' => $chat->getChatId(),
 				'subEntityId' => $data['PARAMS']['IM_MESSAGE_ID'] ?? null,
-				'ta_sec' => 'chat',
+				'ta_sec' => $analyticsSection,
 				'ta_el' => 'chat_context_menu',
 				'description' => $data['PARAMS']['DESCRIPTION'] ?? null,
 				'auditors' => $data['PARAMS']['AUDITORS'] ?? null,
@@ -554,6 +559,26 @@ class TaskService
 		$text = Loc::getMessage('IM_CHAT_TASK_AUTO_GENERATED_NOTICE') ?? '';
 
 		return "[SIZE=12pt][COLOR=#C2C2C2]{$text}[/COLOR][/SIZE]";
+	}
+
+	private function getAnalyticsSection(Chat $chat): string
+	{
+		return $this->isTasksChat($chat) ? self::ANALYTICS_SECTION_TASKS_CHAT : self::ANALYTICS_SECTION_CHAT;
+	}
+
+	/**
+	 * The same entity type pair EntityLinkFactory routes to TasksType: legacy task chat and tasks V2 chat.
+	 */
+	private function isTasksChat(Chat $chat): bool
+	{
+		$entityType = $chat->getEntityType() ?? '';
+
+		if ($entityType === ExtendedType::Tasks->value)
+		{
+			return true;
+		}
+
+		return Loader::includeModule('tasks') && $entityType === TasksV2Chat::ENTITY_TYPE;
 	}
 
 	private function isTasksV2Form(): bool

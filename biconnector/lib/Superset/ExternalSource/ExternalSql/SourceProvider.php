@@ -59,11 +59,10 @@ final class SourceProvider
 	}
 
 	/**
-	 * Returns cloud placeholder sources for MySQL/PgSQL.
+	 * Returns cloud placeholder sources for MySQL/PgSQL/ClickHouse.
 	 * Shows helpdesk article block when no REST connector with matching SOURCE_CODE is registered.
-	 * ClickHouse has no cloud card yet: the source ships for the on-premise edition only.
 	 *
-	 * @return ExternalSql\CloudMysql[]|ExternalSql\CloudPgsql[]
+	 * @return ExternalSql\CloudMysql[]|ExternalSql\CloudPgsql[]|ExternalSql\CloudClickhouse[]
 	 */
 	public static function getCloudSources(): array
 	{
@@ -93,6 +92,11 @@ final class SourceProvider
 		if (!isset($registeredSourceCodes[ExternalSource\Type::Pgsql->value]))
 		{
 			$result[ExternalSource\Type::Pgsql->value] = new ExternalSql\CloudPgsql();
+		}
+
+		if (!isset($registeredSourceCodes[ExternalSource\Type::Clickhouse->value]))
+		{
+			$result[ExternalSource\Type::Clickhouse->value] = new ExternalSql\CloudClickhouse();
 		}
 
 		return $result;

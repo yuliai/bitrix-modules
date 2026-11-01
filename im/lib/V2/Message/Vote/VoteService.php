@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Bitrix\Im\V2\Message\Vote;
 
+use Bitrix\Im\V2\Analytics\CopilotAnalytics;
+use Bitrix\Im\V2\Application\Features;
+use Bitrix\Im\V2\Chat\CopilotChat;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Message\Vote\Event\CollectVotesEvent;
@@ -31,6 +34,15 @@ class VoteService
 			]
 		);
 		$event->send();
+
+		// BitrixGPT v2 ai-label: add_reaction for copilot chats under flag
+		if ($message->getChat() instanceof CopilotChat && Features::isBitrixGptV2Available())
+		{
+			(new CopilotAnalytics($message->getChat()))
+				->withContext($this->getContext())
+				->addAddReaction($message, $vote)
+			;
+		}
 	}
 
 	/**

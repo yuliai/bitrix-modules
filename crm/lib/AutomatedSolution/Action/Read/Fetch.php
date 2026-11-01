@@ -54,6 +54,7 @@ final class Fetch implements Action
 				'SOURCE_ID',
 				'VIBE_ID',
 				'IS_VIBE_ENABLED',
+				'DESCRIPTION',
 			])
 		;
 

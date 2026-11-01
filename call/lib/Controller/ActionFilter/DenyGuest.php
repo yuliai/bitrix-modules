@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Call\Controller\ActionFilter;
 
-use Bitrix\Call\Service\CallLogService;
+use Bitrix\Call\Service\GuestCallPolicy;
 use Bitrix\Main\Engine\ActionFilter\Base;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
@@ -24,6 +24,15 @@ class DenyGuest extends Base
 {
 	public const ERROR_ACCESS_DENIED = 'guest_access_denied';
 
+	private GuestCallPolicy $guestCallPolicy;
+
+	public function __construct(?GuestCallPolicy $guestCallPolicy = null)
+	{
+		parent::__construct();
+
+		$this->guestCallPolicy = $guestCallPolicy ?? new GuestCallPolicy();
+	}
+
 	public function onBeforeAction(Event $event): ?EventResult
 	{
 		$userId = (int)(CurrentUser::get()->getId() ?? 0);
@@ -32,13 +41,27 @@ class DenyGuest extends Base
 			return null;
 		}
 
-		if (!(new CallLogService())->isGuestUser($userId))
+		if (!$this->shouldDeny($userId))
 		{
 			return null;
 		}
 
-		$this->addError(new Error('Action is not available for guest users', self::ERROR_ACCESS_DENIED));
+		$this->addError(new Error($this->getDenialMessage(), self::ERROR_ACCESS_DENIED));
 
 		return new EventResult(EventResult::ERROR, null, null, $this);
+	}
+
+	protected function shouldDeny(int $userId): bool
+	{
+		return $this->guestCallPolicy->isGuest($userId);
+	}
+
+	/**
+	 * What the refusal says. An heir whose denial is conditional has to say so: the same code with the same
+	 * text would leave "guests never may" and "the portal has it switched off" indistinguishable in the log.
+	 */
+	protected function getDenialMessage(): string
+	{
+		return 'Action is not available for guest users';
 	}
 }

@@ -16,6 +16,7 @@ return [
 	'feature-flags' => [
 		'value' => [
 			\Bitrix\StaffTrackMobile\Public\Features\CheckInFeature::class,
+			\Bitrix\StaffTrackMobile\Public\Features\CheckInV3StaffSelectorFeature::class,
 		],
 		'readonly' => true,
 	],

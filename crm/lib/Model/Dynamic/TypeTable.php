@@ -52,6 +52,7 @@ use Bitrix\Main\ORM\Query\Result as QueryResult;
 use Bitrix\Main\Result;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\SystemException;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UserField;
 
@@ -266,6 +267,13 @@ class TypeTable extends UserField\Internal\TypeDataManager
 			->configureNullable()
 			->configureDefaultValue(null)
 			->addValidator([static::class, 'validateDaysBeforeClose'])
+		;
+		$fieldsMap[] = (new ORM\Fields\TextField('DESCRIPTION'))
+			->configureNullable()
+			->addValidator(new ORM\Fields\Validators\LengthValidator(null, 1000))
+			// Emoji::encode() and Emoji::decode() turn NULL into '', and NULL means "no description" here
+			->addSaveDataModifier(static fn(?string $value): ?string => $value === null ? null : Emoji::encode($value))
+			->addFetchDataModifier(static fn(?string $value): ?string => $value === null ? null : Emoji::decode($value))
 		;
 
 		return $fieldsMap;
@@ -796,7 +804,14 @@ class TypeTable extends UserField\Internal\TypeDataManager
 		}
 
 		static::clearBindingMenuCache();
-		static::clearRestCacheIfSchemaAffected($data, $oldData);
+		if (array_key_exists('TITLE', $data) && $data['TITLE'] !== $oldData['TITLE'])
+		{
+			static::clearRestCache();
+		}
+		else
+		{
+			static::clearRestCacheIfSchemaAffected($data, $oldData);
+		}
 
 		return parent::onAfterUpdate($event);
 	}

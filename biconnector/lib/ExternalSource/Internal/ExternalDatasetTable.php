@@ -23,6 +23,7 @@ use Bitrix\Main\Type\DateTime;
  * <li> ID int mandatory
  * <li> TYPE string(50) mandatory
  * <li> NAME string(512) mandatory
+ * <li> VERBOSE_NAME string(255) optional
  * <li> DESCRIPTION text optional
  * <li> EXTERNAL_CODE string(512) optional
  * <li> DATE_CREATE datetime mandatory
@@ -117,6 +118,13 @@ class ExternalDatasetTable extends DataManager
 						];
 					},
 					'title' => Loc::getMessage('EXTERNAL_DATASET_ENTITY_NAME_FIELD'),
+				]
+			),
+			new StringField(
+				'VERBOSE_NAME',
+				[
+					'validation' => fn() => [new LengthValidator(null, 255)],
+					'title' => Loc::getMessage('EXTERNAL_DATASET_ENTITY_VERBOSE_NAME_FIELD'),
 				]
 			),
 			new TextField(

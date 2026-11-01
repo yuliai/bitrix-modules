@@ -19,6 +19,7 @@ final class AutomatedSolution extends Converter
 		'INTRANET_CUSTOM_SECTION_ID',
 		'IS_VIBE_ENABLED',
 		'VIBE_ID',
+		'DESCRIPTION',
 	];
 
 	public function toJson($model): array

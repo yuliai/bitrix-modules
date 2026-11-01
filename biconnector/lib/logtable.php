@@ -40,6 +40,8 @@ class LogTable extends UsageStatTable
 			'<TIMESTAMP_X' => $date,
 		]);
 
-		return '\\Bitrix\\BIConnector\\LogTable::cleanUpAgent();';
+		// The spelling of the schedule row, character for character: a returned name replaces the name
+		// of the row, so a second spelling would rename the row and let the next registration add one more.
+		return 'Bitrix\\BIConnector\\LogTable::cleanUpAgent();';
 	}
 }

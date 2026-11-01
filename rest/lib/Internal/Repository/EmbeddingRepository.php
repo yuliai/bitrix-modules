@@ -9,7 +9,6 @@ use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Rest\EO_Placement_Collection;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\Embedding;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\EmbeddingCollection;
-use Bitrix\Rest\Internal\Exception\ArgumentException;
 use Bitrix\Rest\Internal\Model\EmbeddingAccessTable;
 use Bitrix\Rest\Internal\Repository\Mapper\EmbeddingMapper;
 use Bitrix\Rest\Internal\Service\Embedding\EmbeddingAccessCodeNormalizer;
@@ -19,13 +18,10 @@ use Bitrix\Rest\PlacementTable;
 
 class EmbeddingRepository implements Main\Repository\RepositoryInterface
 {
-	private const ERROR_NOT_A_SUBJECT = 'Access codes belong to a subject with a positive id';
-
-	private EmbeddingMapper $mapper;
-
-	public function __construct(?EmbeddingMapper $mapper = null)
+	public function __construct(
+		private EmbeddingMapper $mapper = new EmbeddingMapper(),
+	)
 	{
-		$this->mapper = $mapper ?? Main\DI\ServiceLocator::getInstance()->get(EmbeddingMapper::class);
 	}
 
 	public function hasDuplicate(
@@ -181,15 +177,24 @@ class EmbeddingRepository implements Main\Repository\RepositoryInterface
 		return $this->mapper->convertCollectionFromOrm($ormCollection);
 	}
 
-	public function getById(int $id): ?Embedding
+	public function getById(int $id, bool $withLanguages = false): ?Embedding
 	{
 		$ormEntity = PlacementTable::query()
 			->setSelect(['*'])
 			->where('ID', $id)
 			->fetchObject()
 		;
+		if ($ormEntity === null)
+		{
+			return null;
+		}
 
-		return $ormEntity === null ? null : $this->mapper->convertFromOrm($ormEntity);
+		if ($withLanguages)
+		{
+			$ormEntity->fillLangAll();
+		}
+
+		return $this->mapper->convertFromOrm($ormEntity);
 	}
 
 	public function getByOwner(string $moduleId, string $entityType, string $entityId): EmbeddingCollection
@@ -206,60 +211,50 @@ class EmbeddingRepository implements Main\Repository\RepositoryInterface
 
 	public function getByPlacementForSubject(string $placement, int $userId): EmbeddingCollection
 	{
-		return $this->fetchByPlacement($placement, $userId, $this->getAccessFilter($userId));
-	}
+		if ($userId <= 0)
+		{
+			return new EmbeddingCollection();
+		}
 
-	public function getByPlacementUnrestricted(string $placement, int $userId): EmbeddingCollection
-	{
-		return $this->fetchByPlacement($placement, $userId, null);
-	}
+		$accessCodes = \CAccess::GetUserCodesArray($userId);
+		if ($accessCodes === [])
+		{
+			return new EmbeddingCollection();
+		}
+		$accessCodes[] = EmbeddingAccessCodeNormalizer::ACCESS_CODE_AUTHORIZED;
 
-	private function fetchByPlacement(
-		string $placement,
-		int $userId,
-		?Main\ORM\Query\Filter\ConditionTree $accessFilter,
-	): EmbeddingCollection
-	{
-		$query = PlacementTable::query()
+		$accessibleEmbeddingIds = EmbeddingAccessTable::query()
+			->setSelect(['EMBEDDING_ID'])
+			->whereIn('ACCESS_CODE', $accessCodes)
+		;
+
+		$ormCollection = PlacementTable::query()
 			->setSelect(['*'])
 			->where('PLACEMENT', $placement)
 			->whereIn('USER_ID', $this->getVisibleUserIds($userId))
+			->whereIn('ID', $accessibleEmbeddingIds)
 			->setOrder(['ID' => 'ASC'])
+			->fetchCollection()
 		;
-
-		if ($accessFilter !== null)
-		{
-			$query->where($accessFilter);
-		}
-
-		$ormCollection = $query->fetchCollection();
 
 		$ormCollection->fillLangAll();
 
 		return $this->mapper->convertCollectionFromOrm($ormCollection);
 	}
 
-	private function getAccessFilter(int $userId): Main\ORM\Query\Filter\ConditionTree
+	public function getByPlacementUnrestricted(string $placement, int $userId): EmbeddingCollection
 	{
-		if ($userId <= 0)
-		{
-			throw new ArgumentException(self::ERROR_NOT_A_SUBJECT, 'userId');
-		}
-
-		$codes = \CAccess::GetUserCodesArray($userId);
-		if (empty($codes))
-		{
-			throw new ArgumentException(self::ERROR_NOT_A_SUBJECT, 'userId');
-		}
-
-		$codes[] = EmbeddingAccessCodeNormalizer::ACCESS_CODE_AUTHORIZED;
-
-		$visibleEmbeddings = EmbeddingAccessTable::query()
-			->setSelect(['EMBEDDING_ID'])
-			->whereIn('ACCESS_CODE', $codes)
+		$ormCollection = PlacementTable::query()
+			->setSelect(['*'])
+			->where('PLACEMENT', $placement)
+			->whereIn('USER_ID', $this->getVisibleUserIds($userId))
+			->setOrder(['ID' => 'ASC'])
+			->fetchCollection()
 		;
 
-		return Main\ORM\Query\Query::filter()->whereIn('ID', $visibleEmbeddings);
+		$ormCollection->fillLangAll();
+
+		return $this->mapper->convertCollectionFromOrm($ormCollection);
 	}
 
 	private function getVisibleUserIds(int $userId): array

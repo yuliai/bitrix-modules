@@ -6,6 +6,12 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Chart\UpdateChartOperation;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class UpdateChartMetadataTool extends BaseBiTool
@@ -13,6 +19,11 @@ final class UpdateChartMetadataTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'update_chart_metadata';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -65,6 +76,57 @@ final class UpdateChartMetadataTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$chartId = (int)($args['chartId'] ?? 0);
+		$changes = array_intersect_key($args, array_flip(['name', 'description']));
+		$actor = new Actor($userId, Channel::Mcp);
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(UpdateChartOperation::class);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->preview($chartId, $changes, $actor);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+
+			return
+				[
+					'requiresConfirmation' => true,
+					'action' => 'update_chart_metadata',
+				]
+				+ $preview->getData()
+				+ [
+					'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call '
+						. 'update_chart_metadata again with the same arguments and confirm=true.',
+				]
+			;
+		}
+
+		$result = $operation->execute(
+			$chartId,
+			$changes,
+			$actor,
+			(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_ALIGNMENT, $userId),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 
@@ -192,9 +254,15 @@ final class UpdateChartMetadataTool extends BaseBiTool
 			$data = [];
 		}
 
+		$name = $data['slice_name'] ?? $data['chart_name'] ?? $fields['slice_name'] ?? null;
+		if ((new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_ALIGNMENT, $userId))
+		{
+			$name ??= $chartData['slice_name'] ?? $chartData['chart_name'] ?? null;
+		}
+
 		$result = [
 			'id' => $chartId,
-			'name' => (string)($data['slice_name'] ?? $data['chart_name'] ?? $fields['slice_name'] ?? ''),
+			'name' => (string)($name ?? ''),
 		];
 
 		if ($hasDescription)

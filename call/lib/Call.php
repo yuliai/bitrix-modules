@@ -48,6 +48,12 @@ class Call
 		PROVIDER_VOXIMPLANT = 'Voximplant'
 	;
 
+	public const PROVIDERS = [
+		self::PROVIDER_PLAIN,
+		self::PROVIDER_BITRIX,
+		self::PROVIDER_VOXIMPLANT,
+	];
+
 	protected $id;
 	protected $type;
 	protected int $scheme;
@@ -98,6 +104,15 @@ class Call
 	 */
 	protected function __construct()
 	{
+	}
+
+	/**
+	 * Single source of truth for the provider allowlist: the module handles the
+	 * providers of self::PROVIDERS only, everything else comes from a broken client.
+	 */
+	public static function isProviderSupported(string $provider): bool
+	{
+		return in_array($provider, self::PROVIDERS, true);
 	}
 
 	/**
@@ -1005,6 +1020,23 @@ class Call
 	}
 
 	/**
+	 * Whether this is a genuine 1-1 ringing call — the single scope predicate for
+	 * device-scoped decline. Canonical source of truth for registration, the decline
+	 * gate, startPush, finish cleanup and the client-facing isDeviceScoped flag, so
+	 * those paths can never drift apart. A call qualifies iff it is TYPE_INSTANT
+	 * (excludes a private chat created as a permanent call) AND its associated entity
+	 * is a private chat (excludes group TYPE_INSTANT calls).
+	 */
+	public function isDeviceScopedRinging(): bool
+	{
+		$entity = $this->getAssociatedEntity();
+
+		return $this->getType() === self::TYPE_INSTANT
+			&& $entity instanceof \Bitrix\Call\Integration\Chat
+			&& $entity->isPrivateChat();
+	}
+
+	/**
 	 * @param string $entityType
 	 * @param int $entityId
 	 * @return void
@@ -1339,7 +1371,8 @@ class Call
 		$sendPush = true,
 		string $sendMode = Signaling::MODE_ALL,
 		bool $isRepeated = false,
-		?array $usersInOtherCalls = null
+		?array $usersInOtherCalls = null,
+		?int $ttl = null
 	): void
 	{
 		$usersInOtherCalls ??= CallFactory::filterUsersInActiveCalls($toUserIds, $this->getId());
@@ -1359,7 +1392,8 @@ class Call
 				sendPush: $sendPush,
 				sendMode: $sendMode,
 				isRepeated: $isRepeated,
-				usersInOtherCalls: $usersInOtherCalls
+				usersInOtherCalls: $usersInOtherCalls,
+				ttl: $ttl,
 			);
 			return;
 		}
@@ -1372,6 +1406,7 @@ class Call
 			sendPush: $sendPush,
 			isRepeated: $isRepeated,
 			usersInOtherCalls: $usersInOtherCalls,
+			ttl: $ttl,
 		);
 	}
 
@@ -1487,6 +1522,26 @@ class Call
 	 */
 	public function finishSideEffects(): void
 	{
+		if ($this->getId() && $this->isDeviceScopedRinging())
+		{
+			// Purge the ringing-device registry for this private 1-1 call. Only
+			// device-scoped (private TYPE_INSTANT) calls ever populate it, so group
+			// finishes skip the otherwise pointless DELETE ... KEY IN (...) over the
+			// full roster. Best-effort: the registry is TTL-evicted anyway, and it
+			// must never abort the exactly-once finish teardown that follows
+			// (finishOnController / participant updates / Call::finish broadcast) —
+			// a storage failure here would otherwise leave the call FINISHED with
+			// clients still ringing and no way to replay the one-shot side effects.
+			try
+			{
+				(new RingingDeviceRegistry())->deleteForCall((int)$this->getId(), $this->getUsers());
+			}
+			catch (\Throwable $e)
+			{
+				Application::getInstance()->getExceptionHandler()->writeToLog($e);
+			}
+		}
+
 		$controllerResult = $this->finishOnController();
 		if (!$controllerResult->isSuccess() && $this->getId())
 		{
@@ -1755,6 +1810,13 @@ class Call
 		}
 		else
 		{
+			// STATE and END_DATE on an existing call are owned exclusively by the
+			// atomic transition (CallTable::updateState via updateState()/commitFinish()).
+			// A full-row save() must never write them back: a stale in-memory instance
+			// (e.g. STATE=inviting) would otherwise resurrect a call already committed
+			// FINISHED by a concurrent lock-free path (lost update). INSERT keeps them -
+			// a new row sets its initial STATE/END_DATE intentionally.
+			unset($fields['STATE'], $fields['END_DATE']);
 			CallTable::update($this->id, $fields);
 		}
 	}

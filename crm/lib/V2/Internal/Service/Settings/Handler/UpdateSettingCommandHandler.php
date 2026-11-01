@@ -6,9 +6,9 @@ namespace Bitrix\Crm\V2\Internal\Service\Settings\Handler;
 
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\Service\Container;
-use Bitrix\Crm\V2\Internal\Service\Settings\Exception\SettingNotFoundException;
+use Bitrix\Crm\V2\Internal\Exception\Settings\SettingNotFoundException;
 use Bitrix\Crm\V2\Internal\Service\Settings\Mutation\TransportValueMapper;
-use Bitrix\Crm\V2\Internal\Service\Settings\Presentation\SettingsHubDataProvider;
+use Bitrix\Crm\V2\Internal\Service\Settings\Presentation\SettingsPresentationProvider;
 use Bitrix\Crm\V2\Internal\Service\Settings\SettingRegistryInterface;
 use Bitrix\Crm\V2\Public\Command\Settings\UpdateSettingCommand;
 use Bitrix\Main\Result;
@@ -19,7 +19,7 @@ final class UpdateSettingCommandHandler
 	public function __construct(
 		private readonly SettingRegistryInterface $registry,
 		private readonly TransportValueMapper $transportValueMapper,
-		private readonly SettingsHubDataProvider $settingsHubDataProvider,
+		private readonly SettingsPresentationProvider $settingsPresentationProvider,
 	)
 	{
 	}
@@ -60,6 +60,6 @@ final class UpdateSettingCommandHandler
 			return (new Result())->addErrors($settingResult->getErrors());
 		}
 
-		return $this->settingsHubDataProvider->get($permissions);
+		return $this->settingsPresentationProvider->get($permissions);
 	}
 }

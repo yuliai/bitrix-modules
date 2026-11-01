@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Infrastructure\Rest\Dto\Form\Embedding;
 
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Form\EmbeddingDtoMapper;
+use Bitrix\Rest\V3\Attribute\Editable;
 use Bitrix\Rest\V3\Attribute\MappedBy;
 use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\Dto\Dto;
@@ -29,7 +30,9 @@ final class EmbeddingDto extends Dto
 
 	public EmbeddingVariantDto $inline;
 
+	#[Editable(['update'])]
 	public EmbeddingVariantDto $click;
 
+	#[Editable(['update'])]
 	public EmbeddingVariantDto $auto;
 }

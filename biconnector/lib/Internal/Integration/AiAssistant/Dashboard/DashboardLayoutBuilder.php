@@ -23,12 +23,16 @@ final class DashboardLayoutBuilder
 
 	/**
 	 * @param array $charts List of {chartId: int, width?: int 1..12, height?: int, sliceName?: string}.
+	 * @param (\Closure(string): \Throwable)|null $refusal What a malformed chart is thrown as, given its
+	 *     description; McpException by default.
 	 * @return array position_json as a PHP array (will be JSON-encoded by the caller).
 	 *
-	 * @throws McpException on invalid input.
+	 * @throws McpException on invalid input, unless another refusal is given.
 	 */
-	public static function build(array $charts): array
+	public static function build(array $charts, ?\Closure $refusal = null): array
 	{
+		$refusal ??= static fn(string $message): \Throwable => new McpException($message);
+
 		$position = [
 			'DASHBOARD_VERSION_KEY' => 'v2',
 			'ROOT_ID' => [
@@ -54,7 +58,7 @@ final class DashboardLayoutBuilder
 			return $position;
 		}
 
-		$normalized = self::normalizeCharts($charts);
+		$normalized = self::normalizeCharts($charts, $refusal);
 
 		$rows = [];
 		$currentRow = [];
@@ -125,26 +129,26 @@ final class DashboardLayoutBuilder
 	/**
 	 * @return array List of normalized charts: [{chartId, width, height, sliceName}].
 	 */
-	private static function normalizeCharts(array $charts): array
+	private static function normalizeCharts(array $charts, \Closure $refusal): array
 	{
 		$normalized = [];
 		foreach ($charts as $idx => $chart)
 		{
 			if (!is_array($chart))
 			{
-				throw new McpException('charts[' . $idx . '] must be an object.');
+				throw $refusal('charts[' . $idx . '] must be an object.');
 			}
 
 			$chartId = (int)($chart['chartId'] ?? 0);
 			if ($chartId <= 0)
 			{
-				throw new McpException('charts[' . $idx . '].chartId must be a positive integer.');
+				throw $refusal('charts[' . $idx . '].chartId must be a positive integer.');
 			}
 
 			$width = isset($chart['width']) ? (int)$chart['width'] : 6;
 			if ($width < self::MIN_CHART_WIDTH || $width > self::GRID_WIDTH)
 			{
-				throw new McpException(
+				throw $refusal(
 					'charts[' . $idx . '].width must be in range '
 					. self::MIN_CHART_WIDTH . '..' . self::GRID_WIDTH . '.'
 				);
@@ -153,7 +157,7 @@ final class DashboardLayoutBuilder
 			$height = isset($chart['height']) ? (int)$chart['height'] : self::DEFAULT_CHART_HEIGHT;
 			if ($height < 10 || $height > 200)
 			{
-				throw new McpException('charts[' . $idx . '].height must be in range 10..200.');
+				throw $refusal('charts[' . $idx . '].height must be in range 10..200.');
 			}
 
 			$sliceName = isset($chart['sliceName']) && is_string($chart['sliceName'])

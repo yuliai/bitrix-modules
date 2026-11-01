@@ -91,6 +91,13 @@ class Template extends Base
 
 		$fields = $this->filterFields($fields);
 
+		// The write must run as the user whose right was just checked, not as a user named by the client.
+		unset($params['USER_ID']);
+		if ($currentUserId > 0)
+		{
+			$params['USER_ID'] = $currentUserId;
+		}
+
 		return (new \CTaskTemplates())->Update($templateId, $fields, $params);
 	}
 

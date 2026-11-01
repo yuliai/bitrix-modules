@@ -1079,6 +1079,7 @@ class ProjectProvider extends BaseProvider
 		$extranetSiteId = ($extranetSiteId && ModuleManager::isModuleInstalled('extranet') ? $extranetSiteId : false);
 		$isExtranet = ($extranetSiteId && $project->get('IS_EXTRANET') === 'Y');
 		$isCollab = $project->getType() === Type::Collab->value;
+		$isScrum = $project->getType() === Type::Scrum->value || (int)$project->getScrumMasterId() > 0;
 
 		$item = new Item([
 			'id' => $project->getId(),
@@ -1093,6 +1094,7 @@ class ProjectProvider extends BaseProvider
 				'closed' => $project->getClosed(),
 				'open' => $project->getOpened(),
 				'project' => $project->getProject(),
+				'isScrum' => $isScrum,
 				'isCollab' => $isCollab,
 				'isExtranet' => $isExtranet,
 				'datePlan' => [

@@ -6,7 +6,7 @@ namespace Bitrix\Crm\V2\Internal\Service\Settings;
 
 use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingRegistration;
-use Bitrix\Crm\V2\Internal\Service\Settings\Exception\SettingNotFoundException;
+use Bitrix\Crm\V2\Internal\Exception\Settings\SettingNotFoundException;
 
 /**
  * @internal

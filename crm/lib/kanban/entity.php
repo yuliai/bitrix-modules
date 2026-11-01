@@ -22,6 +22,7 @@ use Bitrix\Crm\Integration\BizProc\Starter\Dto\RunDataDto;
 use Bitrix\Crm\Item;
 use Bitrix\Crm\Kanban\Helper\ClientFieldsPreparer;
 use Bitrix\Crm\Observer\Entity\ObserverTable;
+use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Display\Field;
@@ -2313,24 +2314,57 @@ abstract class Entity
 	 */
 	public function createPullStage(?array $fields = null, ?array $params = null): array
 	{
+		$statusId = (string)($fields['STATUS_ID'] ?? '');
+		$categoryId = $fields['CATEGORY_ID'] ?? null;
+
 		return [
-			'id' => ($fields['STATUS_ID'] ?? ''),
-			'sort' => ($fields['SORT'] ?? ''),
-			'name' => ($fields['NAME'] ?? ''),
-			'name_init' => ($fields['NAME_INIT'] ?? ''),
-			'color' => ($fields['COLOR'] ?? ''),
+			'id' => $statusId,
+			'statusId' => $statusId,
+			'entityId' => (string)($fields['ENTITY_ID'] ?? ''),
+			'sort' => (int)($fields['SORT'] ?? 0),
+			'name' => (string)($fields['NAME'] ?? ''),
+			'name_init' => (string)($fields['NAME_INIT'] ?? ''),
+			'color' => (string)($fields['COLOR'] ?? ''),
+			'semantics' => $fields['SEMANTICS'] ?? null,
+			'type' => $this->getStageType($fields['SEMANTICS'] ?? null),
+			'categoryId' => $categoryId === null ? null : (int)$categoryId,
+			'description' => (string)($fields['DESCRIPTION'] ?? ''),
 		];
 	}
 
 	public function createPullStageByObj(EO_Status $stage): array
 	{
+		$statusId = $stage->getStatusId() ?? '';
+		$categoryId = $stage->getCategoryId();
+
 		return [
-			'id' => $stage->getStatusId() ?? '',
-			'sort' => $stage->getSort() ?? '',
+			'id' => $statusId,
+			'statusId' => $statusId,
+			'entityId' => $stage->getEntityId() ?? '',
+			'sort' => $stage->getSort() ?? 0,
 			'name' => $stage->getName() ?? '',
 			'name_init' => $stage->getNameInit(),
 			'color' => $stage->getColor() ?? '',
+			'semantics' => $stage->getSemantics(),
+			'type' => $this->getStageType($stage->getSemantics()),
+			'categoryId' => $categoryId === null ? null : (int)$categoryId,
+			'description' => $stage->getDescription() ?? '',
 		];
+	}
+
+	private function getStageType(?string $semantics): string
+	{
+		if ($semantics === PhaseSemantics::SUCCESS)
+		{
+			return 'WIN';
+		}
+
+		if ($semantics === PhaseSemantics::FAILURE)
+		{
+			return 'LOOSE';
+		}
+
+		return 'PROGRESS';
 	}
 
 	/**

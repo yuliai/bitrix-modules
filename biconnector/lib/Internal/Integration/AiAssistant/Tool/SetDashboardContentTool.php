@@ -5,9 +5,17 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Dashboard\DashboardJsonMetadataReader;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Dashboard\DashboardLayoutBuilder;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Dashboard\NativeFilterBuilder;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\DraftPolicy;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\SetContentCommand;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\SetContentOperation;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class SetDashboardContentTool extends BaseBiTool
@@ -15,6 +23,11 @@ final class SetDashboardContentTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'set_dashboard_content';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -175,6 +188,79 @@ final class SetDashboardContentTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		Loader::includeModule('biconnector');
+
+		$dashboardId = (int)($args['dashboardId'] ?? 0);
+		if ($dashboardId <= 0)
+		{
+			throw new McpException('dashboardId is required and must be a positive integer.');
+		}
+
+		$command = new SetContentCommand(
+			$dashboardId,
+			isset($args['charts']) && is_array($args['charts']) ? $args['charts'] : null,
+			isset($args['filters']) && is_array($args['filters']) ? $args['filters'] : null,
+		);
+		$actor = new Actor($userId, Channel::Mcp);
+		$policy = $this->getDraftPolicy($userId);
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(SetContentOperation::class);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->preview($command, $actor, $policy);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+			$hasCharts = $command->charts !== null;
+			$hasFilters = $command->filters !== null;
+
+			return [
+				'requiresConfirmation' => true,
+				'action' => 'set_dashboard_content',
+				'id' => $dashboardId,
+				'name' => $preview->getData()['name'],
+				'impact' => 'The dashboard content will be overwritten: '
+					. ($hasCharts ? 'the chart layout will be fully replaced' : 'the layout is kept')
+					. ' and '
+					. ($hasFilters ? 'the filter configuration will be fully replaced' : 'the filters are kept')
+					. '. This is a full replace, not a delta, and cannot be undone.',
+				'charts_count' => $preview->getData()['charts_count'],
+				'filters_count' => $preview->getData()['filters_count'],
+				'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call '
+					. 'set_dashboard_content again with the same arguments and confirm=true.',
+			];
+		}
+
+		$result = $operation->execute($command, $actor, $policy);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	/**
+	 * The draft-only rule holds for MCP once the alignment of its behaviour with REST is switched on.
+	 */
+	private function getDraftPolicy(int $userId): DraftPolicy
+	{
+		return (new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_ALIGNMENT, $userId)
+			? DraftPolicy::Enforce
+			: DraftPolicy::Skip
+		;
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 
@@ -349,23 +435,7 @@ final class SetDashboardContentTool extends BaseBiTool
 
 	private static function filtersContainTimeRange(array $filters): bool
 	{
-		foreach ($filters as $filter)
-		{
-			if (!is_array($filter) || ($filter['filterType'] ?? '') !== 'time_range')
-			{
-				continue;
-			}
-			$defaultValue = isset($filter['defaultValue']) && is_string($filter['defaultValue'])
-				? trim($filter['defaultValue'])
-				: ''
-			;
-			if ($defaultValue !== '')
-			{
-				return true;
-			}
-		}
-
-		return false;
+		return SetContentOperation::filtersContainTimeRange($filters);
 	}
 
 	/**
@@ -373,48 +443,12 @@ final class SetDashboardContentTool extends BaseBiTool
 	 */
 	private static function extractChartIdsFromPositions(array $positions): array
 	{
-		$ids = [];
-		foreach ($positions as $component)
-		{
-			if (!is_array($component) || ($component['type'] ?? '') !== 'CHART')
-			{
-				continue;
-			}
-			$id = (int)($component['meta']['chartId'] ?? 0);
-			if ($id > 0)
-			{
-				$ids[] = $id;
-			}
-		}
-
-		return array_values(array_unique($ids));
+		return SetContentOperation::extractChartIdsFromPositions($positions);
 	}
 
 	/**
-	 * Smart re-scope of every chart filter after a charts-only layout replace.
-	 *
-	 * Replacing charts changes the universe of chart IDs, so each filter's
-	 * `chartsInScope` must be realigned. We infer the user's original intent from
-	 * the filter's previous scope (compared against the OLD full chart set) and
-	 * preserve it:
-	 *
-	 *  - Filter was on ALL charts (old `chartsInScope`, as a set, equals the OLD
-	 *    full set of dashboard charts) → re-point it at the NEW full set: it
-	 *    picks up freshly added charts and drops removed ones.
-	 *  - Filter was NARROWED by hand (old scope is anything other than the old
-	 *    full set) → do NOT widen it. Keep the user's picks and only drop chart
-	 *    IDs that no longer exist (old scope intersected with the new full set).
-	 *    New charts are never added to such a filter.
-	 *
-	 * Scopes are compared by SET membership (order-insensitive). Only
-	 * `chartsInScope` is rewritten — the `scope` (rootPath/excluded) block is left
-	 * as is: NativeFilterBuilder always emits a global `scope` and expresses the
-	 * effective restriction through `chartsInScope`, which is also what the
-	 * Superset frontend reads (getRelatedCharts / isGlobalScope compare
-	 * `chartsInScope` against the slice count).
-	 *
-	 * Applies uniformly to all filter types produced by NativeFilterBuilder
-	 * (filter_time / filter_select / filter_range).
+	 * Smart re-scope of every chart filter after a charts-only layout replace,
+	 * {@see SetContentOperation::rescopeChartFilters()}.
 	 *
 	 * @param array $config Existing native_filter_configuration.
 	 * @param int[] $oldChartIds Chart IDs that were on the dashboard BEFORE the replace.
@@ -422,80 +456,6 @@ final class SetDashboardContentTool extends BaseBiTool
 	 */
 	private static function rescopeChartFilters(array $config, array $oldChartIds, array $newChartIds): array
 	{
-		$rescopableTypes = ['filter_time', 'filter_select', 'filter_range'];
-
-		$oldFull = self::normalizeChartIdSet($oldChartIds);
-		$newFull = self::normalizeChartIdSet($newChartIds);
-		$newFullLookup = array_fill_keys($newFull, true);
-
-		foreach ($config as &$entry)
-		{
-			if (!is_array($entry) || !in_array($entry['filterType'] ?? '', $rescopableTypes, true))
-			{
-				continue;
-			}
-
-			$oldScope = self::normalizeChartIdSet($entry['chartsInScope'] ?? []);
-
-			if (self::sameChartIdSet($oldScope, $oldFull))
-			{
-				// Was "all charts" → follow the new full set.
-				$entry['chartsInScope'] = $newFull;
-			}
-			else
-			{
-				// Hand-narrowed → keep the user's picks, just drop dead IDs.
-				$entry['chartsInScope'] = array_values(array_filter(
-					$oldScope,
-					static fn (int $id): bool => isset($newFullLookup[$id]),
-				));
-			}
-		}
-		unset($entry);
-
-		return $config;
-	}
-
-	/**
-	 * Unique positive chart IDs, reindexed — a set representation for scope math.
-	 *
-	 * @return int[]
-	 */
-	private static function normalizeChartIdSet(mixed $ids): array
-	{
-		if (!is_array($ids))
-		{
-			return [];
-		}
-
-		return array_values(array_unique(array_filter(
-			array_map('intval', $ids),
-			static fn (int $id): bool => $id > 0,
-		)));
-	}
-
-	/**
-	 * Order-insensitive equality of two chart-ID sets (both already normalized).
-	 *
-	 * @param int[] $a
-	 * @param int[] $b
-	 */
-	private static function sameChartIdSet(array $a, array $b): bool
-	{
-		if (count($a) !== count($b))
-		{
-			return false;
-		}
-
-		$lookup = array_fill_keys($a, true);
-		foreach ($b as $id)
-		{
-			if (!isset($lookup[$id]))
-			{
-				return false;
-			}
-		}
-
-		return true;
+		return SetContentOperation::rescopeChartFilters($config, $oldChartIds, $newChartIds);
 	}
 }

@@ -2,19 +2,18 @@
 
 namespace Bitrix\BIConnector\Controller;
 
+use Bitrix\BIConnector\Access\ActionFilter\KeyManageAccess;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\Controller;
-use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\BIConnector\KeyManager;
 use Bitrix\BIConnector\KeyTable;
+use Bitrix\BIConnector\Manager;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
-use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Services\ApacheSuperset;
 use Bitrix\BIConnector\Superset\KeyManager as SupersetKeyManager;
 use Bitrix\Main\Error;
-use Bitrix\Main\Loader;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use Bitrix\Rest\AppTable;
@@ -42,7 +41,6 @@ class Key extends Controller
 		'DATE_CREATE',
 		'TIMESTAMP_X',
 		'CREATED_BY',
-		'ACCESS_KEY',
 		'CONNECTION',
 	];
 
@@ -59,14 +57,13 @@ class Key extends Controller
 	 */
 	public function addAction($fields, \CRestServer $server)
 	{
-		$userId = isset($fields['USER_ID']) ? (int)$fields['USER_ID'] : 0;
-		$fields['USER_ID'] = $this->prepareUserId($userId);
+		// the key always belongs to the caller, USER_ID from the request is ignored
+		$fields['USER_ID'] = $this->prepareUserId();
 		$res = KeyManager::save(
 			[
 				'APP_ID' => $this->getAppId($server),
 				'CONNECTION' => $fields['CONNECTION'] ?? '',
 				'USER_ID' => $fields['USER_ID'],
-				'ACCESS_KEY' => $fields['ACCESS_KEY'] ?? '',
 				'ACTIVE' => ($fields['ACTIVE'] ?? 'N') === 'Y',
 			],
 		);
@@ -158,6 +155,11 @@ class Key extends Controller
 			'error_description' => 'Key not found.',
 		];
 
+		if (!is_array($fields))
+		{
+			$fields = [];
+		}
+
 		$appId = $this->getAppId($server);
 		if ($appId > 0)
 		{
@@ -168,25 +170,27 @@ class Key extends Controller
 						'=APP_ID' => $appId,
 					],
 					'select' => [
-						'ID', 'CREATED_BY'
+						'ID',
 					],
 				]
 			);
 			if ($item = $list->fetch())
 			{
-				$userId = $this->prepareUserId();
-				if ($userId !== (int)$item['CREATED_BY'] && !\CRestUtil::isAdmin())
-				{
-					return [
-						'error' => 'ACCESS_DENIED',
-						'error_description' => 'Access denied.',
-					];
-				}
-
 				$save = [];
 				if (array_key_exists('CONNECTION', $fields))
 				{
-					$save['CONNECTION'] = $fields['CONNECTION'];
+					// a non-string value cannot name a connection and must not reach the array offset
+					$connection = $fields['CONNECTION'];
+					$connections = Manager::getInstance()->getConnections();
+					if (!is_string($connection) || !isset($connections[$connection]))
+					{
+						return [
+							'error' => 'WRONG_CONNECTION',
+							'error_description' => 'Connection not found.',
+						];
+					}
+
+					$save['CONNECTION'] = $connection;
 				}
 				if (array_key_exists('ACTIVE', $fields))
 				{
@@ -331,7 +335,7 @@ class Key extends Controller
 			}
 		}
 
-		return $result ?: ['*'];
+		return $result ?: self::ALLOW_SELECT_FIELDS;
 	}
 
 	/**
@@ -484,8 +488,9 @@ class Key extends Controller
 	public function getDefaultPreFilters()
 	{
 		return [
-			new ActionFilter\Authentication(),
+			...parent::getDefaultPreFilters(),
 			new AuthType(AuthType::APPLICATION),
+			new KeyManageAccess(),
 		];
 	}
 }

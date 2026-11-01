@@ -152,9 +152,35 @@ class AccessInstaller
 		finally
 		{
 			PermissionWriteLock::release();
+			// After the release of the lock, not before it: this call can build the service of the locator and
+			// throw, and a throw here would leave the lock held until the connection closes.
+			self::resetPermissionValueCache();
 		}
 
 		return true;
+	}
+
+	/**
+	 * The rows written here go straight to the table, so the service the readers of this request take from
+	 * the locator {@see \Bitrix\Sign\Access\Rule\BaseRule} would keep answering from what it read before.
+	 * Every entry point of this class checks the crm module first; the service is only typed as nullable for
+	 * callers that did not, and without crm the locator raises a TypeError long before this line.
+	 */
+	private static function resetPermissionValueCache(): void
+	{
+		try
+		{
+			Container::instance()->getRolePermissionService()?->resetPermissionValueCache();
+		}
+		catch (\Throwable $exception)
+		{
+			// Called from the finally of a write, a throw here would replace the result of that write. There is
+			// nothing stale to drop in this case either: the service of the locator failed to be built, so no
+			// reader of this request holds a cache of it.
+			Container::instance()->getLogger('Access')->error(
+				'Unable to reset the permission value cache of the locator: ' . $exception->getMessage(),
+			);
+		}
 	}
 
 	/**
@@ -350,6 +376,9 @@ class AccessInstaller
 		if ($removeAllPrevious)
 		{
 			PermissionTable::deleteList(['>ID' => 0]);
+			// The only write this method makes on its own, and the widest one of the module - every row of
+			// the table is gone. The saves below reset the cache themselves.
+			self::resetPermissionValueCache();
 		}
 		$roles = CCrmRole::GetList(
 			['ID' => 'DESC'],

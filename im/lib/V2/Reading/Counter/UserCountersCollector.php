@@ -16,7 +16,6 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Query\Join;
-use Bitrix\Im\V2\Recent\Config\RecentConfigManager;
 use Bitrix\Im\V2\Chat\Type\TypeRegistry;
 
 class UserCountersCollector
@@ -24,7 +23,6 @@ class UserCountersCollector
 	private const LIMIT = 1000;
 
 	public function __construct(
-		protected readonly RecentConfigManager $recentConfigManager,
 		protected readonly TypeRegistry $typeRegistry,
 		protected readonly CountersCache $countersCache,
 		protected readonly CounterOverflowService $counterOverflowService,
@@ -275,12 +273,7 @@ class UserCountersCollector
 
 	protected function getRecentSections(Chat\Type $type, int $parentId = 0): array
 	{
-		if ($parentId > 0)
-		{
-			return $this->recentConfigManager->getAllRecentSectionsByType($type->getExtendedType(false));
-		}
-
-		return $this->recentConfigManager->getBaseRecentSections($type->getExtendedType(false));
+		return $this->typeRegistry->getRecentSectionsMinusExclusions($type, hasParent: $parentId > 0);
 	}
 
 	/**

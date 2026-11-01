@@ -3,6 +3,8 @@
 namespace Bitrix\Im\V2\Chat;
 
 use Bitrix\Im;
+use Bitrix\Im\V2\Analytics\ChatAnalytics;
+use Bitrix\Im\V2\Analytics\CopilotAnalytics;
 use Bitrix\Im\V2\Application\Features;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Chat\Copilot\FileUploadPolicy;
@@ -287,11 +289,15 @@ class CopilotChat extends GroupChat
 		return true;
 	}
 
-	public static function activateDraftIfNeeded(Chat $chat): void
+	public static function activateDraftIfNeeded(
+		Chat $chat,
+		string $section = ChatAnalytics::ACTIVATE_SECTION_OTHER,
+		?int $initiatorId = null,
+	): void
 	{
 		if ($chat instanceof self)
 		{
-			$chat->activateDraftChat();
+			$chat->activateDraftChat($section, $initiatorId);
 		}
 	}
 
@@ -300,15 +306,41 @@ class CopilotChat extends GroupChat
 		return $this->getChatParams()->get(ChatParams::IS_COPILOT_DRAFT) !== null;
 	}
 
-	public function activateDraftChat(): void
+	public function activateDraftChat(string $section = ChatAnalytics::ACTIVATE_SECTION_OTHER, ?int $initiatorId = null): void
 	{
 		if (!$this->isDraftChat())
 		{
 			return;
 		}
 
-		$this->getChatParams()->deleteParam(ChatParams::IS_COPILOT_DRAFT);
+		// Funnel-bottom analytics: concurrent requests may pass the isDraftChat() guard
+		// together, so the label is bound to the conditional delete — only the request
+		// that actually removed the draft row sends it, once per draft lifecycle.
+		$claimedTransition = $this->getChatParams()->tryDeleteParam(ChatParams::IS_COPILOT_DRAFT);
 		$this->addIndex();
+
+		if ($claimedTransition && Features::isBitrixGptV2Available())
+		{
+			// The initiator id is pinned before the background job is scheduled: the global
+			// context resolves the current user lazily, so for entrypoints with an explicit
+			// acting user (e.g. PinService::pinChat) the job would otherwise attribute the
+			// label to whoever is authorized when it runs.
+			$actingUserId = $initiatorId ?? $this->getContext()->getUserId();
+
+			(new ChatAnalytics($this))
+				->withContextUser($actingUserId)
+				->addActivateNewChat($section)
+			;
+
+			// The ai create_new_chat label counts real chats, so on the draft path it belongs to
+			// the draft→active transition, not to draft creation: a draft is minted when the
+			// copilot widget opens and may never receive a message. Chats created outside the
+			// draft path keep emitting it from ChatFactory::addChat.
+			(new CopilotAnalytics($this))
+				->withContextUser($actingUserId)
+				->addCreateNewChat()
+			;
+		}
 	}
 
 	public function sendMessage(Im\V2\Message $message, ?SendingConfig $sendingConfig = null): SendResult
@@ -317,7 +349,18 @@ class CopilotChat extends GroupChat
 
 		if ($result->isSuccess() && $result->getMessageId())
 		{
-			$this->activateDraftChat();
+			// c_section is derived from the message itself: a real user message (incl. a suggest
+			// click — byte-identical to text on the backend) → from_text_request; any system message
+			// (addUsers / welcome banners sent via \CIMMessage::Add with SYSTEM=Y) → other.
+			// A user message activates the draft on behalf of its author; system messages are
+			// authored by the bot, so the initiator falls back to the chat context.
+			$isSystemMessage = $message->isSystem();
+			$this->activateDraftChat(
+				$isSystemMessage
+					? ChatAnalytics::ACTIVATE_SECTION_OTHER
+					: ChatAnalytics::ACTIVATE_SECTION_FROM_TEXT_REQUEST,
+				$isSystemMessage ? null : ($message->getAuthorId() ?: null),
+			);
 		}
 
 		return $result;

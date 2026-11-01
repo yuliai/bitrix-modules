@@ -2,12 +2,10 @@
 
 namespace Bitrix\Rest\Infrastructure\Market;
 
-use Bitrix\Bitrix24\Public\Enum\VibePlus\MonetizationModel;
-use Bitrix\Bitrix24\Public\Service\VibePlus\MonetizationModelProvider;
 use Bitrix\Main\Application;
-use Bitrix\Main\Loader;
 use Bitrix\Main\Type\Date;
 use Bitrix\Rest\Internal\Integration\Bitrix24\MarketUrlProvider;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\Marketplace\Client;
 use Bitrix\Rest\Service\RestOption;
 use Bitrix\Rest\Service\ServiceContainer;
@@ -26,7 +24,7 @@ class MarketSubscription
 		?Closure $canBuySubscription = null,
 		?Closure $subscriptionAccess = null,
 		?Closure $licenseRegion = null,
-		private readonly ?MonetizationModelProvider $monetizationModelProvider = null,
+		private readonly ?TariffAccessService $tariffAccessService = null,
 	)
 	{
 		$this->canBuySubscription = $canBuySubscription ?? static fn(): bool => Client::canBuySubscription();
@@ -159,13 +157,8 @@ class MarketSubscription
 
 	private function isSubscriptionModel(): bool
 	{
-		if (!Loader::includeModule('bitrix24'))
-		{
-			return false;
-		}
+		$tariffAccessService = $this->tariffAccessService ?? new TariffAccessService();
 
-		$monetizationModelProvider = $this->monetizationModelProvider ?? new MonetizationModelProvider();
-
-		return $monetizationModelProvider->get() === MonetizationModel::SUBSCRIPTION;
+		return $tariffAccessService->isSubscriptionMonetizationModel();
 	}
 }

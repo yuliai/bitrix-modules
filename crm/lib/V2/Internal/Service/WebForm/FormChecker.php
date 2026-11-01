@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Internal\Service\WebForm;
 
-use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormChangeSet;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormSelect;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormWriteContext;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormAccessDeniedException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormNotFoundException;
+use Bitrix\Crm\V2\Internal\Exception\WebForm\FormSystemImmutableException;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\FormRepository;
 use Bitrix\Main\Result;
 
@@ -39,7 +39,8 @@ use Bitrix\Main\Result;
  * answered alike.
  *
  * Violations come back in the result rather than as an exception: they are the answer of this
- * scenario, not a failure of it. A refusal - no right, no form - is raised.
+ * scenario, not a failure of it. A refusal - no right, no form, a system form - is raised: a dry
+ * run of a write cannot answer with a verdict where the write itself refuses.
  *
  * @internal
  */
@@ -50,21 +51,17 @@ final class FormChecker
 	private readonly WebFormValidator $validator;
 
 	/**
-	 * @param null|\Closure(int): bool $permissionChecker
+	 * @param \Closure(int): bool $permissionChecker the right to change CRM forms, given rather than
+	 *        taken: this scenario is assembled by the caller that knows on whose behalf it runs
 	 * @param null|\Closure(int, WebFormSelect): ?WebForm $formLoader
 	 */
 	public function __construct(
-		?\Closure $permissionChecker = null,
+		\Closure $permissionChecker,
 		?\Closure $formLoader = null,
 		?WebFormValidator $validator = null,
 	)
 	{
-		$this->permissionChecker = $permissionChecker ?? static fn (int $userId): bool =>
-			Container::getInstance()
-				->getUserPermissions($userId)
-				->webForm()
-				->canEdit()
-		;
+		$this->permissionChecker = $permissionChecker;
 		$this->formLoader = $formLoader ?? static fn (int $id, WebFormSelect $select): ?WebForm =>
 			(new FormRepository())->getById($id, $select)
 		;
@@ -78,12 +75,18 @@ final class FormChecker
 	 *         the input path as its code
 	 * @throws FormAccessDeniedException the user may not change CRM forms
 	 * @throws FormNotFoundException there is no such form
+	 * @throws FormSystemImmutableException the form is a system one and can not be changed
 	 */
 	public function check(int $userId, ?int $formId = null, ?WebFormChangeSet $changeSet = null): Result
 	{
 		$this->assertCanEdit($userId);
 
 		$storedForm = $formId === null ? null : $this->loadForm($formId, $changeSet);
+		if ($storedForm?->system === true)
+		{
+			throw new FormSystemImmutableException();
+		}
+
 		$changeSet ??= $storedForm === null
 			? new WebFormChangeSet()
 			: WebFormChangeSet::ofStoredForm($storedForm, WebFormWriteContext::Change)

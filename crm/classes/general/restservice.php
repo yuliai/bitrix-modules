@@ -9174,6 +9174,34 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 {
 	private $FIELDS_INFO = null;
 	private static $ENTITY_TYPES = null;
+
+	public function add(&$fields, array $params = null)
+	{
+		$this->validateDescriptionType($fields);
+
+		return parent::add($fields, $params);
+	}
+
+	public function update($ID, &$fields, array $params = null)
+	{
+		$this->validateDescriptionType($fields);
+
+		return parent::update($ID, $fields, $params);
+	}
+
+	private function validateDescriptionType($fields): void
+	{
+		if (
+			is_array($fields)
+			&& array_key_exists('DESCRIPTION', $fields)
+			&& $fields['DESCRIPTION'] !== null
+			&& !is_string($fields['DESCRIPTION'])
+		)
+		{
+			throw new RestException(CCrmStatus::DESCRIPTION_INVALID_TYPE_ERROR);
+		}
+	}
+
 	/**
 	 * @return array
 	 */
@@ -9321,7 +9349,13 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 			$fields['COLOR'] = $fields['EXTRA']['COLOR'];
 		}
 		$result = true;
-		if(isset($fields['NAME']) || isset($fields['SORT']) || isset($fields['STATUS_ID']) || isset($fields['COLOR']))
+		if(
+			isset($fields['NAME'])
+			|| isset($fields['SORT'])
+			|| isset($fields['STATUS_ID'])
+			|| isset($fields['COLOR'])
+			|| array_key_exists('DESCRIPTION', $fields)
+		)
 		{
 			if(!isset($fields['NAME']))
 			{
@@ -9386,6 +9420,11 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 	}
 	private static function prepareExtra(array &$fields)
 	{
+		if (array_key_exists('DESCRIPTION', $fields) && $fields['DESCRIPTION'] === null)
+		{
+			$fields['DESCRIPTION'] = '';
+		}
+
 		$statusID = $fields['STATUS_ID'] ?? '';
 		if($statusID === '')
 		{
@@ -9461,7 +9500,8 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 			$result[] = array(
 				'NAME' => $fields['NAME'],
 				'SORT' => intval($fields['SORT']),
-				'STATUS_ID' => $fields['STATUS_ID']
+				'STATUS_ID' => $fields['STATUS_ID'],
+				'DESCRIPTION' => $fields['DESCRIPTION'] ?? '',
 			);
 		}
 

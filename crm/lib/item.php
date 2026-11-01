@@ -757,33 +757,70 @@ abstract class Item implements \JsonSerializable, \ArrayAccess, Arrayable
 
 	public function getData(int $valuesType = Values::ALL): array
 	{
+		$data = $this->collectValues($this->getSerializableEntityFieldNames(), $valuesType);
+
+		return $this->mapDataKeysToCommonFieldNames($data);
+	}
+
+	/**
+	 * Same as getData(), limited to the given common field names: key order and values are those
+	 * of getData(), fields outside the list are never read.
+	 *
+	 * @internal
+	 *
+	 * @param string[] $commonFieldNames
+	 */
+	public function getDataForFields(array $commonFieldNames, int $valuesType = Values::ALL): array
+	{
+		$requestedCommonFieldNames = array_flip($commonFieldNames);
+
+		$entityFieldNames = array_filter(
+			$this->getSerializableEntityFieldNames(),
+			fn(string $entityFieldName): bool => isset(
+				$requestedCommonFieldNames[$this->getCommonFieldNameByMap($entityFieldName)]
+			),
+		);
+
+		$data = $this->collectValues($entityFieldNames, $valuesType);
+
+		return $this->mapDataKeysToCommonFieldNames($data);
+	}
+
+	private function getSerializableEntityFieldNames(): array
+	{
+		if ($this->entityFieldNames !== null)
+		{
+			return $this->entityFieldNames;
+		}
+
 		//todo temporary decision to avoid error on jsonSerialization of EntityObjects
 		$fieldTypeMask = FieldTypeMask::SCALAR|FieldTypeMask::USERTYPE|FieldTypeMask::EXPRESSION;
 
-		if (is_null($this->entityFieldNames))
+		$entityFieldNames = array_merge(
+			$this->getEntityFieldNames($fieldTypeMask),
+			$this->utmTableClassName::getCodeList(),
+			$this->lastCommunicationDataClass::getCodeList(),
+		);
+
+		if ($this->hasField(static::FIELD_NAME_OBSERVERS))
 		{
-			$this->entityFieldNames = array_merge(
-				$this->getEntityFieldNames($fieldTypeMask),
-				$this->utmTableClassName::getCodeList(),
-				$this->lastCommunicationDataClass::getCodeList(),
-			);
-
-			if ($this->hasField(static::FIELD_NAME_OBSERVERS))
-			{
-				$this->entityFieldNames[] = $this->getEntityFieldNameByMap(static::FIELD_NAME_OBSERVERS);
-			}
-
-			/** @var string[][] $fromImplementation */
-			$fromImplementation = [];
-			foreach ($this->getAllImplementations() as $implementation)
-			{
-				$fromImplementation[] = $implementation->getSerializableFieldNames();
-			}
-			$this->entityFieldNames = array_merge($this->entityFieldNames, ...$fromImplementation);
-			$this->entityFieldNames = array_unique($this->entityFieldNames);
+			$entityFieldNames[] = $this->getEntityFieldNameByMap(static::FIELD_NAME_OBSERVERS);
 		}
-		$data = $this->collectValues($this->entityFieldNames, $valuesType);
 
+		/** @var string[][] $fromImplementation */
+		$fromImplementation = [];
+		foreach ($this->getAllImplementations() as $implementation)
+		{
+			$fromImplementation[] = $implementation->getSerializableFieldNames();
+		}
+
+		$this->entityFieldNames = array_unique(array_merge($entityFieldNames, ...$fromImplementation));
+
+		return $this->entityFieldNames;
+	}
+
+	private function mapDataKeysToCommonFieldNames(array $data): array
+	{
 		$commonFieldNames = array_map([$this, 'getCommonFieldNameByMap'], array_keys($data));
 
 		return array_combine($commonFieldNames, array_values($data));
@@ -2407,8 +2444,6 @@ abstract class Item implements \JsonSerializable, \ArrayAccess, Arrayable
 
 	protected function resetExpressionField(string $commonFieldName): self
 	{
-		$this->loadExpressionField($commonFieldName);
-
 		unset($this->currentValues[$commonFieldName]);
 
 		return $this;

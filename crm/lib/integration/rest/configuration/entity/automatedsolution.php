@@ -98,6 +98,9 @@ class AutomatedSolution
 		$automatedSolutions = [];
 		foreach ($manager->getExistingAutomatedSolutions() as $automatedSolution)
 		{
+			// the description is shown by the hub only and is not a part of the configuration
+			unset($automatedSolution['DESCRIPTION']);
+
 			if ($isSingleMode)
 			{
 				if ($automatedSolutionCode === ($automatedSolution['CODE'] ?? ''))
@@ -196,11 +199,19 @@ class AutomatedSolution
 
 		try
 		{
+			$source = $params[Dictionary::CONTEXT_APPLICATION_SOURCE] ?? null;
+			$applicationCode = $params[Dictionary::CONTEXT_APPLICATION_CODE] ?? null;
+			if ($source !== Dictionary::SOURCE_MARKETPLACE || !is_string($applicationCode))
+			{
+				$applicationCode = null;
+			}
+
 			(new CreateEvent())
 				->setSection(Dictionary::SECTION_AUTOMATION)
 				->setStatus(Dictionary::STATUS_SUCCESS)
 				->setId($automatedSolution->getId())
-				->setSource($params[Dictionary::CONTEXT_APPLICATION_SOURCE] ?? null)
+				->setSource($source)
+				->setApplicationCode($applicationCode)
 				->buildEvent()
 				->send()
 			;

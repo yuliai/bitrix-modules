@@ -67,7 +67,8 @@ abstract class Request
 		// input data
 		try
 		{
-			if (!empty($httpRequest::getInput()))
+			// php://input belongs to the outer request, not to one built in-process with its own JSON data
+			if (empty($httpRequest->getJsonList()->getValues()) && !empty($httpRequest::getInput()))
 			{
 				$httpRequest->decodeJsonStrict();
 			}

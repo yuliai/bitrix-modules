@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Rest\Internal\Service\Admission\Strategy\Portal;
 
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\Internal\Service\Admission\DenialStrategyInterface;
 use Bitrix\Rest\Internal\Service\Admission\Verdict;
-use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
 
 final class TariffStrategy implements DenialStrategyInterface
 {

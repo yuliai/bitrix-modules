@@ -7,6 +7,7 @@ use Bitrix\StaffTrack\Dictionary\Option;
 use Bitrix\StaffTrack\Feature;
 use Bitrix\StaffTrack\Internal\Integration\HumanResources\Service\NodeSettingsService;
 use Bitrix\StaffTrack\Internal\Integration\Timeman\WorkDayService;
+use Bitrix\StaffTrack\Internal\Integration\Timeman\WorkReportService;
 use Bitrix\StaffTrack\Provider\OptionProvider;
 
 class CheckInSettingsProvider
@@ -78,6 +79,26 @@ class CheckInSettingsProvider
 	protected function isAutoCheckInEnabledInNodeSettings(): bool
 	{
 		return $this->nodeSettingsService->isAutoCheckInEnabledInSettings($this->userId);
+	}
+
+	/**
+	 * The answer of isAutoCheckInEnabledInSettings() for an employee other than the one making the request,
+	 * by the very rules his own device polls the GPS by - the regional gate included. The form of the
+	 * session user stays as it is: the permission popup, the settings modal and the mark of a postponement
+	 * stand on it.
+	 */
+	public function isAutoCheckInEnabledInSettingsFor(int $userId): bool
+	{
+		return
+			$userId > 0
+			&& $this->isGeoFeaturesAvailableByRegion()
+			&& $this->isAutoCheckInEnabledInNodeSettingsFor($userId)
+		;
+	}
+
+	protected function isAutoCheckInEnabledInNodeSettingsFor(int $userId): bool
+	{
+		return $this->nodeSettingsService->isAutoCheckInEnabledInSettings($userId);
 	}
 
 	public function canChangeAutoCheckIn(): bool
@@ -180,5 +201,14 @@ class CheckInSettingsProvider
 	public function isWorkTimeToolAvailable(): bool
 	{
 		return WorkDayService::isWorkTimeToolAvailable();
+	}
+
+	/**
+	 * Draft state of the work report, not a setting - so it stays out of getSettings(), whose
+	 * composition is a contract of its own.
+	 */
+	public function hasReportReadyForSubmit(): bool
+	{
+		return WorkReportService::hasReportReadyForSubmit($this->userId);
 	}
 }

@@ -10,6 +10,7 @@ use Bitrix\Crm\Automation\Connectors\ItemRelations;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\ParentFieldManager;
 
 final class Resolver
 {
@@ -17,6 +18,7 @@ final class Resolver
 	private const FILTER_SETTINGS_PROPERTY = 'FilterSettings';
 	private const RESOLUTION_LIMIT = 150;
 	private const RESOLUTION_ORDER = ['ID' => 'DESC'];
+	private const MULTI_VALUE_OPERATORS = ['in', '!in'];
 
 	public static function resolveDocuments(
 		\CBPActivity $activity,
@@ -382,10 +384,35 @@ final class Resolver
 				return null;
 			}
 
-			$documentId = self::findDocumentIdInParentProperties($activity, $currentFilterId);
-			if (is_array($documentId) && $filterMatcher($filter))
+			$hasParentProperty = false;
+			$parentDocumentId = null;
+			for ($parent = $activity; $parent !== null; $parent = $parent->parent)
 			{
-				return $documentId;
+				if (!$parent->isPropertyExists($currentFilterId))
+				{
+					continue;
+				}
+
+				$hasParentProperty = true;
+				$parentDocumentId = $parent->{$currentFilterId} ?? null;
+				break;
+			}
+
+			if ($hasParentProperty)
+			{
+				if (!is_array($parentDocumentId))
+				{
+					return [];
+				}
+
+				if ($filterMatcher($filter))
+				{
+					return $parentDocumentId;
+				}
+			}
+			else if ($filterMatcher($filter))
+			{
+				break;
 			}
 
 			if (($filter['sourceMode'] ?? null) !== 'filter')
@@ -394,20 +421,6 @@ final class Resolver
 			}
 
 			$currentFilterId = (string)($filter['sourceFilterId'] ?? '');
-		}
-
-		return null;
-	}
-
-	private static function findDocumentIdInParentProperties(\CBPActivity $activity, string $filterId): ?array
-	{
-		for ($parent = $activity->parent; $parent !== null; $parent = $parent->parent)
-		{
-			$documentId = $parent->{$filterId} ?? null;
-			if (is_array($documentId))
-			{
-				return $documentId;
-			}
 		}
 
 		return null;
@@ -432,7 +445,12 @@ final class Resolver
 				return null;
 			}
 
-			if (isset($resolved[$currentFilterId]) && $filterMatcher($filter))
+			if (!isset($resolved[$currentFilterId]))
+			{
+				return null;
+			}
+
+			if ($filterMatcher($filter))
 			{
 				return $resolved[$currentFilterId]['documentId'];
 			}
@@ -509,8 +527,18 @@ final class Resolver
 			return null;
 		}
 
-		$conditionGroup = new ConditionGroup($filter['conditions']);
+		$conditionGroup = new ConditionGroup(self::unserializeDealListValues($filter['conditions']));
 		$conditionGroup->internalizeValues($documentType);
+		foreach ($conditionGroup->getItems() as [$condition])
+		{
+			if ($condition->getOperator() === 'in' && $condition->getValue() === [])
+			{
+				$condition->setField('ID');
+				$condition->setOperator('=');
+				$condition->setValue(0);
+			}
+		}
+
 		$ormFilter = (new OrmFilterAdapter($documentType))->getOrmFilter($conditionGroup, $documentType);
 
 		$queryFilter = [];
@@ -563,6 +591,38 @@ final class Resolver
 			'entityTypeId' => $targetEntityTypeId,
 			'entityIds' => $entityIds,
 		];
+	}
+
+	/**
+	 * The designer stores the list of a multi-value operator as a JSON string in a single value slot.
+	 * The deal field accepts any string and would otherwise be internalized as a list of that one string.
+	 * Other fields keep the string: a user field internalizes a native list down to a single user.
+	 */
+	private static function unserializeDealListValues(array $conditions): array
+	{
+		$dealFieldId = ParentFieldManager::getParentFieldName(\CCrmOwnerType::Deal);
+
+		foreach ($conditions['items'] ?? [] as $index => $item)
+		{
+			$condition = is_array($item) ? ($item[0] ?? null) : null;
+			if (
+				!is_array($condition)
+				|| ($condition['field'] ?? null) !== $dealFieldId
+				|| !in_array($condition['operator'] ?? null, self::MULTI_VALUE_OPERATORS, true)
+				|| !is_string($condition['value'] ?? null)
+			)
+			{
+				continue;
+			}
+
+			$decoded = json_decode($condition['value'], true);
+			if (is_array($decoded) && array_is_list($decoded) && $decoded === array_filter($decoded, 'is_scalar'))
+			{
+				$conditions['items'][$index][0]['value'] = $decoded;
+			}
+		}
+
+		return $conditions;
 	}
 
 	private static function isExternalFilter(array $filter): bool

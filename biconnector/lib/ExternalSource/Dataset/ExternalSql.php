@@ -55,6 +55,10 @@ final class ExternalSql extends Base
 	public function getSqlTableAlias(): string
 	{
 		$dataset = $this->getDataset();
+		if (in_array($dataset->getEnumType(), [ExternalSource\Type::Mysql, ExternalSource\Type::Pgsql], true))
+		{
+			return 'EXTERNAL_DATASET';
+		}
 
 		$alias = sprintf(
 			'%s%s',
@@ -75,6 +79,13 @@ final class ExternalSql extends Base
 	protected function getConnectionTableName(): string
 	{
 		$tableName = $this->getDataset()->getExternalCode() ?? '';
+		if (
+			in_array($this->getDataset()->getEnumType(), [ExternalSource\Type::Mysql, ExternalSource\Type::Pgsql], true)
+			&& ($tableName === '' || str_contains($tableName, "\0"))
+		)
+		{
+			return '';
+		}
 
 		if ($this->getDataset()->getEnumType() === ExternalSource\Type::Clickhouse)
 		{
@@ -83,7 +94,11 @@ final class ExternalSql extends Base
 			return '`' . str_replace('`', '``', $tableName) . '`';
 		}
 
-		return $tableName;
+		return match ($this->getDataset()->getEnumType()) {
+			ExternalSource\Type::Mysql => '`' . str_replace('`', '``', $tableName) . '`',
+			ExternalSource\Type::Pgsql => '"' . str_replace('"', '""', strtolower($tableName)) . '"',
+			default => $tableName,
+		};
 	}
 
 	protected function getField(BIConnector\ExternalSource\Internal\ExternalDatasetField $datasetField): BIConnector\DataSource\DatasetField
@@ -91,6 +106,15 @@ final class ExternalSql extends Base
 		$type = $datasetField->getEnumType();
 		$name = $datasetField->getName();
 		$externalCode = $datasetField->getExternalCode();
+		$isExternalDatabase = in_array(
+			$this->getDataset()->getEnumType(),
+			[ExternalSource\Type::Mysql, ExternalSource\Type::Pgsql],
+			true,
+		);
+		if ($isExternalDatabase)
+		{
+			$externalCode = $this->getSqlTableAlias() . '.' . $this->quoteExternalFieldName($externalCode);
+		}
 
 		$field = match ($type) {
 			BIConnector\ExternalSource\FieldType::Int => new BIConnector\DataSource\Field\IntegerField($name),
@@ -101,10 +125,19 @@ final class ExternalSql extends Base
 			default => new BIConnector\DataSource\Field\StringField($name),
 		};
 
-		$field->setExpression($externalCode, isPrepared: false);
+		$field->setExpression($externalCode, isPrepared: $isExternalDatabase);
 		$field->setDescription($datasetField->getName());
 		$field->setDescriptionFull($datasetField->getName());
 
 		return $field;
+	}
+
+	private function quoteExternalFieldName(string $fieldName): string
+	{
+		return match ($this->getDataset()->getEnumType()) {
+			ExternalSource\Type::Mysql => '`' . str_replace('`', '``', $fieldName) . '`',
+			ExternalSource\Type::Pgsql => '"' . str_replace('"', '""', strtolower($fieldName)) . '"',
+			default => $fieldName,
+		};
 	}
 }

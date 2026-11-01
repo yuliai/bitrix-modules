@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Intranet\Internal\Integration\Bitrix24;
 
-use Bitrix\Bitrix24\Config\Feature\CollaborationWebMenuFlag;
-use Bitrix\Intranet\Config\Feature\CollaborationWebMenuFlag as IntranetCollaborationWebMenuFlag;
+use Bitrix\Bitrix24\Internal\Config\Feature\CollaborationWebMenuFlag;
+use Bitrix\Intranet\Internal\Config\Feature\CollaborationWebMenuFlag as IntranetCollaborationWebMenuFlag;
 use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Loader;
 

@@ -8,9 +8,8 @@ use Bitrix\Main\ORM\Fields\StringField;
 use Bitrix\Main\ORM\Fields\Relations\OneToMany;
 use Bitrix\Main\EventManager;
 use Bitrix\Main\Event;
+use Bitrix\Rest\Internal\Service\Placement\HandlerReader;
 use Bitrix\Rest\UserField\Callback;
-use Bitrix\Rest\Lang;
-use CRestUtil;
 
 Loc::loadMessages(__FILE__);
 
@@ -152,28 +151,6 @@ class PlacementTable extends Main\Entity\DataManager
 		);
 	}
 
-	private static function getUserFilter($userId)
-	{
-		if (is_null($userId))
-		{
-			$userId = (int)(Internal\Entity\CurrentUser::getInstance()->getId() ?? 0);
-		}
-
-		if ($userId > 0)
-		{
-			$result = [
-				static::DEFAULT_USER_ID_VALUE,
-				$userId,
-			];
-		}
-		else
-		{
-			$result = static::DEFAULT_USER_ID_VALUE;
-		}
-
-		return $result;
-	}
-
 	/**
 	 * Returns list of placement handlers. Use \Bitrix\Rest\PlacementTable::getHandlersList.
 	 *
@@ -183,33 +160,10 @@ class PlacementTable extends Main\Entity\DataManager
 	 */
 	public static function getHandlers($placement, int $userId = null)
 	{
-		$dbRes = static::getList(
-			[
-				'filter' => [
-					'=PLACEMENT' => $placement,
-					'=REST_APP.ACTIVE' => AppTable::ACTIVE,
-					'=USER_ID' => static::getUserFilter($userId),
-				],
-				'select' => [
-					'ID',
-					'USER_ID',
-					'ICON_ID',
-					'TITLE',
-					'GROUP_NAME',
-					'OPTIONS',
-					'COMMENT',
-					'APP_ID',
-					'ADDITIONAL',
-					'PLACEMENT_HANDLER',
-					'INSTALLED' => 'REST_APP.INSTALLED',
-					'APP_NAME' => 'REST_APP.APP_NAME',
-					'APP_ACCESS' => 'REST_APP.ACCESS',
-				],
-				'order' => ['ID' => 'ASC'],
-			]
+		return (new Internal\Service\Placement\HandlerQuery())->getLegacyHandlers(
+			(string)$placement,
+			Internal\Service\Placement\HandlerReader::resolveUserId($userId),
 		);
-
-		return $dbRes;
 	}
 
 	/**
@@ -350,151 +304,16 @@ class PlacementTable extends Main\Entity\DataManager
 	 */
 	public static function getHandlersList($placement, $skipInstallCheck = false, ?int $userId = null)
 	{
-		$userId ??= (int)(Internal\Entity\CurrentUser::getInstance()->getId() ?? self::DEFAULT_USER_ID_VALUE);
-
-		$cacheManager = Main\Application::getInstance()->getManagedCache();
-
-		$cacheId = static::getPlacementCacheId($placement, $userId);
-
-		$placementHandlers = [];
-		if ($cacheManager->read(static::CACHE_TTL, $cacheId, static::CACHE_DIR))
-		{
-			$placementHandlers = $cacheManager->get($cacheId);
-		}
-		else
-		{
-			$handlersQueryResult = static::getHandlers($placement, $userId);
-			foreach ($handlersQueryResult->fetchCollection() as $handler)
-			{
-				$placementHandlers[] = static::preparePlacementHandler($handler);
-			}
-
-			$cacheManager->set($cacheId, $placementHandlers);
-		}
-
-		foreach ($placementHandlers as $key => $handler)
-		{
-			if (!$skipInstallCheck && !$handler['INSTALLED'])
-			{
-				unset($placementHandlers[$key]);
-			}
-			elseif (
-				$placement !== Api\UserFieldType::PLACEMENT_UF_TYPE
-				&& !CRestUtil::checkAppAccess($handler['APP_ID'], ['ACCESS' => $handler['APP_ACCESS']])
-			)
-			{
-				unset($placementHandlers[$key]);
-			}
-			else
-			{
-				$placementHandlers[$key] = Lang::mergeFromLangAll($handler);
-				if (empty($placementHandlers[$key]['TITLE']))
-				{
-					$placementHandlers[$key]['TITLE'] = static::getDefaultTitle($handler['ID']);
-				}
-			}
-		}
-
-		return array_values($placementHandlers);
+		return (new HandlerReader())->readHandlers(
+			(string)$placement,
+			(bool)$skipInstallCheck,
+			$userId,
+		);
 	}
 
 	public static function getAccessibleHandlerIds($placement, ?int $userId = null): array
 	{
-		$userId ??= (int)(Internal\Entity\CurrentUser::getInstance()->getId() ?? self::DEFAULT_USER_ID_VALUE);
-
-		$cacheManager = Main\Application::getInstance()->getManagedCache();
-		$cacheId = static::getAccessibleHandlerCacheId($placement, $userId);
-
-		$candidates = [];
-		if ($cacheManager->read(static::CACHE_TTL, $cacheId, static::CACHE_DIR))
-		{
-			$candidates = $cacheManager->get($cacheId);
-		}
-		else
-		{
-			$handlersQueryResult = static::getHandlers($placement, $userId);
-			while ($handler = $handlersQueryResult->fetch())
-			{
-				$candidates[] = [
-					'ID' => (int)$handler['ID'],
-					'APP_ID' => $handler['APP_ID'],
-					'INSTALLED' => $handler['INSTALLED'],
-					'APP_ACCESS' => $handler['APP_ACCESS'],
-				];
-			}
-
-			$cacheManager->set($cacheId, $candidates);
-		}
-
-		$ids = [];
-		if (empty($candidates))
-		{
-			return $ids;
-		}
-
-		$isUserFieldPlacement = ($placement === Api\UserFieldType::PLACEMENT_UF_TYPE);
-		$userAccessCodes = null;
-		$isAdmin = null;
-
-		foreach ($candidates as $candidate)
-		{
-			if ($candidate['INSTALLED'] !== AppTable::INSTALLED)
-			{
-				continue;
-			}
-
-			if (!$isUserFieldPlacement)
-			{
-				$appAccess = (string)($candidate['APP_ACCESS'] ?? '');
-				if ($appAccess !== '')
-				{
-					$userAccessCodes ??= static::getUserAccessCodes($userId);
-					$isAdmin ??= CRestUtil::isAdmin($userId);
-
-					if (!static::isAccessGrantedByCodes($appAccess, $userAccessCodes, $isAdmin))
-					{
-						continue;
-					}
-				}
-			}
-
-			$ids[] = (int)$candidate['ID'];
-		}
-
-		return $ids;
-	}
-
-	/**
-	 * Access codes of the given user, with the same semantics as \CUser::GetAccessCodes().
-	 */
-	private static function getUserAccessCodes(int $userId): array
-	{
-		if ($userId <= 0)
-		{
-			return ['G2'];
-		}
-
-		$codes = \CAccess::GetUserCodesArray($userId);
-		$codes[] = 'AU';
-
-		return $codes;
-	}
-
-	private static function isAccessGrantedByCodes(string $appAccess, array $userAccessCodes, bool $isAdmin): bool
-	{
-		$rights = explode(',', $appAccess);
-
-		if (in_array('G2', $rights, true))
-		{
-			return true;
-		}
-
-		if (!empty(array_intersect($rights, $userAccessCodes)))
-		{
-			return true;
-		}
-
-		return $isAdmin;
+		return (new HandlerReader())->readAccessibleIds((string)$placement, $userId);
 	}
 
 	/**
@@ -517,8 +336,12 @@ class PlacementTable extends Main\Entity\DataManager
 
 	public static function clearHandlerCache()
 	{
-		$cache = Main\Application::getInstance()->getManagedCache();
-		$cache->cleanDir(static::CACHE_DIR);
+		(new Internal\Service\Placement\HandlerCache(
+			Main\Application::getInstance()->getManagedCache(),
+			static::CACHE_TTL,
+			static::CACHE_DIR,
+		))->clear();
+
 		if (defined('BX_COMP_MANAGED_CACHE'))
 		{
 			global $CACHE_MANAGER;
@@ -650,16 +473,6 @@ class PlacementTable extends Main\Entity\DataManager
 		{
 			static::clearHandlerCache();
 		}
-	}
-
-	protected static function getPlacementCacheId($placement, int $userId): string
-	{
-		return 'rest_placement_list|' . $placement . '|' . LANGUAGE_ID . '|user_' . $userId;
-	}
-
-	protected static function getAccessibleHandlerCacheId($placement, int $userId): string
-	{
-		return 'rest_placement_access_ids|' . $placement . '|user_' . $userId;
 	}
 
 	protected static function checkUniq(Main\Entity\Event $event, $add = false, array $owner = [])
@@ -887,52 +700,4 @@ class PlacementTable extends Main\Entity\DataManager
 
 		return (int)(is_array($id) ? ($id['ID'] ?? 0) : $id);
 	}
-
-	private static function preparePlacementHandler(EO_Placement $handler): array
-	{
-		$id = $handler->getId();
-		$app = $handler->getRestApp();
-		$placementItem = [
-			'ID' => $id,
-			'APP_ID' => $handler->getAppId(),
-			'USER_ID' => $handler->getUserId() ?? 0,
-			'ICON_ID' => $handler->getIconId(),
-			'ADDITIONAL' => $handler->getAdditional(),
-			'HANDLER' => $handler->getPlacementHandler(),
-			'TITLE' => '',
-			/**
-			 * @deprecated
-			 * Use DESCRIPTION
-			 */
-			'COMMENT' => '',
-			'DESCRIPTION' => '',
-			'GROUP_NAME' => '',
-			'OPTIONS' => $handler->getOptions(),
-			'INSTALLED' => $app->getInstalled(),
-			'APP_NAME' => $app->getAppName(),
-			'APP_ACCESS' => $app->getAccess(),
-			'LANG_ALL' => [],
-		];
-
-		if ($placementItem['ICON_ID'] > 0 && ($file = \CFile::GetFileArray($placementItem['ICON_ID'])))
-		{
-			$placementItem['ICON'] = array_change_key_case($file, CASE_LOWER);
-		}
-
-		$handler->fillLangAll();
-		if (!is_null($handler->getLangAll()))
-		{
-			foreach ($handler->getLangAll() as $lang)
-			{
-				$placementItem['LANG_ALL'][$lang->getLanguageId()] = [
-					'TITLE' => $lang->getTitle(),
-					'DESCRIPTION' => $lang->getDescription(),
-					'GROUP_NAME' => $lang->getGroupName(),
-				];
-			}
-		}
-
-		return $placementItem;
-	}
-
 }

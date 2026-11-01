@@ -42,8 +42,9 @@ class TaskCompletionService
 		}
 
 		$userId = $config->getUserId();
+		$isFinalStatus = $task->status?->isCompleted() === true;
 
-		if ($task->status?->isCompleted() === true)
+		if ($isFinalStatus)
 		{
 			if (!$this->taskAccessService->can($userId, ActionDictionary::TASK_ACTIONS['read'], $taskId))
 			{
@@ -55,8 +56,7 @@ class TaskCompletionService
 				return $result;
 			}
 		}
-
-		if (!$this->canCompleteWithChecklist($taskId, $userId))
+		elseif (!$this->canCompleteWithChecklist($taskId, $userId))
 		{
 			return $result->addError($this->getAccessError());
 		}
@@ -72,6 +72,11 @@ class TaskCompletionService
 			{
 				return $result->addErrors($checkListResult->getErrors());
 			}
+		}
+
+		if ($isFinalStatus)
+		{
+			return $result;
 		}
 
 		$commandResult = $this->runCompleteTaskCommand($taskId, $config);

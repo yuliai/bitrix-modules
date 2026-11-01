@@ -77,6 +77,7 @@ class StatusTable extends ORM\Data\DataManager
 			(new ORM\Fields\StringField('NAME'))
 				->configureRequired()
 				->configureSize(100),
+			(new ORM\Fields\TextField('DESCRIPTION')),
 			(new ORM\Fields\StringField('NAME_INIT'))
 				->configureSize(100),
 			(new ORM\Fields\IntegerField('SORT'))
@@ -503,7 +504,7 @@ class StatusTable extends ORM\Data\DataManager
 		static::$statusesCache[$entityId] = $statuses;
 	}
 
-	protected static function removeStatusesFromCache(string $entityId): void
+	public static function removeStatusesFromCache(string $entityId): void
 	{
 		unset(static::$statusesCache[$entityId]);
 	}

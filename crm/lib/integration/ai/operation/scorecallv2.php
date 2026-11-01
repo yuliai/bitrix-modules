@@ -60,8 +60,7 @@ final class ScoreCallV2 extends AbstractOperation
 			&& CCrmActivity::CheckItemUpdatePermission(
 				['ID' => $target->getEntityId()],
 				Container::getInstance()->getUserPermissions($userId)->getCrmPermissions(),
-			)
-		;
+			);
 	}
 
 	public static function isSuitableTarget(ItemIdentifier $target): bool
@@ -366,6 +365,24 @@ final class ScoreCallV2 extends AbstractOperation
 
 	protected static function extractPayloadFromAIResult(AI\Result $result, EO_Queue $job): Dto
 	{
+		return self::extractScorePayloadFromAIResult($result);
+	}
+
+	public static function extractAssessmentFromAIResult(AI\Result $result): ?int
+	{
+		$payload = self::extractScorePayloadFromAIResult($result);
+		if ($payload->hasValidationErrors())
+		{
+			return null;
+		}
+
+		return self::isCriteriaListEmpty($payload->criteriaScores)
+			? null
+			: self::getAssessmentsValue($payload);
+	}
+
+	private static function extractScorePayloadFromAIResult(AI\Result $result): ScoreCallV2Payload
+	{
 		$json = self::extractPayloadPrettifiedData($result);
 		if (empty($json))
 		{
@@ -450,12 +467,10 @@ final class ScoreCallV2 extends AbstractOperation
 
 			$assessmentSettingsId = isset($context)
 				? $context->getParameters()['additionalInfo']['assessment_settings_id'] ?? null
-				: null
-			;
+				: null;
 			$criteriaData = isset($context)
 				? (string)($context->getParameters()['additionalInfo']['criteria_data'] ?? '')
-				: ''
-			;
+				: '';
 			$assessmentSettings = self::getAssessmentSettings($activityId, $assessmentSettingsId);
 			$assessment = self::getAssessmentsValue($payload);
 			$controller = AiQualityAssessmentController::getInstance();
@@ -475,7 +490,7 @@ final class ScoreCallV2 extends AbstractOperation
 						'ACTIVITY_ID' => $activityId,
 						'ASSESSMENT_SETTING_ID' => $assessmentSettings?->getId(),
 						'JOB_ID' => $result->getJobId(),
-						'PROMPT' => $assessmentSettings?->getPrompt(),
+						'PROMPT' => $assessmentSettings?->getPrompt() ?? '',
 						'ASSESSMENT' => $assessment,
 						'ASSESSMENT_AVG' => $controller->getNewAvgAssessmentValue($userId, $assessment),
 						'USE_IN_RATING' => true,
@@ -653,7 +668,7 @@ final class ScoreCallV2 extends AbstractOperation
 	{
 		$criteriaList = array_filter(
 			$list,
-			static fn(object $item) => isset($item->met) && is_bool($item->met)
+			static fn(object $item) => isset($item->met) && is_bool($item->met),
 		);
 
 		return empty($criteriaList);
@@ -683,5 +698,4 @@ final class ScoreCallV2 extends AbstractOperation
 
 		$badge->bind($itemIdentifier, $sourceIdentifier);
 	}
-
 }

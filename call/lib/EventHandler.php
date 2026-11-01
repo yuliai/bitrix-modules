@@ -366,44 +366,59 @@ class EventHandler
 			}
 		}
 
-		if (!empty($usersToInvite))
+		if (empty($usersToInvite))
 		{
-			$signaling = $call->getSignaling();
-			$initiatorId = $call->getInitiatorId();
-
-			foreach ($usersToInvite as $userId)
-			{
-				if ($call->getScheme() === Call::SCHEME_JWT)
-				{
-					$signaling->sendCallInviteToUser(
-						senderId: $initiatorId,
-						toUserId: $userId,
-						isLegacyMobile: false,
-						video: true,
-						sendPush: true,
-					);
-				}
-				else
-				{
-					$signaling->sendInviteToUser(
-						senderId: $initiatorId,
-						toUserId: $userId,
-						invitedUsers: $usersToInvite,
-						isLegacyMobile: false,
-						video: true,
-						sendPush: true
-					);
-				}
-				Recent::updateUserActiveCallsCache($userId);
-			}
-
-			if (count($usersToInvite) > 0)
-			{
-				$signaling->sendUsersInvited($initiatorId, $usersToInvite, $call->getUsers(), true);
-			}
-
-			Recent::updateCallCache($call->getId());
+			return;
 		}
+
+		$signaling = $call->getSignaling();
+		$initiatorId = $call->getInitiatorId();
+
+		// Manual add to a running conference (BUGS #230232, Q-5): adding a user to the
+		// conference chat is a direct human invitation -- it RINGS and shows the recent
+		// card, even when the conference started long ago. The `manualInvite` flag lets
+		// the ring survive the client's stale gate (server_time_ago > 30), and the
+		// conference TTL widens the pull expiry so a slow answer still lands. The silent
+		// card-only path is reserved for the automatic start reconcile
+		// (see Controller\Call::reconcileConferenceParticipants()). Type is the
+		// discriminator -- 1:1 (PROVIDER_PLAIN) never reaches this handler (see the
+		// onChatUserAdd provider filter), and TYPE_INSTANT groups keep the plain ring.
+		$conferenceInvite = $call->getType() === Call::TYPE_PERMANENT;
+		$conferenceTtl = $conferenceInvite ? Settings::getConferenceInviteTtl() : null;
+
+		foreach ($usersToInvite as $userId)
+		{
+			if ($call->getScheme() === Call::SCHEME_JWT)
+			{
+				$signaling->sendCallInviteToUser(
+					senderId: $initiatorId,
+					toUserId: $userId,
+					isLegacyMobile: false,
+					video: true,
+					sendPush: true,
+					ttl: $conferenceTtl,
+					manualInvite: $conferenceInvite,
+				);
+			}
+			else
+			{
+				$signaling->sendInviteToUser(
+					senderId: $initiatorId,
+					toUserId: $userId,
+					invitedUsers: $usersToInvite,
+					isLegacyMobile: false,
+					video: true,
+					sendPush: true,
+					ttl: $conferenceTtl,
+					manualInvite: $conferenceInvite,
+				);
+			}
+			Recent::updateUserActiveCallsCache($userId);
+		}
+
+		$signaling->sendUsersInvited($initiatorId, $usersToInvite, $call->getUsers(), true);
+
+		Recent::updateCallCache($call->getId());
 	}
 
 	/**

@@ -5,6 +5,7 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet;
 use Bitrix\AiAssistant\Definition\Dto\DefinitionMetadataDto;
 use Bitrix\AiAssistant\Definition\Dto\UsesToolsDto;
 use Bitrix\AiAssistant\Definition\ToolSet\BaseToolSet;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\AgentOperationsDescription;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\CreateDashboardTool;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\DeleteDashboardTool;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\GetChartDataTool;
@@ -26,23 +27,20 @@ final class BiDashboardsToolSet extends BaseToolSet
 
 	public function getMetadata(): DefinitionMetadataDto
 	{
-		return new DefinitionMetadataDto(
-			'BI Dashboards',
-			'Tools for working with BI Constructor dashboards (Apache Superset) — saved reports '
+		$preamble = 'Tools for working with BI Constructor dashboards (Apache Superset) — saved reports '
 			. 'built over tasks, deals, calls and other entities. '
-			. 'READ/ANALYZE: find a dashboard by name/description, read its structure and '
-			. 'aggregated stats, drill into charts, and discover filter values. Prefer these '
-			. 'tools for any analytical or reporting question about an entity across many records '
-			. '— summaries, top/bottom-N, distributions, anomalies, trends over time, and '
-			. 'group-by aggregates over a period (e.g. "how many tasks did the team close this '
+			. 'Prefer these tools for any analytical or reporting question about an entity across '
+			. 'many records — summaries, top/bottom-N, distributions, anomalies, trends over time, '
+			. 'and group-by aggregates over a period (e.g. "how many tasks did the team close this '
 			. 'year") — and for analytical follow-ups even when the entity changes (e.g. "now the '
 			. 'same for deals"). '
-			. 'AUTHOR/MANAGE: create a draft dashboard, attach charts and set its layout/filters, '
-			. 'rename it, and publish/unpublish or delete it. Publishing, overwriting '
-			. 'layout/filters, unpublishing (revokes share links) and deleting are '
-			. 'destructive/irreversible and require explicit two-step user confirmation. '
+			. 'Destructive operations require explicit two-step user confirmation. '
 			. 'Not for creating or editing CRM entities, acting on one specific record, or '
-			. 'managing access — those stay with the entity-specific tools.',
+			. 'managing access — those stay with the entity-specific tools.';
+
+		return new DefinitionMetadataDto(
+			'BI Dashboards',
+			$preamble . (new AgentOperationsDescription())->getForToolSet($this->getCode()),
 		);
 	}
 

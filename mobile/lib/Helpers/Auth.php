@@ -155,6 +155,43 @@ class Auth
 		return $result;
 	}
 
+	public static function isTrustedOtpDevice(mixed $appUuid, Otp $otp): bool
+	{
+		if (!is_string($appUuid) || $appUuid === '')
+		{
+			return false;
+		}
+
+		$deviceId = self::getTrustedOtpDeviceId($otp);
+		if ($deviceId === null)
+		{
+			return false;
+		}
+
+		return strtoupper($appUuid) === strtoupper($deviceId);
+	}
+
+	public static function hasTrustedOtpDevice(Otp $otp): bool
+	{
+		return self::getTrustedOtpDeviceId($otp) !== null;
+	}
+
+	private static function getTrustedOtpDeviceId(Otp $otp): ?string
+	{
+		if (!$otp->isActivated() || $otp->getType() !== OtpType::Push)
+		{
+			return null;
+		}
+
+		$deviceId = $otp->getInitParams()['deviceInfo']['id'] ?? null;
+		if (!is_string($deviceId) || $deviceId === '')
+		{
+			return null;
+		}
+
+		return $deviceId;
+	}
+
 	private static function resolvePortalUserId(array $otpParams): ?int
 	{
 		$userId = (int)($otpParams['USER_ID'] ?? 0);

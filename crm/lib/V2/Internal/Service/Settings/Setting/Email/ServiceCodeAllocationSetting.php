@@ -7,8 +7,8 @@ namespace Bitrix\Crm\V2\Internal\Service\Settings\Setting\Email;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingDescription;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingOption;
 use Bitrix\Crm\V2\Internal\Service\Settings\AbstractSetting;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\SelectSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Setting\SettingTitleProvider;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\SelectSchema;
+use Bitrix\Crm\V2\Internal\Service\Settings\SettingTitleProvider;
 use Bitrix\Main\Result;
 
 /**

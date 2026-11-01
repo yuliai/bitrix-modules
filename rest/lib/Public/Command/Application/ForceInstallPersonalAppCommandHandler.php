@@ -77,7 +77,6 @@ final class ForceInstallPersonalAppCommandHandler
 			),
 			applicationToken: (string)$command->applicationToken,
 			initiatorUserId: $this->getInitiatorUserId(),
-			skipTariffCheck: true,
 		);
 	}
 

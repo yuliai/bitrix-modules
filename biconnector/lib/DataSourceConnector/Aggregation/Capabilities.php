@@ -109,6 +109,68 @@ final class Capabilities
 		);
 	}
 
+	/**
+	 * Builds the block out of the declaration of an external application (ALG-01).
+	 *
+	 * The rule is "the portal accepts only what it can check itself": every claim is intersected with
+	 * what the portal knows, and the order of every list is the order of the portal - the declaration
+	 * may not reorder a list, because that would change the fingerprint.
+	 *
+	 * @param array<string, string> $mapFields EXTERNAL_CODE => NAME of the same table. Supplied by the
+	 *     caller, so that the aggregation layer never reads the external source catalog itself.
+	 */
+	public static function fromDeclaration(
+		ExternalCapabilitiesDeclaration $declaration,
+		DatasetSchema $schema,
+		array $mapFields,
+		string $scopeId,
+	): self
+	{
+		// An empty or malformed declaration shares no protocol version with the portal.
+		$protocolVersions = self::intersectOrdered(self::PROTOCOL_VERSIONS, $declaration->protocolVersions);
+		if ($protocolVersions === [])
+		{
+			return self::unsupported();
+		}
+
+		$rowSetSemantics = $schema->getRowSetSemantics();
+		if ($rowSetSemantics !== DatasetSchema::ROW_SET_RAW)
+		{
+			return self::unsupported();
+		}
+
+		if ($scopeId === '')
+		{
+			return self::unsupported();
+		}
+
+		$functions = self::buildDeclaredFunctions($declaration);
+		if ($functions === [])
+		{
+			return self::unsupported();
+		}
+
+		return new self(
+			supported: true,
+			// The intersection is published and not the constant of the portal: the published block feeds
+			// the version gate, and a version the application never claimed must not reach it.
+			protocolVersions: $protocolVersions,
+			rowSetSemantics: $rowSetSemantics,
+			functions: $functions,
+			dateTruncUnits: self::intersectOrdered(DateTruncSpec::UNITS, $declaration->dateTruncUnits),
+			having: $declaration->having,
+			groupLimit: $declaration->groupLimit,
+			orderBy: $declaration->orderBy,
+			excludedColumns: self::buildDeclaredExcludedColumns($schema, $declaration, $mapFields),
+			semantics: new DialectSemantics(
+				binaryStringOperations: $declaration->binaryStringOperations,
+				floatNanOrderingCompatible: $declaration->floatNanOrderingCompatible,
+			),
+			scopeId: $scopeId,
+			where: WhereCapabilities::forExternal($declaration, $mapFields),
+		);
+	}
+
 	public function isColumnExcluded(string $name): bool
 	{
 		return in_array($name, $this->excludedColumns, true);
@@ -223,7 +285,7 @@ final class Capabilities
 		{
 			$name = (string)$name;
 
-			if ($schema->hasCallback($name) || $schema->isNonAggregatableType($name))
+			if (self::isExcludedBySchema($schema, $name))
 			{
 				$excluded[] = $name;
 
@@ -247,5 +309,105 @@ final class Capabilities
 		sort($excluded);
 
 		return $excluded;
+	}
+
+	/**
+	 * Reasons a column takes no part in a delegated aggregation that follow from the schema alone, with
+	 * no dialect involved.
+	 */
+	private static function isExcludedBySchema(DatasetSchema $schema, string $name): bool
+	{
+		return $schema->hasCallback($name) || $schema->isNonAggregatableType($name);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function buildDeclaredFunctions(ExternalCapabilitiesDeclaration $declaration): array
+	{
+		$functions = [];
+		foreach (self::FUNCTION_ORDER as $function)
+		{
+			if (!in_array($function, $declaration->functions, true))
+			{
+				continue;
+			}
+
+			// An approximate COUNT(DISTINCT) must never be advertised: it would be a wrong number. The
+			// claim is not taken on trust from the application either.
+			if ($function === self::FUNCTION_COUNT_DISTINCT && !$declaration->exactCountDistinct)
+			{
+				continue;
+			}
+
+			$functions[] = $function;
+		}
+
+		return $functions;
+	}
+
+	/**
+	 * Columns excluded by the schema plus the ones the application declared, translated into dataset
+	 * field names (ALG-01).
+	 *
+	 * The boolean carrier is not judged here: there is no dialect to derive a normalizing expression
+	 * from, and the wire values of this channel are produced by the application itself, which excludes
+	 * a column it cannot normalize by declaring it.
+	 *
+	 * @param array<string, string> $mapFields
+	 *
+	 * @return string[]
+	 */
+	private static function buildDeclaredExcludedColumns(
+		DatasetSchema $schema,
+		ExternalCapabilitiesDeclaration $declaration,
+		array $mapFields,
+	): array
+	{
+		$excluded = [];
+		foreach (array_keys($schema->getRawFields()) as $name)
+		{
+			$name = (string)$name;
+
+			if (self::isExcludedBySchema($schema, $name))
+			{
+				$excluded[] = $name;
+			}
+		}
+
+		foreach ($declaration->translateExcludedColumns($mapFields) as $name)
+		{
+			if (!in_array($name, $excluded, true))
+			{
+				$excluded[] = $name;
+			}
+		}
+
+		sort($excluded);
+
+		return $excluded;
+	}
+
+	/**
+	 * Intersection that keeps the order of the portal: canonicalization preserves array order, so the
+	 * order of the declaration must never reach the block.
+	 *
+	 * @param array<int, int|string> $portalOrder
+	 * @param array<int, int|string> $declared
+	 *
+	 * @return array<int, int|string>
+	 */
+	private static function intersectOrdered(array $portalOrder, array $declared): array
+	{
+		$items = [];
+		foreach ($portalOrder as $item)
+		{
+			if (in_array($item, $declared, true))
+			{
+				$items[] = $item;
+			}
+		}
+
+		return $items;
 	}
 }

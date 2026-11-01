@@ -304,9 +304,7 @@ class RoleService
 
 	public function changeActivateRoles(array $roleIds, bool $needActivate, int $userId): Result
 	{
-		$this->roleRepository->changeActivateRoles($roleIds, $needActivate, $userId);
-
-		return new Result();
+		return $this->roleRepository->changeActivateRoles($roleIds, $needActivate, $userId);
 	}
 
 	public function getMainRoleDataByCodes(array $roleCodes): array

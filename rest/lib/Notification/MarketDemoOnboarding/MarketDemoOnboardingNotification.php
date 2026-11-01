@@ -71,7 +71,7 @@ final class MarketDemoOnboardingNotification
 			return null;
 		}
 
-		if (!$this->marketSubscription->isActive())
+		if (!$this->marketSubscription->isActive() || !$this->marketSubscription->isDemo())
 		{
 			return null;
 		}

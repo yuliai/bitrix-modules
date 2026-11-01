@@ -45,6 +45,7 @@ final class Add implements Action
 			'CODE' => $intranetSection->getCode(),
 			'INTRANET_CUSTOM_SECTION_ID' => $intranetSection->getId(),
 			'IS_VIBE_ENABLED' => false,
+			'DESCRIPTION' => $this->fields['DESCRIPTION'] ?? null,
 		]);
 		$crmResult = $automatedSolution->save();
 		if (!$crmResult->isSuccess())

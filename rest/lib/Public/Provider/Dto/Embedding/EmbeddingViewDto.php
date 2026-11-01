@@ -15,8 +15,7 @@ final class EmbeddingViewDto
 		public readonly string $moduleId,
 		public readonly string $entityType,
 		public readonly string $entityId,
-		public readonly string $url,
-		public readonly array $payload = [],
+		public readonly EmbeddingOpenDto $open,
 	)
 	{
 	}

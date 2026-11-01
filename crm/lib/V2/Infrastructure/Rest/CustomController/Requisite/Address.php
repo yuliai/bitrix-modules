@@ -18,6 +18,8 @@ use Bitrix\Crm\V2\Public\Command\Address\Requisite\AddCommand;
 use Bitrix\Crm\V2\Public\Command\Address\Requisite\DeleteCommand;
 use Bitrix\Crm\V2\Public\Command\Address\Requisite\UpdateCommand;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\ItemId;
+use Bitrix\Crm\V2\Public\Provider\Requisite\RequisiteProvider;
 use Bitrix\Crm\V2\Public\Provider\Address\RequisiteAddressProvider;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Command\CommandInterface;
@@ -37,6 +39,7 @@ final class Address extends AbstractController
 	{
 		/** @var RequisiteAddressDto $dto */
 		$dto = $request->fields->convertToDto('add');
+		$this->assertRequisiteCategoryAllowed($dto->requisiteId);
 		$this->runCommand(new AddCommand(
 			$dto->requisiteId,
 			$dto->typeId,
@@ -50,6 +53,7 @@ final class Address extends AbstractController
 
 	public function getAction(GetRequest $request, EntityType $entityType): GetResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->requisiteId);
 		$selectedFields = $request->select?->getList() ?? [];
 		$scopeFields = $this->getScopeFields($request->getOptions());
 
@@ -81,6 +85,7 @@ final class Address extends AbstractController
 	public function listAction(ListRequest $request, EntityType $entityType): ListResponse
 	{
 		$requisiteId = (int)$request->getRequisiteId();
+		$this->assertRequisiteCategoryAllowed($requisiteId);
 		$items = new DtoCollection(RequisiteAddressDto::class);
 		$selectedFields = $request->select?->getList() ?? [];
 		$scopeFields = $this->getScopeFields($request->getOptions());
@@ -110,6 +115,7 @@ final class Address extends AbstractController
 
 	public function updateAction(UpdateRequest $request, EntityType $entityType): UpdateResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->requisiteId);
 		/** @var RequisiteAddressDto $dto */
 		$dto = $request->fields->convertToDto('update');
 		$this->runCommand(new UpdateCommand(
@@ -125,6 +131,7 @@ final class Address extends AbstractController
 
 	public function deleteAction(DeleteRequest $request, EntityType $entityType): DeleteResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->requisiteId);
 		$this->runCommand(new DeleteCommand(
 			$request->requisiteId,
 			$request->typeId,
@@ -133,6 +140,18 @@ final class Address extends AbstractController
 		));
 
 		return new DeleteResponse();
+	}
+
+	private function assertRequisiteCategoryAllowed(int $requisiteId): void
+	{
+		$result = (new RequisiteProvider($this->userId))->resolveRequisiteOwner($requisiteId, $this->userId);
+		$owner = $result->getData()['owner'] ?? null;
+		if (!$result->isSuccess() || !$owner instanceof ItemId)
+		{
+			throw new \Bitrix\Rest\V3\Exception\EntityNotFoundException($requisiteId);
+		}
+
+		$this->assertCategoryOwnerAllowed($owner);
 	}
 
 	private function getMapper(): Mapper

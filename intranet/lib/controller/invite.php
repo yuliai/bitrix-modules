@@ -467,6 +467,7 @@ class Invite extends Main\Engine\Controller
 			{
 				$errorKey = $this->getReInviteErrorKey($error);
 				$messageCode = match($errorKey) {
+					'ERROR_TIMEOUT_NOT_EXCEEDED' => 'INTRANET_CONTROLLER_INVITE_ERROR_SMS_REINVITE_TIMEOUT',
 					'user_is_not_employee' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_IS_NOT_EMPLOYEE',
 					'user_not_found' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_NOT_FOUND',
 					'user_already_confirmed' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_ALREADY_CONFIRMED',
@@ -630,6 +631,16 @@ class Invite extends Main\Engine\Controller
 
 	private function addReInviteError(Error $error): void
 	{
+		if ($error->getCode() === 'ERROR_TIMEOUT_NOT_EXCEEDED')
+		{
+			$this->addError(new Error(
+				Loc::getMessage('INTRANET_CONTROLLER_INVITE_ERROR_SMS_REINVITE_TIMEOUT'),
+				'ERROR_TIMEOUT_NOT_EXCEEDED',
+			));
+
+			return;
+		}
+
 		if ($error instanceof InviteLimitError)
 		{
 			$this->addError(

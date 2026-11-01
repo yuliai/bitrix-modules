@@ -17,12 +17,16 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\ProductsDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\SourcesDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\StagesDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\CrmTrackingDto;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\CrmTrackingSourceDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\Dictionary\ContactTypeDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Provider\ItemProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Provider\MyCompanyProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\InArrayFrom;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\Length;
+use Bitrix\Crm\V2\Internal\Entity\FieldMetadata\RelatedEntityTitle;
+use Bitrix\Crm\V2\Internal\Entity\FieldMetadata\SystemFieldTitle;
 use Bitrix\Crm\V2\Internal\Integration\Rest\File\RestIntegrationFactory;
+use Bitrix\Crm\V2\Internal\Repository\FieldMetadata\SystemFieldTitleProvider;
 use Bitrix\Crm\V2\Internal\Service\Item\CustomFieldRegistry;
 use Bitrix\Crm\V2\Internal\Service\Item\FieldRegistry;
 use Bitrix\Crm\V2\Public\EntityType;
@@ -40,24 +44,38 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 {
 	private const GENERATED_CLASS_PREFIX = 'EntityType';
 	private const GENERATED_CLASS_SUFFIX = 'Dto';
+	private const MY_COMPANY_CODE = 'MyCompany';
+	private const LEGACY_DOCUMENT_LANGUAGE_SOURCE_FILE = 'classes/general/crm_document.php';
+	private const TRACKING_SOURCE_TITLE_CODE = 'CRM_DOCUMENT_FIELD_TRACKING_SOURCE_ID';
 
 	private ?RestIntegrationFactory $restIntegrationFactory = null;
+	private ?SystemFieldTitleProvider $systemFieldTitleProvider = null;
 	/** @var array<string, EntityType|null> */
 	private static array $entityTypeByGeneratedDtoClass = [];
 
-	public function __construct(?RestIntegrationFactory $restIntegrationFactory = null)
+	public function __construct(
+		?RestIntegrationFactory $restIntegrationFactory = null,
+		?SystemFieldTitleProvider $systemFieldTitleProvider = null,
+	)
 	{
 		$this->restIntegrationFactory = $restIntegrationFactory ?? new RestIntegrationFactory();
+		$this->systemFieldTitleProvider = $systemFieldTitleProvider ?? new SystemFieldTitleProvider();
 	}
 
-	public function generate(int $entityTypeId = 0): GeneratedDto
+	/**
+	 * @param bool $isMyCompany An own company gets a contract of its own: the company contract without the
+	 *                          fields an own company does not have. Ignored for any other entity type.
+	 */
+	public function generate(int $entityTypeId = 0, bool $isMyCompany = false): GeneratedDto
 	{
 		/** @var array<string, GeneratedDto> $dtoByEntityType */
 		static $dtoByEntityType = [];
 
 		$entityType = EntityType::fromId($entityTypeId);
+		$isMyCompany = $isMyCompany && $entityType->getId() === OwnerType::COMPANY;
 		$isFileContractAvailable = $this->getRestIntegrationFactory()->isFileContractAvailable();
-		$cacheKey = $this->getCacheKey($entityType, $isFileContractAvailable);
+		$cacheKey = $this->getCacheKey($entityType, $isFileContractAvailable)
+			. ($isMyCompany ? ':' . self::MY_COMPANY_CODE : '');
 		if (!isset($dtoByEntityType[$cacheKey]))
 		{
 			$entityTypeSettings = $this->getEntityTypeSettings($entityType);
@@ -122,6 +140,10 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 			if ($entityTypeSettings->hasCrmTracking())
 			{
 				$fields = array_merge($fields, $this->getCrmTrackingFields());
+				if (!$isMyCompany)
+				{
+					$fields = array_merge($fields, $this->getCrmTrackingSourceFields());
+				}
 			}
 			$parentEntityTypesMap = $entityTypeSettings->getParentEntityTypesMap();
 			if ($parentEntityTypesMap !== [])
@@ -140,11 +162,19 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 
 			foreach ($fields as $field)
 			{
+				if (
+					$field->getType() !== DtoField::DTO_FIELD_TYPE_USER_FIELD
+					&& !str_ends_with($field->getPropertyName(), '_data')
+					&& $field->getTitle() === $field->getPropertyName()
+				)
+				{
+					$field->setTitle($this->getSystemFieldTitleProvider()->getTitle($entityType, $field->getPropertyName()));
+				}
 				$this->addEntityTypeContextArg($field, $entityType);
 				$this->addRelationToDtoTypeField($field);
 			}
 
-			$className = $this->getGeneratedClassName($entityType);
+			$className = $this->getGeneratedClassName($entityType, $isMyCompany);
 			$namespace = $this->getGeneratedNamespace();
 
 			$dtoByEntityType[$cacheKey] = new GeneratedDto($className, $namespace, $fields);
@@ -164,9 +194,23 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 		return __NAMESPACE__;
 	}
 
-	public function getGeneratedClassName(EntityType $entityType): string
+	public function getGeneratedClassName(EntityType $entityType, bool $isMyCompany = false): string
 	{
-		return self::GENERATED_CLASS_PREFIX . $entityType->getCode() . self::GENERATED_CLASS_SUFFIX;
+		$code = $isMyCompany && $entityType->getId() === OwnerType::COMPANY
+			? self::MY_COMPANY_CODE
+			: $entityType->getCode()
+		;
+
+		return self::GENERATED_CLASS_PREFIX . $code . self::GENERATED_CLASS_SUFFIX;
+	}
+
+	/**
+	 * Whether the class is the contract of an own company; its entity type is the company one.
+	 */
+	public function isMyCompanyGeneratedDtoClass(string $dtoClass): bool
+	{
+		return $dtoClass === $this->getGeneratedNamespace() . '\\'
+			. $this->getGeneratedClassName(EntityType::company(), true);
 	}
 
 	public function getEntityTypeByGeneratedDtoClass(string $dtoClass): ?EntityType
@@ -184,6 +228,10 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 		}
 
 		$code = substr($dtoClass, strlen($prefix), -strlen(self::GENERATED_CLASS_SUFFIX));
+		if ($code === self::MY_COMPANY_CODE)
+		{
+			return self::$entityTypeByGeneratedDtoClass[$cacheKey] = EntityType::company();
+		}
 
 		return self::$entityTypeByGeneratedDtoClass[$cacheKey] = EntityType::fromCode($code);
 	}
@@ -312,7 +360,7 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 					propertyType: 'string',
 					type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
 					validationRules: [new Length(max: 255)],
-					requiredGroups: [],
+					requiredGroups: null,
 					editableGroups: [],
 					filterable: true,
 					sortable: true,
@@ -386,6 +434,11 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	private function getRestIntegrationFactory(): RestIntegrationFactory
 	{
 		return $this->restIntegrationFactory ??= new RestIntegrationFactory();
+	}
+
+	private function getSystemFieldTitleProvider(): SystemFieldTitleProvider
+	{
+		return $this->systemFieldTitleProvider ??= new SystemFieldTitleProvider();
 	}
 
 	/**
@@ -511,6 +564,25 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	}
 
 	/**
+	 * @return DtoField[]
+	 */
+	protected function getCrmTrackingSourceFields(): array
+	{
+		$fields = $this->dtoFieldsCollectionToArray((new CrmTrackingSourceDto())->getFields());
+		foreach ($fields as $field)
+		{
+			// The phrase the legacy documents give the same field; a generated DTO keeps only
+			// titles that survive its export, hence not a plain LocalizableMessage.
+			$field->setTitle(new SystemFieldTitle(
+				[[self::LEGACY_DOCUMENT_LANGUAGE_SOURCE_FILE, self::TRACKING_SOURCE_TITLE_CODE]],
+				$field->getPropertyName(),
+			));
+		}
+
+		return $fields;
+	}
+
+	/**
 	 * @param EntityType[] $parentEntityTypes
 	 * @return DtoField[]
 	 */
@@ -519,10 +591,13 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 		$result = [];
 		foreach ($parentEntityTypes as $parentEntityType)
 		{
+			$idFieldName = 'related' . $parentEntityType->getCode() . 'Id';
+			$objectFieldName = 'related' . $parentEntityType->getCode();
 			$result[] = new DtoField(
-				propertyName: 'related' . $parentEntityType->getCode() . 'Id',
+				propertyName: $idFieldName,
 				propertyType: 'int',
 				type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
+				title: new RelatedEntityTitle($parentEntityType->getId(), $idFieldName),
 				validationRules: [
 					new InArrayFrom(ItemProvider::class, ['entityTypeId' => $parentEntityType->getId()]),
 				],
@@ -531,12 +606,13 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 				nullable: true,
 			);
 			$result[] = $this->setCrmRelationTarget(new DtoField(
-				propertyName: 'related' . $parentEntityType->getCode(),
+				propertyName: $objectFieldName,
 				propertyType: ItemDto::class,
 				type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
+				title: new RelatedEntityTitle($parentEntityType->getId(), $objectFieldName),
 				nullable: true,
 				relation: new DtoFieldRelation(
-					thisField: 'related' . $parentEntityType->getCode() . 'Id',
+					thisField: $idFieldName,
 					refField: 'id',
 				),
 			), $parentEntityType->getId());

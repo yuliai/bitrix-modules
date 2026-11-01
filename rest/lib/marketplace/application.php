@@ -8,6 +8,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Main;
 use Bitrix\Rest\Internal\Access\AppAccessChecker;
+use Bitrix\Rest\Internal\Integration\Market\ApplicationLimitProvider;
 use Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer;
 use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Engine\Access;
@@ -69,6 +70,46 @@ class Application
 		}
 
 		return false;
+	}
+
+	private static function describeInstallationFailure(
+		Main\Result $failure,
+		array $appDetailInfo,
+		array $fallback
+	): array
+	{
+		$errors = $failure->getErrorCollection();
+		$limitExceeded = $errors->getErrorByCode(
+			ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
+		);
+		if ($limitExceeded !== null)
+		{
+			$limitReached = [
+				'error' => ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
+				'errorDescription' => Loc::getMessage('RMP_ERROR_ACCESS_DENIED'),
+				'helperCode' => Access::getHelperCode(
+					Access::ACTION_INSTALL,
+					Access::ENTITY_TYPE_APP,
+					$appDetailInfo,
+				),
+			];
+			$applicationLimit = (new ApplicationLimitProvider())->getProjection();
+			if ($applicationLimit !== null)
+			{
+				$limitReached['vibePlusApplicationLimit'] = $applicationLimit;
+			}
+
+			return $limitReached;
+		}
+
+		$lockFailed = $errors->getErrorByCode(ApplicationInstallationFinalizer::ERROR_LOCK_NOT_ACQUIRED) !== null;
+		$updateFailed = $errors->getErrorByCode(ApplicationInstallationFinalizer::ERROR_UPDATE_FAILED) !== null;
+
+		$fallback['errorDescription'] = $lockFailed || $updateFailed
+			? Loc::getMessage('RMP_INSTALL_ERROR')
+			: implode('<br />', $failure->getErrorMessages());
+
+		return $fallback;
 	}
 
 	public static function install($code, $version = false, $checkHash = false, $installHash = false, $from = null) : array
@@ -390,41 +431,7 @@ class Application
 						}
 						else
 						{
-							$limitError = $addResult->getErrorCollection()->getErrorByCode(
-								ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
-							);
-							if ($limitError !== null)
-							{
-								$result = [
-									'error' => ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
-									'errorDescription' => Loc::getMessage('RMP_ERROR_ACCESS_DENIED'),
-									'helperCode' => Access::getHelperCode(
-										Access::ACTION_INSTALL,
-										Access::ENTITY_TYPE_APP,
-										$appDetailInfo,
-									),
-								];
-								$vibePlusApplicationLimit = self::getVibePlusApplicationLimitProjection();
-								if ($vibePlusApplicationLimit !== null)
-								{
-									$result['vibePlusApplicationLimit'] = $vibePlusApplicationLimit;
-								}
-							}
-							elseif (
-								$addResult->getErrorCollection()->getErrorByCode(
-									ApplicationInstallationFinalizer::ERROR_LOCK_NOT_ACQUIRED,
-								) !== null
-								|| $addResult->getErrorCollection()->getErrorByCode(
-									ApplicationInstallationFinalizer::ERROR_UPDATE_FAILED,
-								) !== null
-							)
-							{
-								$result['errorDescription'] = Loc::getMessage('RMP_INSTALL_ERROR');
-							}
-							else
-							{
-								$result['errorDescription'] = implode('<br />', $addResult->getErrorMessages());
-							}
+							$result = self::describeInstallationFailure($addResult, $appDetailInfo, $result);
 						}
 					}
 				}
@@ -485,23 +492,6 @@ class Application
 		}
 		catch (\Throwable)
 		{
-		}
-	}
-
-	private static function getVibePlusApplicationLimitProjection(): ?array
-	{
-		try
-		{
-			if (!Main\Loader::includeModule('market'))
-			{
-				return null;
-			}
-
-			return (new \Bitrix\Market\Application\VibePlusApplicationLimit())->getProjection();
-		}
-		catch (\Throwable)
-		{
-			return null;
 		}
 	}
 

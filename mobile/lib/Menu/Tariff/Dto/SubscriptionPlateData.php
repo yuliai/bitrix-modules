@@ -12,4 +12,6 @@ final class SubscriptionPlateData extends Dto
 	public ?string $expireText;
 	public bool $isDemoAvailable;
 	public bool $cta;
+	public bool $ctaForced;
+	public bool $canBuy;
 }

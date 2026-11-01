@@ -64,8 +64,6 @@ class TranscribedResultHandler
 			);
 		}
 
-		(new AutoTaskStatus($message, $initiatorId, Status::ResultCreationCompleted, true))->send();
-
 		try
 		{
 			$this->resultService->add($result, $initiatorId);
@@ -74,6 +72,10 @@ class TranscribedResultHandler
 		{
 			return false;
 		}
+
+		// the terminal success is announced only once the result exists: every false of this method
+		// must stay silent so that the caller owns the refusal and no contradictory pair is sent
+		(new AutoTaskStatus($message, $initiatorId, Status::ResultCreationCompleted, true))->send();
 
 		return true;
 	}

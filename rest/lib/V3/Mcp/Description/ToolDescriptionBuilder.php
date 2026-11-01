@@ -7,6 +7,7 @@ use Bitrix\AiAssistant\Facade\TracedLogger;
 use Bitrix\Main\Localization\LocalizableMessage;
 use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\Dto\TypeHelper;
+use Bitrix\Rest\V3\Mcp\Schema\ToolInputSchema;
 use Bitrix\Rest\V3\Mcp\Schema\ToolSchemaBuilder;
 use Bitrix\Rest\V3\Mcp\Verb\VerbRegistry;
 use Bitrix\Rest\V3\Schema\MethodDescription;
@@ -57,7 +58,7 @@ final class ToolDescriptionBuilder
 		return new ToolDescriptionDto(
 			name: $mcpTool->nameOverride ?? str_replace('.', '_', $methodDescription->actionUri),
 			description: $description,
-			inputSchema: (object)$this->schemaBuilder->build($methodDescription),
+			inputSchema: new ToolInputSchema($this->schemaBuilder->build($methodDescription)),
 			annotations: $verb?->getAnnotations(),
 		);
 	}
@@ -68,7 +69,8 @@ final class ToolDescriptionBuilder
 	 */
 	private function resolveEntityTitle(MethodDescription $methodDescription): string
 	{
-		$dtoClass = $methodDescription->dtoFqcn;
+		$fieldResourceUri = $this->resolveFieldResourceUri($methodDescription->actionUri);
+		$dtoClass = $fieldResourceUri === null ? $methodDescription->dtoFqcn : null;
 		if (
 			isset($methodDescription->queryParams['dtoClass'])
 			&& is_string($methodDescription->queryParams['dtoClass'])
@@ -86,18 +88,46 @@ final class ToolDescriptionBuilder
 				/** @var Title $title */
 				$title = $titleAttributes[0]->newInstance();
 				$value = $title->value;
-
-				return $value instanceof LocalizableMessage
+				$resolvedTitle = $value instanceof LocalizableMessage
 					? trim((string)$value->localize('en'))
 					: trim((string)$value);
+
+				if ($fieldResourceUri === null || $resolvedTitle !== '')
+				{
+					return $resolvedTitle;
+				}
+			}
+
+			if ($fieldResourceUri !== null)
+			{
+				return $fieldResourceUri;
 			}
 
 			return strtolower($reflection->getShortName());
 		}
 
+		if ($fieldResourceUri !== null)
+		{
+			return $fieldResourceUri;
+		}
+
 		$segments = explode('.', $methodDescription->actionUri);
 
 		return (string)($segments[count($segments) - 2] ?? $methodDescription->method);
+	}
+
+	private function resolveFieldResourceUri(string $actionUri): ?string
+	{
+		$normalizedActionUri = strtolower($actionUri);
+		foreach (['.field.list', '.field.get'] as $suffix)
+		{
+			if (str_ends_with($normalizedActionUri, $suffix))
+			{
+				return substr($actionUri, 0, -strlen($suffix));
+			}
+		}
+
+		return null;
 	}
 
 	private function appendDescriptionAdditions(string $description, array $descriptionAdditions): string

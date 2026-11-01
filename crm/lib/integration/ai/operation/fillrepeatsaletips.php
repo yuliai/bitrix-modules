@@ -101,11 +101,28 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 		$providerParams = self::buildDataInsufficientProviderParams($activity);
 		if ($providerParams !== null)
 		{
-			CCrmActivity::Update($activityId, ['PROVIDER_PARAMS' => $providerParams], false, false);
+			// Repeat-sale automation runs in a system context, so the service mark bypasses permission checks.
+			$isUpdated = (bool)CCrmActivity::Update(
+				$activityId,
+				['PROVIDER_PARAMS' => $providerParams],
+				false,
+				false,
+			);
+			if (!$isUpdated)
+			{
+				AIManager::logger()->error(
+					'{date}: {class}: Error while trying to mark activity as short of AI data: {activityId}'
+					. PHP_EOL,
+					[
+						'class' => self::class,
+						'activityId' => $activityId,
+					],
+				);
+			}
 		}
 
 		return (new Main\Result())->addError(
-			ErrorCode::getInvalidPayloadMarkersForFillRepeatSaleTipsError()
+			ErrorCode::getInvalidPayloadMarkersForFillRepeatSaleTipsError(),
 		);
 	}
 
@@ -144,12 +161,10 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 
 		$logMarkAiStart = $result->isManualLaunch()
 			? Logger::LOG_MARK_AI_MANUAL_LAUNCH
-			: Logger::LOG_MARK_AI_AUTO_LAUNCH
-		;
+			: Logger::LOG_MARK_AI_AUTO_LAUNCH;
 		$logMarkAiPaid = self::isSponsoredOperation()
 			? Logger::LOG_MARK_AI_NOT_PAID
-			: Logger::LOG_MARK_AI_PAID
-		;
+			: Logger::LOG_MARK_AI_PAID;
 
 		(new Logger('RepeatSaleVsAI'))->info(
 			'{date}: Task with job ID {jobId} for activity ID {activityId} has been sent to AI queue: {markAiStart} {markAiPaid}' . PHP_EOL,
@@ -193,8 +208,7 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 
 		$analyticsStatus = self::applyJobResultToActivity($activityId, $payload, $context)
 			? \Bitrix\Crm\Integration\Analytics\Dictionary::STATUS_SUCCESS
-			: \Bitrix\Crm\Integration\Analytics\Dictionary::STATUS_ERROR
-		;
+			: \Bitrix\Crm\Integration\Analytics\Dictionary::STATUS_ERROR;
 
 		$segmentCode = SegmentCode::tryFrom(RepeatSale::getSegmentCodeByActivity($activityId));
 
@@ -244,7 +258,7 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 			'DESCRIPTION' => RepeatSale::createDescriptionFromPayload(
 				$payload,
 				false,
-				$context?->getLanguage()?->getCode()
+				$context?->getLanguage()?->getCode(),
 			),
 		]);
 		if (!$isUpdated)
@@ -291,7 +305,7 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 		Result $result,
 		bool $withSyncBadges = true,
 		bool $withSendAnalytics = true,
-		?ItemIdentifier $target = null
+		?ItemIdentifier $target = null,
 	): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();

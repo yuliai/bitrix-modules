@@ -8,6 +8,7 @@ use Bitrix\Crm\V2\Internal\Entity\WebForm\Embedding\EmbeddingChangeSet;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\Section;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormChangeSet;
+use Bitrix\Crm\V2\Internal\Exception\WebForm\FormNotFoundException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormSettingsOverflowException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormVersionMismatchException;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\Section\AgreementSectionWriter;
@@ -18,13 +19,16 @@ use Bitrix\Crm\V2\Internal\Repository\WebForm\Section\PresetFieldSectionWriter;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\Section\ResponsibleSectionWriter;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\Section\WebFormSectionWriter;
 use Bitrix\Crm\WebForm\Internals\FormTable;
+use Bitrix\Main\DB\Connection;
 use Bitrix\Main\DB\SqlExpression;
+use Bitrix\Main\DB\TransactionException;
 use Bitrix\Main\Error;
 use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
 use InvalidArgumentException;
+use Throwable;
 use UnexpectedValueException;
 
 /**
@@ -39,7 +43,13 @@ use UnexpectedValueException;
  *
  * There is no transaction: the first unsuccessful write stops the cycle and its errors are
  * returned, so an unsuccessful result means the operation did not finish, not that nothing
- * changed. The id of the form is in the result data of both operations.
+ * changed. The id of the form is in the result data of both operations. The switch of the
+ * activity is the one exception ({@see setActive()}): it is a single row, and its refusal has to
+ * leave the version the caller holds acting.
+ *
+ * A form removed in between is answered as a missing form ({@see FormNotFoundException}) by every
+ * operation that reserves or compares the version, the way the scenarios answer a form they did
+ * not find.
  *
  * A merge outgrowing the settings column is refused by every operation writing it
  * ({@see FormSettingsOverflowException}): the column holds one tree, and storing a cut one would
@@ -291,10 +301,25 @@ final class FormWriteRepository
 	 * The author of the change travels only when the form is turned on. Turning it off, the event
 	 * of the table takes the column out of the write, so this operation promises no author there.
 	 *
-	 * The expected version is not taken: turning a form on and off is an operation over the state
-	 * the caller has just read, not a change of the configuration competing with another one.
+	 * The expected version is optional, the way it is in {@see update()}: a caller switching the form
+	 * it has just read guards the switch with the version it read, and a caller naming the form alone
+	 * switches it as it always did. The comparison travels in the reservation of the next version, so
+	 * the version is compared and moved by one statement and no window is left between them.
+	 *
+	 * The reservation and the write of the row are one transaction. A write refused after the
+	 * version was reserved rolls the reservation back with it, so the refusal leaves the form with
+	 * the version the caller holds, and repeating the switch with that version is not answered with
+	 * a conflict that nothing written caused.
+	 *
+	 * @throws FormVersionMismatchException the form was changed after the expected version was read
+	 * @throws FormNotFoundException the form was removed after the caller read it
 	 */
-	public function setActive(int $formId, bool $isActive, int $userId): Result
+	public function setActive(
+		int $formId,
+		bool $isActive,
+		int $userId,
+		?DateTime $expectedModifiedTime = null,
+	): Result
 	{
 		$result = new Result();
 		if ($formId <= 0)
@@ -311,18 +336,53 @@ final class FormWriteRepository
 			$columns['ACTIVE_CHANGE_BY'] = $userId;
 		}
 
-		self::reserveNextModifiedTime($formId, null);
+		$connection = FormTable::getEntity()->getConnection();
+		$connection->startTransaction();
+		try
+		{
+			self::reserveNextModifiedTime($formId, $expectedModifiedTime);
+			$updateResult = FormTable::update($formId, $columns);
+			$modifiedTime = $updateResult->isSuccess() ? self::getCurrentModifiedTime($formId) : null;
+		}
+		catch (Throwable $failure)
+		{
+			self::rollBack($connection);
 
-		$updateResult = FormTable::update($formId, $columns);
+			throw $failure;
+		}
+
 		if (!$updateResult->isSuccess())
 		{
+			self::rollBack($connection);
+
 			return $result->addErrors($updateResult->getErrors());
 		}
 
+		$connection->commitTransaction();
+
 		return $result->setData([
 			self::DATA_FORM_ID => $formId,
-			self::DATA_MODIFIED_TIME => self::getCurrentModifiedTime($formId),
+			self::DATA_MODIFIED_TIME => $modifiedTime,
 		]);
+	}
+
+	/**
+	 * Takes back what the transaction of {@see setActive()} wrote. A nested rollback undoes its
+	 * savepoint and then reports itself as unsupported
+	 * ({@see \Bitrix\Main\DB\MysqlCommonConnection::rollbackTransaction()}); by then the write is
+	 * undone, so the complaint must not replace the refusal the caller is answered with.
+	 */
+	private static function rollBack(Connection $connection): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (TransactionException)
+		{
+		}
+
+		FormTable::cleanCache();
 	}
 
 	/**
@@ -341,6 +401,7 @@ final class FormWriteRepository
 	 * has one rule of concurrent change rather than two.
 	 *
 	 * @throws FormVersionMismatchException the form was changed after the expected version was read
+	 * @throws FormNotFoundException the form was removed after the caller read it
 	 * @throws FormSettingsOverflowException the merged settings no longer fit the column
 	 */
 	public function updateEmbedding(
@@ -443,10 +504,17 @@ final class FormWriteRepository
 			$filter->where(self::createExpectedModifiedTimeFilter($expectedModifiedTime));
 		}
 
-		$affectedRowsCount = self::moveModifiedTime($filter);
-		if ($expectedModifiedTime !== null && $affectedRowsCount !== 1)
+		if (self::moveModifiedTime($filter) === 1)
 		{
-			throw new FormVersionMismatchException(self::getCurrentModifiedTime($formId));
+			return;
+		}
+
+		// Nothing moved: either the form is gone, which the read below answers for, or it no longer
+		// carries the expected version.
+		$currentModifiedTime = self::getCurrentModifiedTime($formId);
+		if ($expectedModifiedTime !== null)
+		{
+			throw new FormVersionMismatchException($currentModifiedTime);
 		}
 	}
 
@@ -565,7 +633,7 @@ final class FormWriteRepository
 	 *
 	 * @throws FormVersionMismatchException the form was changed after the expected version was read
 	 */
-	public function assertExpectedModifiedTime(int $formId, DateTime $expectedModifiedTime): void
+	private function assertExpectedModifiedTime(int $formId, DateTime $expectedModifiedTime): void
 	{
 		$currentModifiedTime = self::getCurrentModifiedTime($formId);
 		if ($currentModifiedTime->getTimestamp() !== $expectedModifiedTime->getTimestamp())
@@ -578,6 +646,8 @@ final class FormWriteRepository
 	 * The version of the stored form, with the creation time standing in for an empty column. The
 	 * stand-in answers the same way the read of the form does, so a conflict stays a conflict the
 	 * client can resolve instead of an unexplained internal failure.
+	 *
+	 * @throws FormNotFoundException the form was removed in between
 	 */
 	private static function getCurrentModifiedTime(int $formId): DateTime
 	{
@@ -586,6 +656,11 @@ final class FormWriteRepository
 			->where('ID', $formId)
 			->fetch()
 		;
+		if (!is_array($row))
+		{
+			throw new FormNotFoundException();
+		}
+
 		$modifiedTime = $row['DATE_MODIFY'] ?? $row['DATE_CREATE'] ?? null;
 		if (!$modifiedTime instanceof DateTime)
 		{

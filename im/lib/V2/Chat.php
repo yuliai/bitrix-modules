@@ -3,6 +3,7 @@
 namespace Bitrix\Im\V2;
 
 use Bitrix\Disk\Folder;
+use Bitrix\Disk\Storage;
 use Bitrix\Im\Alias;
 use Bitrix\Im\V2\Analytics\MessageAnalytics;
 use Bitrix\Im\V2\Chat\Background\Background;
@@ -20,6 +21,7 @@ use Bitrix\Im\V2\Integration\HumanResources\Structure;
 use Bitrix\Im\Recent;
 use Bitrix\Im\V2\Integration\AI\Restriction;
 use Bitrix\Im\V2\Integration\Socialnetwork\Group;
+use Bitrix\Im\V2\Message\BlocksBuilder\Entity\BlockType;
 use Bitrix\Im\V2\Message\Send\MentionService;
 use Bitrix\Im\V2\Message\Send\PushService;
 use Bitrix\Im\V2\Message\Send\SendingService;
@@ -187,6 +189,7 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 
 	private const CHUNK_SIZE = 1000;
 	protected const EXTRANET_CAN_SEE_HISTORY = true;
+	protected const EXTRANET_CAN_SEE_HISTORY_ON_EXPLICIT_ADD = false;
 	protected const MAX_USERS_TO_DISABLE_DELETE_MESSAGE = 50;
 
 	protected array $accessCache = [];
@@ -303,8 +306,6 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 	protected Background $background;
 	protected TextFieldEnabled $textFieldEnabled;
 
-	protected RecentConfigManager $recentConfigManager;
-
 	protected RelationProvider $relationProvider;
 
 	protected bool $isFilledNonCachedData = false;
@@ -325,7 +326,6 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 		}
 
 		$this->messageRegistry = new Registry;
-		$this->recentConfigManager = Main\DI\ServiceLocator::getInstance()->get(RecentConfigManager::class);
 	}
 
 	//region Users
@@ -429,7 +429,10 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 
 	public function getRecentSections(): array
 	{
-		return $this->recentConfigManager->getRecentSectionsByChat($this);
+		return ServiceLocator::getInstance()
+			->get(Chat\Type\TypeRegistry::class)
+			->getRecentSectionsMinusExclusions($this->getChatType(), $this->hasParent())
+		;
 	}
 
 	public function getRecentSectionsForGuest(): array
@@ -865,9 +868,16 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 			return;
 		}
 
+		$skippedFileIds = $this->getFileIdsToSkipTranscription($message);
+
 		/** @var FileItem $file */
 		foreach ($message->getFiles() as $file)
 		{
+			if (isset($skippedFileIds[$file->getId()]))
+			{
+				continue;
+			}
+
 			if ($file->isTranscribable())
 			{
 				$transcribeManager = new Im\V2\Integration\AI\Transcription\TranscribeManager(
@@ -882,6 +892,35 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 				return;
 			}
 		}
+	}
+
+	/**
+	 * Neither the audio block nor the file block has a place for a transcription: they render the file
+	 * themselves and carry no transcription text or button, so recognition of such a file would be paid
+	 * for with nowhere to show the result. The gallery keeps its old behaviour - the block is older than
+	 * these two. A file the message also carries as a plain attachment is transcribed as before: the
+	 * attachment does have a place to show it.
+	 *
+	 * @return array<int, true>
+	 */
+	private function getFileIdsToSkipTranscription(Message $message): array
+	{
+		$builder = $message->getBlocksBuilder();
+		if ($builder === null)
+		{
+			return [];
+		}
+
+		$blockFileIds = array_merge(
+			$builder->getFilesOfType(BlockType::Audio),
+			$builder->getFilesOfType(BlockType::File),
+		);
+		$attachmentFileIds = $message->getParams()->isSet(Message\Params::FILE_ID)
+			? $message->getParams()->get(Message\Params::FILE_ID)->getValue()
+			: []
+		;
+
+		return array_fill_keys(array_diff($blockFileIds, $attachmentFileIds), true);
 	}
 
 	protected function processMessageAnalyticsOnAfterSend(Message $message): void
@@ -950,9 +989,34 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 			previewSource: $this->buildCollabPreviewSourcePiggyback($message),
 		);
 
+		$this->markParentMessageAsUpdated($parentChat, $raiseUserIds);
+
 		ServiceLocator::getInstance()->get(AncestorContextSender::class)->send($this, $metaUserIds);
 
 		return new Result();
+	}
+
+	/**
+	 * EVENT-01: a change of a discussion marks its root post as updated, so the delta page brings
+	 * the fresh discussion data along with the post. The context of the record is the parent chat:
+	 * with the discussion itself as context the log filter would drop the event.
+	 *
+	 * @param int[] $raiseUserIds
+	 */
+	protected function markParentMessageAsUpdated(Chat $parentChat, array $raiseUserIds): void
+	{
+		$parentMessageId = $this->getParentMessageId();
+
+		if ($parentMessageId <= 0 || empty($raiseUserIds) || !$parentChat->allowsComments())
+		{
+			return;
+		}
+
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::UPDATED_MESSAGE_ENTITY, $parentMessageId),
+			$raiseUserIds,
+			$parentChat
+		);
 	}
 
 	protected function buildCollabPreviewSourcePiggyback(Message $message): ?Im\V2\Recent\PreviewSource\CollabPreviewSourcePiggyback
@@ -1418,7 +1482,7 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 		return new Result();
 	}
 
-	public function sendPushUpdateMessage(Message $message): void
+	public function sendPushUpdateMessage(Message $message, bool $compositionUpdated = false): void
 	{
 		return;
 	}
@@ -2302,6 +2366,52 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 
 	public function canHaveChild(Chat $child): bool
 	{
+		// a short circuit, not a rule: the service refuses such a parent on its own, but only past the resolve
+		// of the child type, which this spares along with the lookup of the service itself
+		if (!$this->isExist())
+		{
+			return false;
+		}
+
+		return ServiceLocator::getInstance()
+			->get(Chat\Tree\Relation\TreeRelationService::class)
+			->canHaveChild($this, $child)
+		;
+	}
+
+	/**
+	 * The same question narrowed to the child kind threads are made of. Kept private on purpose:
+	 * admissibility belongs to the parent-child pair, not to the chat, so there is no public reader.
+	 */
+	private function canHaveCommentChild(): bool
+	{
+		// a short circuit, not a rule: the service refuses such a parent on its own, and this spares two
+		// ServiceLocator lookups and the resolve of the comment type on every chat of a list payload
+		if (!$this->isExist())
+		{
+			return false;
+		}
+
+		$commentType = ServiceLocator::getInstance()
+			->get(Chat\Type\TypeRegistry::class)
+			->getByLiteralAndEntity(self::IM_TYPE_COMMENT, null)
+		;
+
+		return ServiceLocator::getInstance()
+			->get(Chat\Tree\Relation\TreeRelationService::class)
+			->canHaveChildOfType($this, $commentType)
+		;
+	}
+
+	/**
+	 * Tells whether messages of this chat can carry discussions.
+	 * Single place that decides the set of thread-capable parents: once the relation registry
+	 * of the chat tree lands, this predicate starts answering wider without changes at call sites.
+	 *
+	 * @return bool
+	 */
+	public function allowsComments(): bool
+	{
 		return false;
 	}
 
@@ -2493,13 +2603,13 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 		$this->diskFolder = $folder;
 	}
 
-	public function getOrCreateDiskFolder(): ?Folder
+	public function getOrCreateDiskFolder(?Storage $storage = null): ?Folder
 	{
 		$folder = $this->getDiskFolder();
 
 		if ($folder === null)
 		{
-			$folder = $this->createDiskFolder();
+			$folder = $this->createDiskFolder($storage);
 			$this->setDiskFolder($folder);
 		}
 
@@ -2540,9 +2650,9 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 		return $folder;
 	}
 
-	protected function createDiskFolder(): ?Folder
+	protected function createDiskFolder(?Storage $storage = null): ?Folder
 	{
-		$storage = \CIMDisk::GetStorage($this->chatId);
+		$storage ??= \CIMDisk::GetStorage($this->chatId);
 
 		if (!$storage)
 		{
@@ -3520,8 +3630,10 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 
 	protected function createRelation(int $userId, AddUsersConfig $config): Relation
 	{
+		$user = Im\V2\Entity\User\User::getInstance($userId);
 		$hideHistory = $config->hideHistory ?? false;
-		$hideHistory = (!static::EXTRANET_CAN_SEE_HISTORY && Im\V2\Entity\User\User::getInstance($userId)->isExtranet()) ? true : $hideHistory;
+		$hideHistory = (!static::EXTRANET_CAN_SEE_HISTORY && $user->isExtranet()) ? true : $hideHistory;
+		$hideHistory = $this->mustHideHistoryOnExplicitAdd($user, $config) ? true : $hideHistory;
 
 		$relation = new Relation();
 		$relation
@@ -3540,6 +3652,20 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 		}
 
 		return $relation;
+	}
+
+	/**
+	 * Members brought in by the org structure sync always see the history: hiding it there would make
+	 * linking a node change what its people can read.
+	 */
+	protected function mustHideHistoryOnExplicitAdd(Im\V2\Entity\User\User $user, AddUsersConfig $config): bool
+	{
+		if (static::EXTRANET_CAN_SEE_HISTORY_ON_EXPLICIT_ADD || $config->reason === Reason::STRUCTURE)
+		{
+			return false;
+		}
+
+		return $user->isExtranet() || $user->isCollaber();
 	}
 
 	protected function getValidUsersToAdd(array $userIds): array
@@ -4583,6 +4709,7 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 			'isNew' => $this->isNew(),
 			'textFieldEnabled' => $this->getTextFieldEnabled()->get(),
 			'backgroundId' => $this->getBackground()->get(),
+			'canHaveThreads' => $this->canHaveCommentChild(),
 		];
 
 		if ($option['CHAT_WITH_DATE_MESSAGE'] ?? false)
@@ -4646,6 +4773,7 @@ abstract class Chat implements RegistryEntry, ActiveRecord, RestEntity, PopupDat
 			'textFieldEnabled' => $this->getTextFieldEnabled()->get(),
 			'backgroundId' => $this->getBackground()->get(),
 			'guestCount' => $this->containsGuest() ? (new GuestCounter($this))->getGuestCount() : 0,
+			'canHaveThreads' => $this->canHaveCommentChild(),
 		];
 	}
 

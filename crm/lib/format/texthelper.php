@@ -158,9 +158,11 @@ class TextHelper
 		$text = $bbcode;
 		$replaced  = 0;
 		$doubleLF = false;
+		// each pass unwraps one nesting level; the limit keeps the cost linear on crafted input
+		$passesLeft = 10;
 		do
 		{
-			$text = preg_replace_callback(
+			$result = preg_replace_callback(
 				"/\\[p](.*?)\\[\\/p](([ \r\t]*)\n?)/isu",
 				static function($matches) use (&$doubleLF) {
 					$result = preg_replace("/^\r?\n|\r?\n$/", '', $matches[1]);
@@ -177,8 +179,14 @@ class TextHelper
 				-1,
 				$replaced
 			);
+			if ($result === null)
+			{
+				break;
+			}
+
+			$text = $result;
 		}
-		while ($replaced > 0);
+		while ($replaced > 0 && --$passesLeft > 0);
 
 		return $text;
 	}

@@ -32,6 +32,11 @@ final class VibecodeAppFolder extends SystemFolder
 		return 'IM_FOLDER_SYSTEM_VIBECODE_APP';
 	}
 
+	public function getDescriptionLangKey(): ?string
+	{
+		return 'IM_FOLDER_SYSTEM_VIBECODE_APP_DESCRIPTION';
+	}
+
 	/**
 	 * Portal gate plus a per-user rule: the folder is pointless for those who have no access
 	 * to the app catalog at all.

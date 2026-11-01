@@ -8,7 +8,8 @@ use Bitrix\Crm\V2\Internal\Access\Settings\Composite\AnyOfPolicy;
 use Bitrix\Crm\V2\Internal\Access\Settings\Policy;
 use Bitrix\Crm\V2\Internal\Access\Settings\SettingAccessPolicyInterface;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingRegistration;
-use Bitrix\Crm\V2\Internal\Service\Settings\Exception\SettingNotFoundException;
+use Bitrix\Crm\V2\Internal\Exception\Settings\SettingNotFoundException;
+use Bitrix\Main\DI\ServiceLocator;
 
 /**
  * @internal
@@ -132,6 +133,68 @@ final class SettingFactory implements SettingFactoryInterface
 				[
 					new Policy\AiCallProcessingEnabledPolicy(),
 					new Policy\AiFillFieldsGlobalSettingEnabledPolicy(),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\AutomaticCallProcessingEnabledSetting::class,
+				'crm.copilot.call_processing.automatic.enabled',
+				[new Policy\AiCallProcessingEnabledPolicy()],
+			),
+			$this->registration(
+				Setting\Copilot\FillItemFromCallEnabledSetting::class,
+				'crm.copilot.fill_item_from_call.enabled',
+				[
+					new Policy\AiCallProcessingEnabledPolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\CallAssessmentEnabledSetting::class,
+				'crm.copilot.call_assessment.enabled',
+				[
+					new Policy\AiCallProcessingEnabledPolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\AnalyzeCommunicationEnabledSetting::class,
+				'crm.copilot.analyze_communication.enabled',
+				[
+					new Policy\AiCallProcessingEnabledPolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\SummarizeEnabledSetting::class,
+				'crm.copilot.summarize.enabled',
+				[
+					new Policy\AiCallProcessingEnabledPolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\RepeatSaleEnabledSetting::class,
+				'crm.copilot.repeat_sale.enabled',
+				[
+					new Policy\AiCallProcessingEnabledPolicy(),
+					new Policy\RepeatSaleAvailablePolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\FillCrmTextEnabledSetting::class,
+				'crm.copilot.fill_crm_text.enabled',
+				[
+					new Policy\AiTextEngineAvailablePolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
+				],
+			),
+			$this->registration(
+				Setting\Copilot\MessageSenderEditorEnabledSetting::class,
+				'crm.copilot.message_sender_editor.enabled',
+				[
+					new Policy\AiTextEngineAvailablePolicy(),
+					ServiceLocator::getInstance()->get(Policy\AiSettingsAdminPolicy::class),
 				],
 			),
 			$this->registration(
@@ -339,7 +402,7 @@ final class SettingFactory implements SettingFactoryInterface
 			throw new SettingNotFoundException($settingClass);
 		}
 
-		return new $settingClass();
+		return ServiceLocator::getInstance()->get($settingClass);
 	}
 
 	/**

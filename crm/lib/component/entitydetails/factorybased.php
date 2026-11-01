@@ -16,6 +16,7 @@ use Bitrix\Crm\Field;
 use Bitrix\Crm\Format\Money;
 use Bitrix\Crm\Integration;
 use Bitrix\Crm\Integration\Analytics\Builder;
+use Bitrix\Crm\Integration\Analytics\KanbanCreateOrigin;
 use Bitrix\Crm\Integration\DocumentGeneratorManager;
 use Bitrix\Crm\Integration\IntranetManager;
 use Bitrix\Crm\Integration\UI\EntityEditor\DefaultEntityConfig\DynamicDefaultEntityConfig;
@@ -485,6 +486,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		$params = [
 			'entityTypeId' => $this->getEntityTypeID(),
 			'entityTypeName' => $this->factory->getEntityName(),
+			'entityTypeCaption' => $this->factory->getEntityDescription(),
 			'id' => $this->item->getId(),
 			'messages' => $this->getJsMessages(),
 			'signedParameters' => $this->getSignedParameters(),
@@ -1674,6 +1676,33 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 				->setItemOption('VIEW_MODE', \Bitrix\Crm\Kanban\ViewMode::MODE_ACTIVITIES)
 				->setItemOption(\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID, $activityViewModeStageId)
 			;
+		}
+
+		$originParams = is_array($data['PARAMS'] ?? null) ? $data['PARAMS'] : [];
+		$originViewMode = $originParams['VIEW_MODE'] ?? \Bitrix\Crm\Kanban\ViewMode::MODE_STAGES;
+		$originViewMode = is_string($originViewMode) ? $originViewMode : '';
+		if ($activityViewModeStageId !== null)
+		{
+			$originParams[\Bitrix\Crm\Kanban\Entity\EntityActivities::ACTIVITY_STAGE_ID] = $activityViewModeStageId;
+		}
+		$columnId = KanbanCreateOrigin::resolveColumnForSave(
+			$originViewMode,
+			$this->factory->isStagesEnabled() ? (string)$this->item->getStageId() : '',
+			$originParams,
+		);
+		if (KanbanCreateOrigin::verifyForSave(
+			$data['KANBAN_CREATE_ORIGIN'] ?? null,
+			$this->userID,
+			$this->entityTypeId,
+			(int)$this->item->getCategoryId(),
+			$columnId,
+			$isNew,
+			$this->isCopyMode(),
+			$this->isConversionMode(),
+			$originViewMode,
+		))
+		{
+			$operation->getContext()->setItemOption('KANBAN_CREATE_ORIGIN', true);
 		}
 
 		$result = $operation->launch();

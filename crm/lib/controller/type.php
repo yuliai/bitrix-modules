@@ -14,6 +14,7 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\UserPermissions\ConfigurationCallSite;
 use Bitrix\Crm\Service\UserPermissions\ConfigurationScope;
 use Bitrix\Crm\UserField\UserFieldManager;
+use Bitrix\Crm\V2\Internal\Service\Hub\DescriptionNormalizer;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Engine\Response\DataType\Page;
@@ -490,6 +491,26 @@ class Type extends Base
 			$fields['TITLE'] = trim($fields['TITLE']);
 		}
 
+		if (array_key_exists('DESCRIPTION', $fields))
+		{
+			if ($this->isRest())
+			{
+				unset($fields['DESCRIPTION']);
+			}
+			else
+			{
+				$descriptionResult = (new DescriptionNormalizer())->normalize($fields['DESCRIPTION']);
+				if (!$descriptionResult->isSuccess())
+				{
+					$this->addErrors($descriptionResult->getErrors());
+
+					return null;
+				}
+
+				$fields['DESCRIPTION'] = $descriptionResult->getData()['description'];
+			}
+		}
+
 		if (!$isNew)
 		{
 			$fieldKeysToUnset = array_merge(['ENTITY_TYPE_ID', 'NAME'], $fieldKeysToUnset);
@@ -541,6 +562,7 @@ class Type extends Base
 			{
 				$result['urlTemplates'] = Container::getInstance()->getRouter()->getTemplatesForJsRouter();
 				$result['isUrlChanged'] = $customSectionsResult->getData()['isCustomSectionChanged'] ?? false;
+				$result['description'] = $type->getDescription();
 			}
 
 			return $result;

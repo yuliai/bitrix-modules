@@ -9,8 +9,8 @@ use Bitrix\BIConnector\Access\Service\DashboardGroupService;
 use Bitrix\BIConnector\Public\Command\Dashboard\InstallDashboardCommand;
 use Bitrix\BIConnector\Public\Command\DashboardChat\DashboardDiscussionChatResult;
 use Bitrix\BIConnector\Public\Command\DashboardChat\GetOrCreateDashboardDiscussionChatCommand;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Model;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardGroupBindingTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardGroupTable;
@@ -18,12 +18,16 @@ use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
+use Bitrix\BIConnector\Internal\Digest\Onboarding\DigestSetupOnboarding;
+use Bitrix\BIConnector\Internal\Digest\Service\DigestRecipientAccessCheckService;
+use Bitrix\BIConnector\Internal\Digest\Service\DigestSetupPreparationService;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\BitrixGptBiAnnouncement;
 use Bitrix\BIConnector\Superset\ActionFilter\BIConstructorAccess;
 use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
 use Bitrix\BIConnector\Superset\Dashboard\ExternalFilter\RlsRuleBuilder;
 use Bitrix\BIConnector\Superset\Demo\DemoService;
 use Bitrix\BIConnector\Public\Command\Share\CreateShareCommand;
+use Bitrix\BIConnector\Public\Command\Share\CreateShareCommandHandler;
 use Bitrix\BIConnector\Public\Command\Share\DeactivateShareCommand;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Superset\Dashboard\ScreenshotExporter;
@@ -41,6 +45,7 @@ use Bitrix\BIConnector\Superset\UI\DashboardManager;
 use Bitrix\Intranet\ActionFilter\IntranetUser;
 use Bitrix\Main\Application;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\CurrentUser;
@@ -95,8 +100,49 @@ class Dashboard extends Controller
 				BIConstructorAccess::class,
 			],
 		];
+		// Both digest setup actions change state: the first one copies and starts a template, the second
+		// one spends the onboarding mark. The default HttpMethod filter of the engine allows GET as well,
+		// which would carry sessid in the query string, so a stricter filter is appended to them.
+		$configureActions['prepareDigestSetup'] = [
+			'+prefilters' => [
+				new ActionFilter\HttpMethod([ActionFilter\HttpMethod::METHOD_POST]),
+			],
+		];
+		$configureActions['claimDigestSetupOnboarding'] = [
+			'+prefilters' => [
+				new ActionFilter\HttpMethod([ActionFilter\HttpMethod::METHOD_POST]),
+			],
+		];
 
 		return $configureActions;
+	}
+
+	/**
+	 * @param array|null $screenState Native filter id => its state on the report screen, as the browser read it.
+	 *     Taken as an intention only: it is read after every check has passed and never decides the setup.
+	 */
+	public function prepareDigestSetupAction(
+		DigestSetupPreparationService $preparationService,
+		?int $dashboardId = null,
+		?array $screenState = null,
+	): array
+	{
+		$prepared = $preparationService->prepare($this->getDigestSetupUserId(), $dashboardId, $screenState);
+		$this->addErrors($prepared->getErrors());
+
+		return $prepared->getData();
+	}
+
+	public function claimDigestSetupOnboardingAction(DigestSetupOnboarding $onboarding, string $version): array
+	{
+		return [
+			'claimed' => $onboarding->claim($version, $this->getDigestSetupUserId()),
+		];
+	}
+
+	protected function getDigestSetupUserId(): int
+	{
+		return (int)$this->getCurrentUser()?->getId();
 	}
 
 	public function getPrimaryAutoWiredParameter(): ExactParameter
@@ -130,6 +176,14 @@ class Dashboard extends Controller
 
 	public function copyAction(Model\Dashboard $dashboard): ?array
 	{
+		// A dashboard the user cannot open is answered as a missing one, so copying tells nothing about it.
+		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
+		{
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND')));
+
+			return null;
+		}
+
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_COPY, $dashboard))
 		{
 			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_COPY')));
@@ -162,7 +216,6 @@ class Dashboard extends Controller
 
 		$copiedDashboardExternalId = (int)($data['id'] ?? 0);
 		$title = $data['title'] ?? '';
-		$filter = new EmbeddedFilter\DateTime($dashboard);
 
 		$addData = [
 			'EXTERNAL_ID' => $copiedDashboardExternalId,
@@ -172,18 +225,6 @@ class Dashboard extends Controller
 			'TYPE' => SupersetDashboardTable::DASHBOARD_TYPE_CUSTOM,
 			'CREATED_BY_ID' => $this->getCurrentUser()?->getId(),
 		];
-
-		if ($dashboard->getField('FILTER_PERIOD'))
-		{
-			$addData['FILTER_PERIOD'] = $filter->getPeriod();
-		}
-
-		if ($filter->getPeriod() === EmbeddedFilter\DateTime::PERIOD_RANGE)
-		{
-			$addData['DATE_FILTER_START'] = $dashboard->getOrmObject()->getDateFilterStart();
-			$addData['DATE_FILTER_END'] = $dashboard->getOrmObject()->getDateFilterEnd();
-			$addData['INCLUDE_LAST_FILTER_DATE'] = $dashboard->getOrmObject()->getIncludeLastFilterDate();
-		}
 
 		$addResult = SupersetDashboardTable::add($addData);
 		if (!$addResult->isSuccess())
@@ -279,17 +320,13 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$filterPeriod = $dashboard->getOrmObject()->getFilterPeriod();
-		if (!$filterPeriod)
-		{
-			$filterPeriod = EmbeddedFilter\DateTime::PERIOD_DEFAULT;
-		}
+		// older portals read this block: PERIOD_NONE keeps them from applying their own period
 		$dashboardSettings = [
 			'period' => [
-				'FILTER_PERIOD' => $filterPeriod,
-				'DATE_FILTER_START' => $dashboard->getOrmObject()->getDateFilterStart(),
-				'DATE_FILTER_END' => $dashboard->getOrmObject()->getDateFilterEnd(),
-				'INCLUDE_LAST_FILTER_DATE' => $dashboard->getOrmObject()->getIncludeLastFilterDate(),
+				'FILTER_PERIOD' => EmbeddedFilter\DateTime::PERIOD_NONE,
+				'DATE_FILTER_START' => null,
+				'DATE_FILTER_END' => null,
+				'INCLUDE_LAST_FILTER_DATE' => null,
 			],
 		];
 		$dashboardScopes = Model\SupersetScopeTable::getList([
@@ -358,15 +395,7 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$dashboardId = $dashboard->getId();
-		$hasCopiedDashboards = SupersetDashboardTable::getList([
-			'select' => ['SOURCE_ID'],
-			'filter' => [
-				'=SOURCE_ID' => $dashboardId,
-			],
-		])->fetch();
-
-		if ($hasCopiedDashboards)
+		if ($dashboard->hasCopies())
 		{
 			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_COPIED')));
 
@@ -450,6 +479,13 @@ class Dashboard extends Controller
 
 	public function getMarketDashboardRelatedItemsAction(Model\Dashboard $dashboard): ?array
 	{
+		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
+		{
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
+
+			return null;
+		}
+
 		if (!$dashboard->isMarketDashboard())
 		{
 			return [];
@@ -588,18 +624,9 @@ class Dashboard extends Controller
 			&& ($dashboard->getStatus() !== SupersetDashboardTable::DASHBOARD_STATUS_DRAFT)
 		;
 
-		$shareData = null;
 		$shareProvider = ServiceLocator::getInstance()->get('biconnector.provider.share');
-		$currentUserId = (int)CurrentUser::get()->getId();
-		$share = $shareProvider->getByDashboardAndUser($dashboard->getId(), $currentUserId);
-		if ($share && $share->isActive())
-		{
-			$shareData = [
-				'isActive' => true,
-				'password' => $share->getPassword(),
-				'dateExpireTimestamp' => $share->getDateExpire()->getTimestamp(),
-			];
-		}
+		$shareData = $shareProvider->getAuthorShareState($dashboard->getId(), (int)CurrentUser::get()->getId());
+		$isShareBanned = $shareProvider->isShareBanned($dashboard->getId());
 
 		$dashboard->loadCredentials();
 		$dashboard->loadProxyData();
@@ -639,6 +666,7 @@ class Dashboard extends Controller
 				'canEdit' => $canEdit,
 				'canShare' => $canShare,
 				'shareData' => $shareData,
+				'isShareBanned' => $isShareBanned,
 				'urlParams' => $urlParams,
 				'isUseExternalDatasets' => $dashboard->isUseExternalDatasets(),
 				'isAvailable' => MarketAccessManager::getInstance()->isDashboardAvailableByType($dashboard->getType()),
@@ -704,8 +732,10 @@ class Dashboard extends Controller
 			'STATUS' => $dashboard->getStatus(),
 		]);
 
+		// The action tells which url parameters the report declares, which is part of reading it: whoever
+		// may open the report already sees these filters in it. Editing rights are not the bar for that.
 		$accessController = AccessController::getCurrent();
-		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem))
+		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $accessItem))
 		{
 			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
@@ -724,6 +754,40 @@ class Dashboard extends Controller
 		return [
 			'urlParameters' => $result,
 		];
+	}
+
+	/**
+	 * Who of the chosen recipients will not be sent a digest of this report, and why.
+	 *
+	 * @see DigestRecipientAccessCheckService::check() for the answer and its limits.
+	 *
+	 * @param int[] $recipients
+	 * @param array<string, int> $scopeValues Scope parameter code => chosen value id.
+	 * @param list<array{id: int, withSubdepartments: bool}> $departments
+	 */
+	public function getDigestRecipientAccessIssuesAction(
+		Model\Dashboard $dashboard,
+		DigestRecipientAccessCheckService $accessCheckService,
+		array $recipients = [],
+		array $scopeValues = [],
+		array $departments = [],
+	): ?array
+	{
+		$checked = $accessCheckService->check(
+			$dashboard,
+			$this->getDigestSetupUserId(),
+			$recipients,
+			$scopeValues,
+			$departments,
+		);
+		if (!$checked->isSuccess())
+		{
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
+
+			return null;
+		}
+
+		return $checked->getData();
 	}
 
 	/**
@@ -1017,14 +1081,9 @@ class Dashboard extends Controller
 		$result = $dashboard->toggleDraft($publish);
 		if (!$result->isSuccess())
 		{
-			return null;
-		}
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_TOGGLE_DRAFT_ERROR')));
 
-		if (!$publish)
-		{
-			(new \Bitrix\BIConnector\Public\Command\Share\DeleteSharesCommand(
-				dashboardId: $dashboard->getId(),
-			))->run();
+			return null;
 		}
 
 		return true;
@@ -1175,6 +1234,7 @@ class Dashboard extends Controller
 	 * @param string|null $dateEnd
 	 * @param array|null $externalFilterValues Locked external filter values.
 	 *        Format: {filterId: {value: [...], label: '...'}, ...}
+	 * @param string $autoSave 'Y' for a save of the popup fields: a link switched off by an administrator stays off.
 	 * @return array|null
 	 */
 	public function createShareAction(
@@ -1183,6 +1243,7 @@ class Dashboard extends Controller
 		string $dateEnd,
 		?string $externalFilterValuesJson = null,
 		?array $urlParameterValues = null,
+		string $autoSave = 'N',
 	): ?array
 	{
 		$externalFilterValues = null;
@@ -1239,8 +1300,6 @@ class Dashboard extends Controller
 				);
 			}
 		}
-		$shareProvider = ServiceLocator::getInstance()->get('biconnector.provider.share');
-		$existingShare = $shareProvider->getByDashboardAndUser($dashboard->getId(), $currentUserId);
 
 		$command = new CreateShareCommand(
 			dashboardId: $dashboard->getId(),
@@ -1249,9 +1308,35 @@ class Dashboard extends Controller
 			dateExpire: $dateExpire,
 			externalFilterValues: $externalFilterValues,
 			urlParameterValues: $urlParameterValues,
+			isAutoSave: $autoSave === 'Y',
 		);
 
 		$result = $command->run();
+		if ($result->getErrorCollection()->getErrorByCode(CreateShareCommandHandler::ERROR_SHARE_FORBIDDEN))
+		{
+			$this->addError(new UserFacingError(
+				Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_SHARE_FORBIDDEN'),
+				CreateShareCommandHandler::ERROR_SHARE_FORBIDDEN,
+			));
+
+			return null;
+		}
+
+		if ($result->getErrorCollection()->getErrorByCode(CreateShareCommandHandler::ERROR_SHARE_DISABLED_BY_ADMIN))
+		{
+			$state = ServiceLocator::getInstance()
+				->get('biconnector.provider.share')
+				->getAuthorShareState($dashboard->getId(), $currentUserId)
+			;
+			$this->addError(new UserFacingError(
+				Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_SHARE_DISABLED_BY_ADMIN'),
+				CreateShareCommandHandler::ERROR_SHARE_DISABLED_BY_ADMIN,
+				['disabledByAdmin' => $state['disabledByAdmin'] ?? null],
+			));
+
+			return null;
+		}
+
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -1324,27 +1409,15 @@ class Dashboard extends Controller
 			return null;
 		}
 
-		$currentUserId = (int)CurrentUser::get()->getId();
-		$shareProvider = ServiceLocator::getInstance()->get('biconnector.provider.share');
-		$share = $shareProvider->getByDashboardAndUser($dashboard->getId(), $currentUserId);
-		if (!$share)
-		{
-			return true;
-		}
+		// Kept for old clients: the link is switched off, the record stays for the registry.
+		$result = (new DeactivateShareCommand(
+			dashboardId: $dashboard->getId(),
+			userId: (int)CurrentUser::get()->getId(),
+		))->run();
 
-		try
+		if (!$result->isSuccess())
 		{
-			\Bitrix\BIConnector\Superset\Dashboard\SharePullService::sendRevokeEvent($share->getToken());
-			\Bitrix\BIConnector\Superset\Dashboard\ShareExpireAgent::remove($share->getId());
-			$shareRepository = ServiceLocator::getInstance()->get('biconnector.repository.share');
-			$shareRepository->delete($share->getId());
-		}
-		catch (\Exception $e)
-		{
-			Logger::logErrors(
-				[new Error($e->getMessage())],
-				['EXCEPTION_CODE' => $e->getCode()],
-			);
+			Logger::logErrors($result->getErrors());
 			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_SHARE_REVOKE_ERROR')));
 
 			return null;

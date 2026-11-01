@@ -355,6 +355,22 @@ class ClickhouseSqlHelper extends \Bitrix\Main\DB\MysqliSqlHelper implements BiA
 		return "toString({$expr})";
 	}
 
+	/**
+	 * @param string $expression
+	 * @param string $scaleExpression Must be a constant: ClickHouse rejects a per-row scale.
+	 *
+	 * @return string
+	 */
+	public function getRoundExpression(string $expression, string $scaleExpression): string
+	{
+		return "round(({$expression}), ({$scaleExpression}))";
+	}
+
+	public function castNumericToInt(string $expr): string
+	{
+		return "CAST({$expr} AS Int64)";
+	}
+
 	public function quoteIdentifier(string $identifier): string
 	{
 		return $this->quote($identifier);

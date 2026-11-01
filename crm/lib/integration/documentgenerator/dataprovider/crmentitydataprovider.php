@@ -630,6 +630,46 @@ abstract class CrmEntityDataProvider extends EntityDataProvider implements Hasha
 	}
 
 	/**
+	 * Returns the user field placeholders getFields() puts into $this->userFieldDescriptions,
+	 * without loading the field values.
+	 *
+	 * @return string[]
+	 */
+	protected function getUserFieldPlaceholders(): array
+	{
+		$names = array_diff(array_keys($this->getEntity()->getFields()), $this->getHiddenFields());
+		$placeholders = array_fill_keys($names, true);
+
+		$manager = $this->getCrmUserTypeManager();
+		if ($manager)
+		{
+			$supportedNames = [];
+			foreach ($manager->GetEntityFields(0) as $name => $field)
+			{
+				if (isset($this->getAvailableUserFieldTypes()[$field['USER_TYPE_ID']]))
+				{
+					$supportedNames[] = $name;
+					$placeholders[$name] = true;
+				}
+				else
+				{
+					unset($placeholders[$name]);
+				}
+			}
+
+			foreach ($this->getAlternativeUserFieldNames($supportedNames) as $alternatives)
+			{
+				$placeholders += array_fill_keys($alternatives, true);
+			}
+		}
+
+		return array_values(array_filter(
+			array_keys($placeholders),
+			static fn(string $name): bool => str_starts_with($name, 'UF_') && !str_ends_with($name, '_SINGLE'),
+		));
+	}
+
+	/**
 	 * @param array $placeholders
 	 * @return array
 	 */

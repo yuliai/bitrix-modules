@@ -9,11 +9,13 @@ use Bitrix\Main\Config\Option;
 
 final class BitrixAnswersFeature extends FeatureFlag
 {
+	use MyCompanySectionElement;
+
 	private const OPTION_CODE = 'feature_bitrix_answers_enabled';
 
-	public function isEnabled(): bool
+	protected function isOptionEnabled(): bool
 	{
-		return (bool)Option::get('mobile', self::OPTION_CODE, false);
+		return $this->isOptionOn('mobile', self::OPTION_CODE, false);
 	}
 
 	public function enable(): void

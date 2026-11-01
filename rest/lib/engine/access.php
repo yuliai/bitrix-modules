@@ -152,26 +152,17 @@ class Access
 		bool $force = false,
 	): bool
 	{
-		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
-		$marketApplicationLimit = $tariffAccessService->getMarketApplicationLimit();
+		$marketApplicationLimit = ServiceContainer::getInstance()
+			->getVibePlusTariffAccessService()
+			->getMarketApplicationLimit()
+		;
 		if ($marketApplicationLimit !== null)
 		{
-			return $tariffAccessService->canInstallMarketApplication(
-				$marketApplicationLimit,
-				true,
-				static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force),
-				$isFreeApplicationAllowed,
-			);
+			return static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force);
 		}
 
-		$isApplicationAvailable = static::isAvailable($appCode);
-
-		return $tariffAccessService->canInstallMarketApplication(
-			$marketApplicationLimit,
-			$isApplicationAvailable,
-			$isApplicationAvailable && static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force),
-			$isFreeApplicationAllowed,
-		);
+		return (static::isAvailable($appCode) && static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force))
+			|| $isFreeApplicationAllowed;
 	}
 
 	public static function isAllowFreeApp(array $freeAppData): bool
@@ -365,6 +356,15 @@ class Access
 		return $result;
 	}
 
+	private static function shouldCountMarketApplication(
+		?int $marketApplicationLimit,
+		bool $isLocalApplication,
+		bool $isFreeApplication,
+	): bool
+	{
+		return $isFreeApplication || ($marketApplicationLimit !== null && !$isLocalApplication);
+	}
+
 	private static function calcUsageEntity()
 	{
 		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
@@ -417,7 +417,7 @@ class Access
 					$result[static::ENTITY_TYPE_APP][] = $item['CODE'];
 				}
 
-				if ($tariffAccessService->shouldCountMarketApplication(
+				if (static::shouldCountMarketApplication(
 					$marketApplicationLimit,
 					$item['STATUS'] === AppTable::STATUS_LOCAL,
 					$item['STATUS'] === AppTable::STATUS_FREE,

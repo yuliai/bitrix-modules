@@ -11,7 +11,9 @@ use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Rest\Exceptions\ArgumentException;
 use Bitrix\Rest\Internal;
 use Bitrix\Rest\Internal\Repository\EmbeddingRepository;
+use Bitrix\Rest\Internal\Service\Embedding\EmbeddingOwnerResolver;
 use Bitrix\Rest\Internal\Service\Embedding\EmbeddingValidationService;
+use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Public\Dto\Embedding\EmbeddingLanguageDto;
 use Bitrix\Rest\Public\Dto\Embedding\EmbeddingOwnerDto;
 use Bitrix\Rest\Public\Exception\Embedding\EmbeddingOwnerProviderNotFoundException;
@@ -43,7 +45,6 @@ final class BindEmbeddingCommandHandler
 		$prepared = $this->validationService->prepare(
 			$command->owner->moduleId,
 			$command->owner->entityType,
-			$command->owner->entityId,
 			$command->placement,
 			$command->handler,
 			$command->targetUserId,
@@ -97,8 +98,6 @@ final class BindEmbeddingCommandHandler
 			);
 
 			$connection->commitTransaction();
-
-			return $embeddingId;
 		}
 		catch (\Throwable $exception)
 		{
@@ -111,6 +110,41 @@ final class BindEmbeddingCommandHandler
 
 			throw $exception;
 		}
+
+		$this->runAfterCommit($command->owner, $prepared['placement'], $embeddingId);
+
+		return $embeddingId;
+	}
+
+	private function runAfterCommit(EmbeddingOwnerDto $owner, string $placement, int $embeddingId): void
+	{
+		PlacementTable::clearHandlerCache();
+
+		if (EmbeddingOwnerResolver::isAppOwnerType($owner->moduleId, $owner->entityType))
+		{
+			return;
+		}
+
+		try
+		{
+			$this->publishPlacementAdd($placement, $embeddingId);
+		}
+		catch (\Throwable $exception)
+		{
+			Main\Application::getInstance()->getExceptionHandler()->writeToLog($exception);
+		}
+	}
+
+	private function publishPlacementAdd(string $placement, int $embeddingId): void
+	{
+		Main\EventManager::getInstance()->send(new Main\Event(
+			'rest',
+			PlacementTable::PREFIX_EVENT_ON_AFTER_ADD . $placement,
+			[
+				'ID' => $embeddingId,
+				'PLACEMENT' => $placement,
+			],
+		));
 	}
 
 	private function resolveProvider(EmbeddingOwnerDto $owner): EmbeddingOwnerProviderInterface

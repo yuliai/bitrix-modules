@@ -6,6 +6,7 @@ namespace Bitrix\Crm\V2\Infrastructure\Rest\Dto\Form;
 
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\ElementsType;
 use Bitrix\Main\Validation\Rule\Enum\Type;
+use Bitrix\Rest\V3\Attribute\ElementType;
 use Bitrix\Rest\V3\Attribute\Filterable;
 use Bitrix\Rest\V3\Dto\Dto;
 
@@ -27,6 +28,7 @@ final class ResponsibleDto extends Dto
 {
 	#[Filterable]
 	#[ElementsType(Type::Integer)]
+	#[ElementType('int')]
 	public array $userIds;
 
 	public bool $checkWorkTime;

@@ -9,8 +9,8 @@ use Bitrix\Main\Type\Date;
 interface MetricSnapshotCacheInterface
 {
 	/**
-	 * @param callable(): array{createdForms: int, views: int, submissions: int, abandonedFills: int} $calculate
-	 * @return array{createdForms: int, views: int, submissions: int, abandonedFills: int}
+	 * @param callable(): array<string, int> $calculate
+	 * @return array<string, int>
 	 */
 	public function getOrCalculate(Date $from, Date $to, callable $calculate): array;
 

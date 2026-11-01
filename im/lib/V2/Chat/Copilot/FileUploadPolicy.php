@@ -16,11 +16,14 @@ final class FileUploadPolicy
 		'xlsx',
 		'xls',
 		'docx',
+		'doc',
+		'pptx',
 		'pdf',
 		'jpg',
 		'jpeg',
 		'png',
 		'webp',
+		'gif',
 	];
 
 	public static function toPublicData(): array

@@ -11,9 +11,11 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Controller\MyCompany\Basic;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Category;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Dictionary;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Field;
+use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Form as CustomForm;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Item;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Product;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Requisite;
+use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Tracking;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\OpenLineAccessDeniedException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\OpenLinesNotInstalledException;
 use Bitrix\Crm\V2\Internal\Integration\ImOpenLines\OpenLineGateway;
@@ -55,19 +57,21 @@ final class CrmMethodAccessChecker implements MethodAccessCheckerInterface
 			// Category-specific access is checked by the controller once the category ID is known.
 			Category\Stage::class => true,
 			Form\Form::class => $this->canAccessForm($methodDescription, $userId),
-			Form\Configuration::class,
-			Form\Field::class,
-			Form\Embedding::class,
-			Form\Scenario::class,
-			Form\ScenarioCategory::class,
-			Form\EntityField::class => $this->canReadForms($userId),
-			Form\SiteButton::class => $this->canReadForms($userId) && $this->canReadSiteButtons($userId),
-			Form\OpenLine::class => $this->canReadForms($userId) && $this->canModifyOpenLineChats($userId),
+			CustomForm\Configuration::class,
+			CustomForm\Field::class,
+			CustomForm\Scenario::class,
+			CustomForm\ScenarioCategory::class,
+			CustomForm\EntityField::class => $this->canReadForms($userId),
+			CustomForm\Embedding::class => $this->canAccessFormEmbedding($methodDescription, $userId),
+			CustomForm\SiteButton::class => $this->canReadForms($userId) && $this->canReadSiteButtons($userId),
+			CustomForm\OpenLine::class => $this->canReadForms($userId) && $this->canModifyOpenLineChats($userId),
 			Lead::class => Container::getInstance()->getUserPermissions($userId)->isCrmAdmin(),
 			Product\Product::class,
 			Requisite\Requisite::class => Container::getInstance()->getUserPermissions($userId)->isAdmin(),
 			Requisite\Preset::class => $this->canReadItemsOfRouteInDefaultCategory($methodDescription, $userId),
 			Dictionary\DictionaryValue::class => $this->canAccessDictionaryValue($methodDescription, $userId),
+			// Trace-level access to the bound items is checked by the controller.
+			Tracking\Trace::class => $this->canReadSomeItemsInCrm($userId),
 			default => true,
 		};
 	}
@@ -149,8 +153,19 @@ final class CrmMethodAccessChecker implements MethodAccessCheckerInterface
 		return match ($methodDescription->method)
 		{
 			'get', 'list' => $permissions->canRead(),
-			'add', 'update', 'delete' => $permissions->canEdit(),
+			'add', 'update', 'delete', 'validate', 'activate', 'deactivate' => $permissions->canEdit(),
 			default => true,
+		};
+	}
+
+	private function canAccessFormEmbedding(MethodDescription $methodDescription, int $userId): bool
+	{
+		$permissions = Container::getInstance()->getUserPermissions($userId)->webForm();
+
+		return match ($methodDescription->method)
+		{
+			'update' => $permissions->canEdit(),
+			default => $permissions->canRead(),
 		};
 	}
 
@@ -176,6 +191,11 @@ final class CrmMethodAccessChecker implements MethodAccessCheckerInterface
 		}
 
 		return true;
+	}
+
+	private function canReadSomeItemsInCrm(int $userId): bool
+	{
+		return Container::getInstance()->getUserPermissions($userId)->entityType()->canReadSomeItemsInCrm();
 	}
 
 	private function canReadItemsOfRouteInDefaultCategory(MethodDescription $methodDescription, int $userId): bool

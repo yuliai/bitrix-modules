@@ -56,6 +56,50 @@ final class ActivityStorageElementRepository
 	}
 
 	/**
+	 * Element ids of the given activities in one query. An activity with no row is absent from the result.
+	 *
+	 * THE ROWS ARE THE ANSWER AND THE COLUMN IS NOT. An activity moved to the recycle bin keeps its
+	 * serialized `STORAGE_ELEMENT_IDS` so that a restoration can put the rows back, so a fallback to the
+	 * column would answer for activities whose rows were deliberately taken away.
+	 *
+	 * @param int[] $activityIds
+	 * @return array<int, int[]> by activity id, each set in the order of its ids
+	 */
+	public function getElementIdsByActivityIds(array $activityIds): array
+	{
+		$ids = [];
+		foreach ($activityIds as $activityId)
+		{
+			$activityId = (int)$activityId;
+			if ($activityId > 0)
+			{
+				$ids[$activityId] = $activityId;
+			}
+		}
+
+		if ($ids === [])
+		{
+			return [];
+		}
+
+		$rows =
+			ActivityElementTable::query()
+				->setSelect(['ACTIVITY_ID', 'ELEMENT_ID'])
+				->whereIn('ACTIVITY_ID', array_values($ids))
+				->setOrder(['ACTIVITY_ID' => 'ASC', 'ELEMENT_ID' => 'ASC'])
+				->fetchAll()
+		;
+
+		$elementIds = [];
+		foreach ($rows as $row)
+		{
+			$elementIds[(int)$row['ACTIVITY_ID']][] = (int)$row['ELEMENT_ID'];
+		}
+
+		return $elementIds;
+	}
+
+	/**
 	 * Stores the given ids as the set of the activity, in the rows and in the column alike.
 	 *
 	 * @param int $storageTypeId the storage the rows name; one that is none of the known ones leaves them

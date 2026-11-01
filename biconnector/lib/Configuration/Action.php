@@ -293,32 +293,72 @@ class Action
 					$fileInfo['PATH']
 				);
 
+				// Do not attempt to save an unusable file array: skip straight to a controlled error.
+				if (!self::isImportedFileArrayValid($file))
+				{
+					return ['EXCEPTION' => 'error'];
+				}
+
 				$file['MODULE_ID'] = 'rest';
 				$file['name'] = $fileInfo['NAME'];
-				$setting = new Setting($contextUser);
-				$fileId = CFile::saveFile(
+				$fileId = (int)CFile::saveFile(
 					$file,
 					'configuration/' . static::ENTITY_CODE
 				);
-				$isSave = $setting->set(
-					Structure::CODE_CUSTOM_FILE . static::ENTITY_TYPE_POWER_BI . time(),
-					[
-						'ID' => $fileId,
-					]
-				);
-				if ($isSave)
-				{
-					$result['RATIO']['DOWNLOAD_FILE_ID'] = $fileId;
-					$result['RATIO']['DOWNLOAD_FILE_NAME'] = $fileInfo['NAME'];
-				}
-				else
-				{
-					$result['EXCEPTION'] = 'error';
-				}
+
+				// Persist the setting only for a real saved file; a non-positive id means the save failed.
+				$setting = new Setting($contextUser);
+				$isSave = $fileId > 0
+					&& $setting->set(
+						Structure::CODE_CUSTOM_FILE . static::ENTITY_TYPE_POWER_BI . time(),
+						[
+							'ID' => $fileId,
+						]
+					);
+
+				$result = self::buildPowerBiDownloadResult($fileId, $isSave, $fileInfo['NAME']);
 			}
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Checks that CFile::makeFileArray() produced a usable file array before it is saved.
+	 * A usable array must contain a non-empty temporary file reference.
+	 *
+	 * @param mixed $file Result of CFile::makeFileArray().
+	 *
+	 * @return bool
+	 */
+	private static function isImportedFileArrayValid($file): bool
+	{
+		return is_array($file) && !empty($file['tmp_name']);
+	}
+
+	/**
+	 * Builds the Power BI import result. DOWNLOAD_FILE_ID is exposed only when the file
+	 * was actually saved (positive id) and its setting was persisted.
+	 *
+	 * @param int $fileId Result of CFile::saveFile().
+	 * @param bool $isSettingSaved Whether the related setting was stored.
+	 * @param string $fileName Original file name.
+	 *
+	 * @return array
+	 */
+	private static function buildPowerBiDownloadResult(int $fileId, bool $isSettingSaved, string $fileName): array
+	{
+		if ($fileId <= 0 || !$isSettingSaved)
+		{
+			return ['EXCEPTION' => 'error'];
+		}
+
+		return [
+			'RATIO' => [
+				'DOWNLOAD_FILE_ID' => $fileId,
+				'DOWNLOAD_FILE_NAME' => $fileName,
+			],
+		];
 	}
 
 	/**

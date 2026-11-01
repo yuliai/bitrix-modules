@@ -18,8 +18,9 @@ class ConfigurableActivity
 	 * Create timeline item for Activity based on Item\Configurable implementation
 	 *
 	 * The two items chosen by the legacy type of an activity - a letter and a call - belong to no provider and
-	 * are decided here. Everything else is the provider's own item: which providers build one is declared by
-	 * their descriptors in the registry, and building it is asked of the provider itself.
+	 * are decided here. Historical CRM_DOCUMENT activities are the exception to provider-based card selection:
+	 * their provider is gone, but their saved rows remain visible as NotAvailable. Everything else is the
+	 * provider's own item: which providers build one is declared by their descriptors in the registry.
 	 *
 	 * @param int $typeId
 	 * @param string $providerId
@@ -43,6 +44,10 @@ class ConfigurableActivity
 		if ($typeId !== CCrmActivityType::Provider)
 		{
 			return null;
+		}
+		if ($providerId === 'CRM_DOCUMENT')
+		{
+			return new Item\NotAvailable($context, $model);
 		}
 
 		$provider = self::getProviderBuildingItsOwnItem($providerId);

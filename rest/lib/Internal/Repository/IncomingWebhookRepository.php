@@ -211,12 +211,6 @@ class IncomingWebhookRepository implements IncomingWebhookRepositoryInterface
 			$query->whereIn('ID', $this->buildPasswordIdsByExternalAttributesQuery($attributes));
 		}
 
-		$excludedAttributes = $filter->getExcludedExternalAttributes();
-		if ($excludedAttributes !== null)
-		{
-			$query->whereNotIn('ID', $this->buildPasswordIdsByExternalAttributesQuery($excludedAttributes));
-		}
-
 		return $query;
 	}
 

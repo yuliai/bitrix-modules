@@ -9,10 +9,9 @@ use Bitrix\Crm\Model\Field\DefaultValue\CloseDateConfigurator;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingDescription;
 use Bitrix\Crm\V2\Internal\Service\Settings\AbstractSetting;
 use Bitrix\Crm\V2\Internal\Service\Settings\ResettableSettingInterface;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\IntegerSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Setting\SettingTitleProvider;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\IntegerSchema;
+use Bitrix\Crm\V2\Internal\Service\Settings\SettingTitleProvider;
 use Bitrix\Main\Config\Option;
-use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Result;
 use CCrmOwnerType;
 
@@ -27,7 +26,7 @@ final class DaysBeforeCloseSetting extends AbstractSetting implements Resettable
 	private const MODULE_ID = 'crm';
 	private const OPTION_NAME = 'crm_deal_days_before_close';
 
-	public function __construct(private readonly ?CloseDateConfigurator $closeDateConfigurator = null)
+	public function __construct(private readonly CloseDateConfigurator $closeDateConfigurator)
 	{
 	}
 
@@ -48,7 +47,7 @@ final class DaysBeforeCloseSetting extends AbstractSetting implements Resettable
 
 	public function getValue(): int
 	{
-		return $this->getCloseDateConfigurator()->resolveDefaultCloseDateDays(CCrmOwnerType::Deal);
+		return $this->closeDateConfigurator->resolveDefaultCloseDateDays(CCrmOwnerType::Deal);
 	}
 
 	public function reset(): Result
@@ -65,9 +64,4 @@ final class DaysBeforeCloseSetting extends AbstractSetting implements Resettable
 		return new Result();
 	}
 
-	private function getCloseDateConfigurator(): CloseDateConfigurator
-	{
-		return $this->closeDateConfigurator
-			?? ServiceLocator::getInstance()->get(CloseDateConfigurator::class);
-	}
 }

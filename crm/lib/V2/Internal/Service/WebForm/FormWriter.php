@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Internal\Service\WebForm;
 
 use Bitrix\Crm\Service\Container;
-use Bitrix\Crm\UI\Webpack;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\Section;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormChangeSet;
-use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormPath;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormSelect;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormAccessDeniedException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormActivationLimitReachedException;
@@ -29,7 +27,6 @@ use Bitrix\Crm\V2\Internal\Repository\WebForm\FormDeleteRepository;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\FormRepository;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\FormWriteRepository;
 use Bitrix\Crm\WebForm\Form;
-use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
 use UnexpectedValueException;
@@ -64,15 +61,11 @@ final class FormWriter
 	private const COPYRIGHT_REMOVED_PATH =
 		WebForm::SECTION_APPEARANCE . '.' . Section\Appearance::FIELD_COPYRIGHT_REMOVED;
 
-	/** What a refusal of the storage says instead of its own text. */
-	private const STORAGE_REFUSAL_MESSAGE = 'Value of this field was not accepted by the CRM form';
-
 	private const LOGGER_ID = 'Default';
 
 	private readonly \Closure $permissionChecker;
 	private readonly \Closure $formLoader;
-	private readonly \Closure $activeFormCount;
-	private readonly \Closure $activeFormMaximum;
+	private readonly ActiveFormLimit $activeFormLimit;
 	private readonly \Closure $formCreator;
 	private readonly \Closure $formUpdater;
 	private readonly \Closure $removalClaimer;
@@ -81,24 +74,26 @@ final class FormWriter
 	private readonly WebFormWriteRestriction $writeRestriction;
 	private readonly FormPage $formPage;
 	private readonly FormDeleteRepository $deleteRepository;
+	private ?FormStorageRefusal $storageRefusal;
 
 	/**
 	 * @param null|\Closure(int): bool $permissionChecker
 	 * @param null|\Closure(int, WebFormSelect): ?WebForm $formLoader
-	 * @param null|\Closure(): int $activeFormCount
-	 * @param null|\Closure(): int $activeFormMaximum
+	 * @param null|ActiveFormLimit $activeFormLimit defaults to the limit of this portal, asked
+	 *        through the restriction this writer was given
 	 * @param null|\Closure(WebFormChangeSet): Result $formCreator
 	 * @param null|\Closure(int, WebFormChangeSet, ?DateTime=): Result $formUpdater
 	 * @param null|\Closure(int, ?DateTime, bool): bool $removalClaimer
 	 * @param null|\Closure(int): bool $scriptBuilder
 	 * @param null|FormDeleteRepository $deleteRepository defaults to a repository deleting the page
 	 *        of the form through the same landing layer as the rest of the scenarios
+	 * @param null|FormStorageRefusal $storageRefusal defaults to a translation writing the refusals
+	 *        of the storage to the log of the module
 	 */
 	public function __construct(
 		?\Closure $permissionChecker = null,
 		?\Closure $formLoader = null,
-		?\Closure $activeFormCount = null,
-		?\Closure $activeFormMaximum = null,
+		?ActiveFormLimit $activeFormLimit = null,
 		?\Closure $formCreator = null,
 		?\Closure $formUpdater = null,
 		?\Closure $removalClaimer = null,
@@ -107,6 +102,7 @@ final class FormWriter
 		?WebFormWriteRestriction $writeRestriction = null,
 		?FormPage $formPage = null,
 		?FormDeleteRepository $deleteRepository = null,
+		?FormStorageRefusal $storageRefusal = null,
 	)
 	{
 		$this->permissionChecker = $permissionChecker ?? static fn (int $userId): bool =>
@@ -117,12 +113,6 @@ final class FormWriter
 		;
 		$this->formLoader = $formLoader ?? static fn (int $id, WebFormSelect $select): ?WebForm =>
 			(new FormRepository())->getById($id, $select)
-		;
-		$this->activeFormCount = $activeFormCount ?? static fn (): int =>
-			(new FormRepository())->getActiveFormCount()
-		;
-		$this->activeFormMaximum = $activeFormMaximum ?? static fn (): int =>
-			(new FormRepository())->getActiveFormMaximum()
 		;
 		$this->formCreator = $formCreator ?? static fn (WebFormChangeSet $changeSet): Result =>
 			(new FormWriteRepository())->add($changeSet)
@@ -146,8 +136,10 @@ final class FormWriter
 		;
 		$this->validator = $validator ?? new WebFormValidator();
 		$this->writeRestriction = $writeRestriction ?? new WebFormWriteRestriction();
+		$this->activeFormLimit = $activeFormLimit ?? new ActiveFormLimit(restriction: $this->writeRestriction);
 		$this->formPage = $formPage ?? new FormPage();
 		$this->deleteRepository = $deleteRepository ?? new FormDeleteRepository($this->formPage);
+		$this->storageRefusal = $storageRefusal;
 	}
 
 	/**
@@ -198,7 +190,7 @@ final class FormWriter
 			// There is no transaction, so a section failing after the row leaves the form created.
 			// The id travels with the refusal: the caller has to be able to find what already
 			// exists.
-			throw self::toValidationException($result, $formId);
+			throw $this->storageRefusal()->toException($result, $formId);
 		}
 
 		$this->buildScripts($formId, createdFormId: $formId);
@@ -263,9 +255,10 @@ final class FormWriter
 	 * Deletes a CRM form together with the data the legacy cascade removes.
 	 *
 	 * The cascade is reproduced literally by FormDeleteRepository: the agreements, the responsible
-	 * queue, the dependency groups, the rotation option, the background image and the built script
-	 * package stay behind as orphans, exactly as they do today. What is new is that the three
-	 * reasons of a refusal are told apart instead of sharing one false.
+	 * queue, the dependency groups, the rotation option and the background image stay behind as
+	 * orphans, exactly as they do today. The built script package is the one addition to it, because
+	 * nothing but the form names that package. What is new besides is that the three reasons of a
+	 * refusal are told apart instead of sharing one false.
 	 *
 	 * The plan of the portal is asked here as it is asked on a creation and on a change: legacy
 	 * checks it in the access predicate every changing action of the editor goes through, removal
@@ -334,9 +327,6 @@ final class FormWriter
 			throw new FormSideEffectException(self::OPERATION_DELETE_FORM);
 		}
 
-		// The call looks like a removal of the built package and does nothing, so the package
-		// outlives the form. Reproduced as it is.
-		Webpack\Form::instance($formId)->delete();
 		Form::cleanCacheByTag($formId);
 	}
 
@@ -389,9 +379,8 @@ final class FormWriter
 	/**
 	 * The limit is asked about the way turning a stored form on asks about it
 	 * ({@see FormActivator::setActive()}), because it is the same growth of the number of working
-	 * forms: the plan of the portal first, and the count against the maximum only on a portal that
-	 * has a plan to be limited by. Outside the cloud a form is created working without a count, the
-	 * way the product turns one on ({@see Form::canActivateForm()}).
+	 * forms - and it is asked of the same object, so what refuses a creation here and what refuses
+	 * an activation there are one comparison rather than two.
 	 *
 	 * The window between the count and the write is accepted: there is no transaction under this
 	 * path, so creations overlapping in it all read the count before any of them writes and all
@@ -402,12 +391,7 @@ final class FormWriter
 	 */
 	private function assertLimitNotReached(): void
 	{
-		if (!$this->writeRestriction->isActivationLimited())
-		{
-			return;
-		}
-
-		if (($this->activeFormCount)() >= ($this->activeFormMaximum)())
+		if ($this->activeFormLimit->isReached())
 		{
 			throw new FormActivationLimitReachedException();
 		}
@@ -543,7 +527,7 @@ final class FormWriter
 		;
 		if (!$result->isSuccess())
 		{
-			throw self::toValidationException($result);
+			throw $this->storageRefusal()->toException($result);
 		}
 	}
 
@@ -582,71 +566,16 @@ final class FormWriter
 	}
 
 	/**
-	 * Turns an unsuccessful write into the one error format the caller understands.
-	 *
-	 * The storage writes what the caller sent and nothing else, so its refusals are refusals of
-	 * that input and belong to the input paths. Every writer answers with a code this method can
-	 * read as such a path: the section writers name their column or their section, and the writer of
-	 * the ad links addresses to the section of the input the refusals of the mechanism owning them,
-	 * which answers with no code at all.
-	 *
-	 * The text of the storage stays inside and goes to the log instead: the ORM and the legacy
-	 * options write about the columns they refused, and the shape of the schema is not part of the
-	 * public contract. The path of the input is what the caller acts on anyway.
-	 *
-	 * A form id given here is the id of a form that was created before the failure. It travels on the
-	 * refusal itself rather than inside the errors: which form exists is one fact about the
-	 * operation, not a property of any field of the input.
+	 * The translation a refused write is answered through, shared with the scenario switching the
+	 * activity of a form ({@see FormActivator}) so that one refusal of the storage reaches the client
+	 * as one answer. A writer built without one takes the log of the module, and takes it only when a
+	 * write is actually refused.
 	 */
-	private static function toValidationException(Result $result, int $formId = 0): FormValidationException
+	private function storageRefusal(): FormStorageRefusal
 	{
-		$errors = [];
-		foreach ($result->getErrors() as $error)
-		{
-			$code = (string)$error->getCode();
-			$path = self::toInputPath($code);
-			self::logStorageRefusal($path, (string)$error->getMessage());
-
-			$errors[] = new Error(self::STORAGE_REFUSAL_MESSAGE, $path, $error->getCustomData());
-		}
-
-		return $formId > 0
-			? FormValidationException::ofPartiallyCreatedForm($formId, ...$errors)
-			: new FormValidationException(...$errors)
-		;
-	}
-
-	private static function logStorageRefusal(string $path, string $message): void
-	{
-		Container::getInstance()->getLogger(self::LOGGER_ID)->error(
-			'CRM form write was refused by the storage at `{path}`: {message}',
-			['path' => $path, 'message' => $message],
+		return $this->storageRefusal ??= new FormStorageRefusal(
+			Container::getInstance()->getLogger(self::LOGGER_ID),
 		);
-	}
-
-	/**
-	 * The input path a code of the storage stands for. A writer of a section whose input is one
-	 * collection names the section it failed on, and the collection is the address of that input;
-	 * anything else already is a path, a column of the form row included.
-	 */
-	private static function toInputPath(string $code): string
-	{
-		if ($code === WebForm::SECTION_INTEGRATIONS)
-		{
-			return WebFormPath::ADS;
-		}
-
-		if ($code === WebForm::SECTION_RESPONSIBLE)
-		{
-			return WebFormPath::RESPONSIBLE_USER_IDS;
-		}
-
-		if ($code === WebForm::SECTION_AGREEMENTS)
-		{
-			return WebFormPath::AGREEMENT_ITEMS;
-		}
-
-		return $code;
 	}
 
 	/**

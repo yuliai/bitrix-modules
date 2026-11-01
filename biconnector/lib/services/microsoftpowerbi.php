@@ -106,6 +106,7 @@ class MicrosoftPowerBI extends Service
 		$size = 0;
 		$countColumns = count($fields);
 		$firstLinePrinted = false;
+		$convertRow = $this->getOutputRowConverter($tableName, $fields);
 
 		$connector->sendAnalytic();
 
@@ -152,6 +153,11 @@ class MicrosoftPowerBI extends Service
 						$row += array_fill($rowCount, $countColumns - $rowCount, null);
 					}
 
+					if ($convertRow)
+					{
+						$row = $convertRow($row);
+					}
+
 					$output = ',' . Json::encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE) . "\n";
 					echo $output;
 					$size += strlen($output);
@@ -162,6 +168,7 @@ class MicrosoftPowerBI extends Service
 		}
 
 		$queryReturnResult = $queryResult->getReturn();
+		$queryReturnData = $queryReturnResult instanceof Result ? $queryReturnResult->getData() : [];
 		if ($queryReturnResult instanceof Result && !$queryReturnResult->isSuccess())
 		{
 			$result->addErrors($queryReturnResult->getErrors());
@@ -205,6 +212,14 @@ class MicrosoftPowerBI extends Service
 			$output = ']';
 			echo $output;
 			$size += strlen($output);
+		}
+		elseif ($queryReturnData['aggregationApplied'] ?? false)
+		{
+			// A delegated aggregation is printed as the application framed it, so the row count comes from
+			// the gate that verified the answer. The raw path leaves no such data and keeps the count at
+			// zero. The limit is soft for these queries: the excess is recorded, the answer is not cut.
+			$count = (int)($queryReturnData['count'] ?? 0);
+			$isOverLimit = $licenseLimit > 0 && $count > $licenseLimit;
 		}
 
 		$limitManager->fixLimit($count);
@@ -253,5 +268,18 @@ class MicrosoftPowerBI extends Service
 		}
 
 		return $errorRow;
+	}
+
+	/**
+	 * Returns a converter applied to every data row right before it is encoded, or null to print rows as they are.
+	 *
+	 * @param string $tableName Requested table.
+	 * @param string[] $fields Column IDs in output order.
+	 *
+	 * @return \Closure|null
+	 */
+	protected function getOutputRowConverter(string $tableName, array $fields): ?\Closure
+	{
+		return null;
 	}
 }

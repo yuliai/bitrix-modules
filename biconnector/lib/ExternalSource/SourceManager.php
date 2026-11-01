@@ -102,6 +102,8 @@ class SourceManager
 			// ClickHouse is reached over its HTTP interface, so the scheme of the address is what
 			// tells the source whether the connection has to be encrypted.
 			$hostPlaceholders = [
+				ExternalSource\Type::Mysql->value => 'db.example.com',
+				ExternalSource\Type::Pgsql->value => 'db.example.com',
 				ExternalSource\Type::Clickhouse->value => 'https://clickhouse.example.com',
 			];
 
@@ -220,11 +222,6 @@ class SourceManager
 		return Feature::isExternalSqlDatasetEnabled();
 	}
 
-	/**
-	 * ClickHouse carries an option of its own on top of the external SQL sources.
-	 *
-	 * @return bool
-	 */
 	public static function isClickhouseConnectionsAvailable(): bool
 	{
 		return Feature::isClickhouseSourceEnabled();
@@ -374,8 +371,6 @@ class SourceManager
 			return $result;
 		}
 
-		// The type arrives from the request, so the option is checked here and not only where the list of
-		// databases is built: a type left out of the selector must not be creatable by asking for it.
 		if ($type === ExternalSource\Type::Clickhouse && !self::isClickhouseConnectionsAvailable())
 		{
 			$result->addError(
@@ -627,9 +622,14 @@ class SourceManager
 
 	public static function getSourceSettings(ExternalSource\Internal\ExternalSource $source): ExternalSourceSettingsCollection
 	{
+		return self::getSourceSettingsBySourceId((int)$source->getId());
+	}
+
+	public static function getSourceSettingsBySourceId(int $sourceId): ExternalSourceSettingsCollection
+	{
 		return ExternalSourceSettingsTable::getList([
 			'filter' => [
-				'=SOURCE_ID' => $source->getId(),
+				'=SOURCE_ID' => $sourceId,
 			],
 		])
 			->fetchCollection()

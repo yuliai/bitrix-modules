@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Internal\Service\Admission\Strategy\OAuth;
 
 use Bitrix\Rest\AppTable;
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\Internal\Service\Admission\DenialStrategyInterface;
 use Bitrix\Rest\Internal\Service\Admission\Verdict;
-use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
 
 final class TariffStrategy implements DenialStrategyInterface
 {
@@ -30,12 +30,8 @@ final class TariffStrategy implements DenialStrategyInterface
 		if ($availability === false)
 		{
 			$appInfo = AppTable::getByClientId($this->clientId);
-			$isPublishedApplication = is_array($appInfo)
+			$availability = is_array($appInfo)
 				&& ($appInfo['STATUS'] ?? null) !== AppTable::STATUS_LOCAL;
-			$availability = $this->tariffAccessService->getUserRestAvailability(
-				$isPublishedApplication,
-				$availability,
-			);
 		}
 
 		return $availability === true

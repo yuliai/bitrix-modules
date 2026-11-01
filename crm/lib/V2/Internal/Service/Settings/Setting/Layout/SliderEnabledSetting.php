@@ -9,8 +9,8 @@ use Bitrix\Crm\Feature\ReturnToOldDetailPage;
 use Bitrix\Crm\Settings\LayoutSettings;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingDescription;
 use Bitrix\Crm\V2\Internal\Service\Settings\AbstractSetting;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\BooleanSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Setting\SettingTitleProvider;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\BooleanSchema;
+use Bitrix\Crm\V2\Internal\Service\Settings\SettingTitleProvider;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 

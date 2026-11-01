@@ -101,7 +101,6 @@ class ExternalSourceRepository
 
 		$queryForCrmTable = SourceTable::query()
 			->setSelect(['TITLE' => 'NAME', 'TYPE' => 'CODE'])
-			->addSelect(new ExpressionField('CREATED_BY_ID', 'NULL'))
 			->setFilter($this->grid->getOrmFilter() ?? [])
 			->addFilter('=TYPE', self::getSourceFilter())
 			->setCacheTtl(3600)

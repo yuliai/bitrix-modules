@@ -819,7 +819,7 @@ abstract class Engine
 	 * and stream analytics — so the module id says nothing about urgency. What separates them
 	 * is whether anyone is waiting: a background run has no portal user behind it.
 	 */
-	private function resolveRequestContextCallType(): RequestContext\CallType
+	protected function resolveRequestContextCallType(): RequestContext\CallType
 	{
 		return $this->getContext()->getUserId() > 0
 			? RequestContext\CallType::Interactive
@@ -831,7 +831,7 @@ abstract class Engine
 	 * the call, so that the receiver's breakdown shows not just which part of the product
 	 * the load comes from, but which of its calls.
 	 */
-	private function getRequestContextFeature(): string
+	protected function getRequestContextFeature(): string
 	{
 		return RequestContext\FeatureTag::fromContext($this->getContext())->value;
 	}

@@ -5,6 +5,7 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet;
 use Bitrix\AiAssistant\Definition\Dto\DefinitionMetadataDto;
 use Bitrix\AiAssistant\Definition\Dto\UsesToolsDto;
 use Bitrix\AiAssistant\Definition\ToolSet\BaseToolSet;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\AgentOperationsDescription;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\CreateChartTool;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\DeleteChartTool;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool\GetChartTool;
@@ -21,14 +22,13 @@ final class BiChartsToolSet extends BaseToolSet
 
 	public function getMetadata(): DefinitionMetadataDto
 	{
+		$preamble = 'Tools for managing charts in BI Constructor (Apache Superset). '
+			. 'Charts are built on top of datasets (bar, line, scatter, pie, table, big_number). '
+			. 'Destructive operations require explicit two-step user confirmation.';
+
 		return new DefinitionMetadataDto(
 			'BI Charts',
-			'Tools for managing charts in BI Constructor (Apache Superset). '
-			. 'List existing charts, inspect chart configuration, create new charts '
-			. 'on top of datasets (bar, line, scatter, pie, table, big_number), update '
-			. 'chart metadata (name/description), fully replace its configuration, or delete a chart. '
-			. 'Replacing a chart config and deleting a chart are destructive and require '
-			. 'explicit two-step user confirmation.',
+			$preamble . (new AgentOperationsDescription())->getForToolSet($this->getCode()),
 		);
 	}
 

@@ -30,8 +30,9 @@ final class Update implements Action
 		$hasTitleChange = $diff->isChanged('TITLE');
 		$isVibeFeatureEnabled = Feature::enabled(AutomatedSolutionVibe::class);
 		$hasVibeToggled = $isVibeFeatureEnabled && $diff->isChanged('IS_VIBE_ENABLED');
+		$hasDescriptionChange = $this->hasDescriptionChange();
 
-		if (!$hasTitleChange && !$hasVibeToggled)
+		if (!$hasTitleChange && !$hasVibeToggled && !$hasDescriptionChange)
 		{
 			// nothing to change
 			return new Result();
@@ -89,6 +90,11 @@ final class Update implements Action
 			->setUpdatedBy(Container::getInstance()->getContext()->getUserId())
 		;
 
+		if ($hasDescriptionChange)
+		{
+			$automatedSolution->setDescription($this->currentFields['DESCRIPTION']);
+		}
+
 		$crmResult = $automatedSolution->save();
 		if (!$crmResult->isSuccess())
 		{
@@ -114,5 +120,14 @@ final class Update implements Action
 		$fields['TYPE_IDS'] = $this->previousFields['TYPE_IDS'] ?? [];
 
 		return $overallResult->setData(['fields' => $fields]);
+	}
+
+	// Difference::isChanged() treats all empty values as equal and so would miss a description "0"
+	private function hasDescriptionChange(): bool
+	{
+		return (
+			array_key_exists('DESCRIPTION', $this->currentFields)
+			&& $this->currentFields['DESCRIPTION'] !== ($this->previousFields['DESCRIPTION'] ?? null)
+		);
 	}
 }

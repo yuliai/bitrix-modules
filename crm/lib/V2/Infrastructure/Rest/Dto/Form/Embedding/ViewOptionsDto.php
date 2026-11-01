@@ -6,6 +6,7 @@ namespace Bitrix\Crm\V2\Infrastructure\Rest\Dto\Form\Embedding;
 
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\ElementsType;
 use Bitrix\Main\Validation\Rule\Enum\Type;
+use Bitrix\Rest\V3\Attribute\ElementType;
 use Bitrix\Rest\V3\Dto\Dto;
 
 /**
@@ -15,15 +16,19 @@ use Bitrix\Rest\V3\Dto\Dto;
 final class ViewOptionsDto extends Dto
 {
 	#[ElementsType(Type::String)]
+	#[ElementType('string')]
 	public array $type;
 
 	#[ElementsType(Type::String)]
+	#[ElementType('string')]
 	public array $position;
 
 	#[ElementsType(Type::String)]
+	#[ElementType('string')]
 	public array $vertical;
 
 	#[ElementsType(Type::Integer)]
+	#[ElementType('int')]
 	public array $delay;
 
 	public ButtonOptionsDto $button;

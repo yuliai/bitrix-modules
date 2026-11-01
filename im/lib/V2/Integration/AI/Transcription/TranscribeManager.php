@@ -53,9 +53,16 @@ final class TranscribeManager
 		$this->messageId = $messageId;
 	}
 
+	/**
+	 * @param array $additionalContextParams context parameters known to the caller already.
+	 * @param \Closure|null $deferredContextParams context parameters that cost something to
+	 *        produce, as a provider of the same shape. Every short circuit below stands before it
+	 *        is called, so a launch that queues nothing never pays for them, @see self::sendAiQuery().
+	 */
 	public function transcribeFile(
 		LaunchType $launchType = LaunchType::Auto,
-		array $additionalContextParams = []
+		array $additionalContextParams = [],
+		?\Closure $deferredContextParams = null
 	): TranscribeResult
 	{
 		$result = new TranscribeResult($this->createErrorFileItem());
@@ -93,7 +100,7 @@ final class TranscribeManager
 			Application::getConnection()->unlock($this->getLockName());
 		}
 
-		$result = $this->sendAiQuery($launchType, $additionalContextParams);
+		$result = $this->sendAiQuery($launchType, $additionalContextParams, $deferredContextParams);
 
 		if ($result->isSuccess())
 		{
@@ -232,7 +239,16 @@ final class TranscribeManager
 		return TranscribeQueueManager::getInstance()->inQueue($this->fileId, $this->chatId);
 	}
 
-	protected function sendAiQuery(LaunchType $launchType, array $additionalContextParams): TranscribeResult
+	/**
+	 * @param \Closure|null $deferredContextParams @see self::transcribeFile(). Called here and
+	 *        nowhere earlier: this is the first point past the short circuits of transcribeFile(),
+	 *        so the work behind it happens only for a launch that really goes to the queue.
+	 */
+	protected function sendAiQuery(
+		LaunchType $launchType,
+		array $additionalContextParams,
+		?\Closure $deferredContextParams = null
+	): TranscribeResult
 	{
 		$result = new TranscribeResult($this->createErrorFileItem());
 
@@ -244,7 +260,11 @@ final class TranscribeManager
 			'launchType' => $launchType->value,
 		];
 
-		$contextParams = array_merge($contextParams, $additionalContextParams);
+		$contextParams = array_merge(
+			$contextParams,
+			$additionalContextParams,
+			$deferredContextParams === null ? [] : $deferredContextParams()
+		);
 
 		$fileId = $this->fileId;
 		$file = \CFile::GetFileArray($fileId);

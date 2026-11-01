@@ -7,6 +7,8 @@ namespace Bitrix\Crm\V2\Internal\Service\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\Embedding\EmbeddingVariant;
 use Bitrix\Crm\V2\Internal\Integration\Bitrix24\PortalRestrictionGateway;
 use Bitrix\Crm\WebForm\Internals\LandingTable;
+use Bitrix\Crm\WebForm\Telemetry\SourceContextSigner;
+use Bitrix\Crm\WebForm\Telemetry\SubmissionClassifier;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Context;
 use Bitrix\Main\Web\Uri;
@@ -55,18 +57,21 @@ final class PublicUrlBuilder
 	private readonly \Closure $portalUrlLoader;
 	private readonly \Closure $publicFormPathLoader;
 	private readonly \Closure $urlProxy;
+	private readonly \Closure $telemetrySigner;
 
 	/**
 	 * @param null|\Closure(int): ?string $landingUrlLoader public address of the form page, if the form has one
 	 * @param null|\Closure(): string $portalUrlLoader scheme and host the links of this request lead to
 	 * @param null|\Closure(): string $publicFormPathLoader path template of a public form
 	 * @param null|\Closure(string): string $urlProxy platform-specific rewrite of a public link
+	 * @param null|\Closure(int, string): string $telemetrySigner trusted telemetry context builder
 	 */
 	public function __construct(
 		?\Closure $landingUrlLoader = null,
 		?\Closure $portalUrlLoader = null,
 		?\Closure $publicFormPathLoader = null,
 		?\Closure $urlProxy = null,
+		?\Closure $telemetrySigner = null,
 	)
 	{
 		// The single-form read never touches the landing map, so no form page is generated behind it.
@@ -80,6 +85,9 @@ final class PublicUrlBuilder
 		$this->urlProxy = $urlProxy ?? static fn (string $url): string =>
 			(new PortalRestrictionGateway())->proxyPublicUrl($url)
 		;
+		$this->telemetrySigner = $telemetrySigner ?? static fn (int $formId, string $source): string =>
+			(new SourceContextSigner())->sign($formId, $source)
+		;
 	}
 
 	/**
@@ -92,10 +100,23 @@ final class PublicUrlBuilder
 		$landingUrl = ($this->landingUrlLoader)($formId);
 		if (is_string($landingUrl) && $landingUrl !== '')
 		{
-			return $landingUrl;
+			$url = $landingUrl;
+		}
+		else
+		{
+			$url = ($this->urlProxy)($this->buildFormPathUrl($formId, $formCode, $securityCode));
 		}
 
-		return ($this->urlProxy)($this->buildFormPathUrl($formId, $formCode, $securityCode));
+		$telemetrySign = ($this->telemetrySigner)($formId, SubmissionClassifier::SOURCE_DIRECT_LINK);
+		if ($telemetrySign === '')
+		{
+			return $url;
+		}
+
+		return (new Uri($url))
+			->addParams([SourceContextSigner::PARAMETER => $telemetrySign])
+			->getLocator()
+		;
 	}
 
 	/**

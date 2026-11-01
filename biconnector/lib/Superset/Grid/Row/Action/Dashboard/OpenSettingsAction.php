@@ -2,9 +2,8 @@
 
 namespace Bitrix\BIConnector\Superset\Grid\Row\Action\Dashboard;
 
-use Bitrix\BIConnector\Access\AccessController;
-use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
+use Bitrix\BIConnector\Internal\Services\DashboardSettings\DashboardSettingsModeResolver;
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\BIConnector\Superset\Grid\Row\Action\FormatMenuAction;
@@ -12,6 +11,12 @@ use Bitrix\BIConnector\Superset\Grid\Row\Action\FormatMenuAction;
 
 final class OpenSettingsAction extends FormatMenuAction
 {
+	private ?DashboardSettingsModeResolver $modeResolver;
+
+	public function __construct(?DashboardSettingsModeResolver $modeResolver = null)
+	{
+		$this->modeResolver = $modeResolver;
+	}
 
 	public static function getId(): ?string
 	{
@@ -36,7 +41,7 @@ final class OpenSettingsAction extends FormatMenuAction
 			'STATUS' => $rawFields['STATUS'],
 		]);
 
-		if (!AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_MODIFY_SETTINGS, $accessItem))
+		if (!$this->getModeResolver()->canOpen($accessItem))
 		{
 			return null;
 		}
@@ -58,5 +63,12 @@ final class OpenSettingsAction extends FormatMenuAction
 		$result['html'] = $this->getMenuItem('--o-settings');
 
 		return $result;
+	}
+
+	private function getModeResolver(): DashboardSettingsModeResolver
+	{
+		$this->modeResolver ??= new DashboardSettingsModeResolver();
+
+		return $this->modeResolver;
 	}
 }

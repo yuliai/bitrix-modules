@@ -12,6 +12,7 @@ use Bitrix\Main\Result;
 use Bitrix\Tasks\Internals\Task\Priority;
 use Bitrix\Tasks\Internals\Task\Status;
 use Bitrix\Tasks\Util\User;
+use Bitrix\Tasks\V2\Internal\Service\Template\Author\AuthorAssignmentSubject;
 
 Loc::loadMessages(__FILE__);
 
@@ -53,18 +54,31 @@ final class Tasks
 			$templateResult = \CTaskTemplates::GetList($order, $filter, $navParams, $params, $select);
 			if (!$templateResult->Fetch())
 			{
-				(new \CTaskTemplates())->Add([
-					'CREATED_BY' => $adminId,
-					'TPARAM_TYPE' => \CTaskTemplates::TYPE_FOR_NEW_USER,
-					'PRIORITY' => \CTasks::PRIORITY_AVERAGE,
-					'STATUS' => \CTasks::STATE_PENDING,
-					'TITLE' => $data['TITLE'],
-					'DESCRIPTION' => $data['DESCRIPTION'],
-					'DESCRIPTION_IN_BBCODE' => 'Y',
-					'SITE_ID' => \CTaskTemplates::CURRENT_SITE_ID,
-					'XML_ID' => $xmlId,
-					'ALLOW_CHANGE_DEADLINE' => 'Y',
-				]);
+				$addParams = [];
+				if (
+					class_exists(AuthorAssignmentSubject::class)
+					&& defined(\CTaskTemplates::class . '::AUTHOR_ASSIGNMENT_SUBJECT')
+				)
+				{
+					$addParams[\CTaskTemplates::AUTHOR_ASSIGNMENT_SUBJECT] =
+						AuthorAssignmentSubject::fromServerContext($adminId);
+				}
+
+				(new \CTaskTemplates())->Add(
+					arFields: [
+						'CREATED_BY' => $adminId,
+						'TPARAM_TYPE' => \CTaskTemplates::TYPE_FOR_NEW_USER,
+						'PRIORITY' => \CTasks::PRIORITY_AVERAGE,
+						'STATUS' => \CTasks::STATE_PENDING,
+						'TITLE' => $data['TITLE'],
+						'DESCRIPTION' => $data['DESCRIPTION'],
+						'DESCRIPTION_IN_BBCODE' => 'Y',
+						'SITE_ID' => \CTaskTemplates::CURRENT_SITE_ID,
+						'XML_ID' => $xmlId,
+						'ALLOW_CHANGE_DEADLINE' => 'Y',
+					],
+					arParams: $addParams,
+				);
 			}
 		}
 	}

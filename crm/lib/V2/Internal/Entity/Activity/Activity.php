@@ -8,6 +8,8 @@ use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\AutocompleteRule;
 use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\CompletionStatus;
 use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\DescriptionType;
 use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\Direction;
+use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\Priority;
+use Bitrix\Crm\V2\Internal\Entity\Activity\Enum\Type;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Type\DateTime;
 
@@ -16,16 +18,22 @@ use Bitrix\Main\Type\DateTime;
  * A plain data object - no ORM, no persistence, no side effects.
  *
  * WHAT IS NOT HERE. Raw serialized fields go into {@see ProviderPayload}, provider-specific
- * columns into the typed data of the provider, and the columns the storage needs but the domain
- * does not (owner, thread, notify, search content) travel through {@see StorageFieldTransit}.
- * Legacy formats - 'Y'/'N', upper-case field names, the max-date deadline sentinel - never reach
- * this model: converting them is the job of the repository and of the legacy facade.
+ * columns into the typed data of the provider, and every column a write needs in its legacy shape
+ * travels through {@see StorageFieldTransit}. Legacy formats - 'Y'/'N', upper-case field names, the
+ * max-date deadline sentinel, the zero that means "nothing" - never reach this model: converting
+ * them is the job of the repository and of the legacy facade.
  *
  * CHANGE TRACKING. Setters mark their field as changed, so a partial update writes only what the
  * caller touched; {@see self::internalSet()} hydrates without marking. Fields with no setter are
  * read-only by contract: the id and the audit stamps are assigned by the storage, the deadline is
- * derived from the start time by the provider, and the incoming-channel flag lives in a table of
- * its own.
+ * derived from the start time by the provider, the incoming-channel flag lives in a table of its
+ * own, and the read projection below holds the columns a write still addresses through the transit.
+ *
+ * THE READ PROJECTION is what a read scenario needs and a write does not: the type of the activity,
+ * the owner pair kept in step with the bindings, the origin of an imported activity and the object
+ * the provider points at. It also holds the grade of the priority, of which a write knows only the
+ * flag {@see self::isImportant()} - one field in two views, not two fields. The correspondence with
+ * the columns belongs to the field map, which projects only the written fields back onto them.
  */
 final class Activity
 {
@@ -55,6 +63,15 @@ final class Activity
 	public const isIncomingChannel = 'isIncomingChannel';
 	public const pingOffsets = 'pingOffsets';
 
+	// Read projection - what a write addresses through the transit or knows in a poorer form
+	public const type = 'type';
+	public const ownerTypeId = 'ownerTypeId';
+	public const ownerId = 'ownerId';
+	public const associatedEntityId = 'associatedEntityId';
+	public const originatorId = 'originatorId';
+	public const originId = 'originId';
+	public const priority = 'priority';
+
 	private array $changedFields = [];
 
 	// Read-only by contract - assigned by the storage or derived
@@ -63,6 +80,17 @@ final class Activity
 	private ?DateTime $updatedTime = null;
 	private ?DateTime $deadline = null;
 	private ?bool $isIncomingChannel = null;
+
+	// Read-only by contract - the read projection
+	private ?Type $type = null;
+	private ?int $ownerTypeId = null;
+	private ?int $ownerId = null;
+	private ?int $associatedEntityId = null;
+	private ?string $originatorId = null;
+	private ?string $originId = null;
+
+	// The grade a read sees and the flag a write sets are one field
+	private ?Priority $priority = null;
 
 	private ?string $providerId = null;
 	private ?string $providerTypeId = null;
@@ -74,7 +102,6 @@ final class Activity
 	private ?int $responsibleId = null;
 	private ?int $authorId = null;
 	private ?int $editorId = null;
-	private ?bool $isImportant = null;
 	private ?Direction $direction = null;
 	private ?DateTime $startTime = null;
 	private ?DateTime $endTime = null;
@@ -199,6 +226,67 @@ final class Activity
 	public function isIncomingChannel(): ?bool
 	{
 		return $this->isIncomingChannel;
+	}
+
+	// --- read projection ---
+
+	/**
+	 * Classification of the activity of its own: a meeting, a call, a task, an email or one of the
+	 * two general types. The pair of the provider and its type does not replace it.
+	 */
+	public function getType(): ?Type
+	{
+		return $this->type;
+	}
+
+	/**
+	 * Type of the one binding the storage keeps in the row, null when the activity has no owner.
+	 *
+	 * The pair is not the set of the bindings and does not replace it: the row holds one owner, an
+	 * activity may be bound to several entities, and which binding becomes the owner is decided by
+	 * the repository when it writes.
+	 */
+	public function getOwnerTypeId(): ?int
+	{
+		return $this->ownerTypeId;
+	}
+
+	public function getOwnerId(): ?int
+	{
+		return $this->ownerId;
+	}
+
+	/**
+	 * Identifier of the object of the provider this activity stands for, null when there is none.
+	 *
+	 * What the identifier addresses is said by the pair of the provider and its type; nothing here
+	 * resolves it into an object. It is read for the scenario's own needs - the body of a compressed mail
+	 * is found by it - and is not published: its meaning belongs to the provider.
+	 */
+	public function getAssociatedEntityId(): ?int
+	{
+		return $this->associatedEntityId;
+	}
+
+	/** External system an imported activity came from, null when it was not imported. */
+	public function getOriginatorId(): ?string
+	{
+		return $this->originatorId;
+	}
+
+	/** Identifier of the activity in the external system it came from. */
+	public function getOriginId(): ?string
+	{
+		return $this->originId;
+	}
+
+	/**
+	 * Grade of the priority of the activity. {@see self::isImportant()} is the same field seen as
+	 * the flag a write sets, so the two can never disagree.
+	 */
+	public function getPriority(): ?Priority
+	{
+		return $this->priority;
 	}
 
 	// --- writable fields ---
@@ -333,14 +421,22 @@ final class Activity
 		return $this;
 	}
 
+	/**
+	 * Whether the activity carries the highest grade of {@see self::getPriority()}. The flag and the
+	 * grade are one field: a write knows the flag, a read the whole scale.
+	 */
 	public function isImportant(): ?bool
 	{
-		return $this->isImportant;
+		return $this->priority === null ? null : $this->priority === Priority::High;
 	}
 
+	/**
+	 * Marks the activity as important or as not important, which is the highest grade of the priority
+	 * or the lowest one - the two grades a write has ever produced.
+	 */
 	public function setImportant(bool $isImportant): static
 	{
-		$this->isImportant = $isImportant;
+		$this->priority = self::priorityOfImportance($isImportant);
 		$this->markChanged(self::isImportant);
 
 		return $this;
@@ -513,7 +609,7 @@ final class Activity
 			self::responsibleId => $this->responsibleId = $value,
 			self::authorId => $this->authorId = $value,
 			self::editorId => $this->editorId = $value,
-			self::isImportant => $this->isImportant = $value,
+			self::isImportant => $this->priority = self::priorityOfImportance($value),
 			self::direction => $this->direction = $value,
 			self::startTime => $this->startTime = $value,
 			self::endTime => $this->endTime = $value,
@@ -523,10 +619,28 @@ final class Activity
 			self::communications => $this->communications = $value,
 			self::files => $this->files = $value,
 			self::pingOffsets => $this->pingOffsets = $value,
+			self::type => $this->type = $value,
+			self::ownerTypeId => $this->ownerTypeId = $value,
+			self::ownerId => $this->ownerId = $value,
+			self::associatedEntityId => $this->associatedEntityId = $value,
+			self::originatorId => $this->originatorId = $value,
+			self::originId => $this->originId = $value,
+			self::priority => $this->priority = $value,
 			default => throw new ArgumentException("Unknown field: {$fieldName}"),
 		};
 
 		return $this;
+	}
+
+	/** Nothing said about the importance says nothing about the grade either. */
+	private static function priorityOfImportance(?bool $isImportant): ?Priority
+	{
+		if ($isImportant === null)
+		{
+			return null;
+		}
+
+		return $isImportant ? Priority::High : Priority::Low;
 	}
 
 	/**

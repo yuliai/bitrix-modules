@@ -12,6 +12,7 @@ use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoField;
 use Bitrix\Rest\V3\Interaction\Response\ArrayResponse;
 use Bitrix\Rest\V3\CacheManager;
+use Bitrix\Rest\V3\Schema\MethodDescription;
 use Bitrix\Rest\V3\Schema\SchemaManager;
 
 final class Scope extends RestController
@@ -29,7 +30,10 @@ final class Scope extends RestController
 		{
 			/** @var SchemaManager $schemaManager */
 			$schemaManager = ServiceLocator::getInstance()->get(SchemaManager::class);
-			$methodDescriptions = $schemaManager->getMethodDescriptions();
+			$methodDescriptions = array_filter(
+				$schemaManager->getMethodDescriptions(),
+				static fn(MethodDescription $methodDescription): bool => $methodDescription->isEnabled && !$methodDescription->isHidden,
+			);
 			$schemaManager->ensureGeneratedDtoClassesLoadedFromMethodDescriptions($methodDescriptions);
 
 			$scopes = [];
@@ -41,10 +45,6 @@ final class Scope extends RestController
 
 			foreach ($methodDescriptions as $methodDescription)
 			{
-				if ($methodDescription->isHidden)
-				{
-					continue;
-				}
 				if (!Loader::includeModule($methodDescription->module))
 				{
 					continue;

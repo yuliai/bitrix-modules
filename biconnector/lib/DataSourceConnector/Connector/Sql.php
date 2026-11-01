@@ -52,6 +52,39 @@ class Sql extends Base
 	}
 
 	/**
+	 * A statement can be generated as soon as the connection helper implements the aggregation contract.
+	 */
+	protected function canDelegateAggregation(): bool
+	{
+		return $this->getAggregationDialect() !== null;
+	}
+
+	/**
+	 * The aggregated statement of the dialect of this connection.
+	 *
+	 * @throws Aggregation\AggregationException
+	 */
+	protected function buildAggregatedQuery(
+		Aggregation\Request $request,
+		Aggregation\DatasetSchema $schema,
+		string $whereClause,
+		string $joins,
+	): string
+	{
+		$dialect = $this->getAggregationDialect();
+		if ($dialect === null)
+		{
+			// The condition is answered before the block is read, so a connection that goes away in
+			// between arrives here: refused with the very code that condition would have produced.
+			throw Aggregation\AggregationException::unsupported('dialect does not support aggregation');
+		}
+
+		$builder = new Aggregation\SqlBuilder($dialect, $schema, $this->getDateFormats());
+
+		return $builder->build($request, $whereClause, $joins);
+	}
+
+	/**
 	 * @return array{readRows: int, readBytes: int}|null
 	 */
 	public function getLastScanStatistics(): ?array
@@ -186,7 +219,7 @@ class Sql extends Base
 				{
 					if ($keyInfo['ID'] === $fieldInfo['GROUP_KEY'])
 					{
-						if ($fieldInfo['TYPE'] === 'ARRAY_STRING')
+						if (($fieldInfo['TYPE'] ?? null) === 'ARRAY_STRING')
 						{
 							$delimiter = null;
 							if ($fieldInfo['IS_VALUE_SPLITABLE'] ?? false)
@@ -429,7 +462,9 @@ class Sql extends Base
 				$limit = " order by {$primaryKey} asc \n {$limit}";
 			}
 
-			if (!empty($additionalJoins))
+			// A sort key with a table alias is invalid after UNION branches, so the limit of a dataset
+			// with branches always goes into the subquery, whether the main branch has joins or not.
+			if (!empty($additionalJoins) || !empty($tableInfo['UNIONS']))
 			{
 				if (!empty($primaryKey) && !empty($fieldInfo['FIELD_NAME']))
 				{
@@ -478,13 +513,9 @@ class Sql extends Base
 				if (in_array($unionFieldKey, $selectFieldNames, true))
 				{
 					$formattedFields[] = $unionField['FIELD_NAME'] . ' AS ' . $unionFieldKey;
-					if (!empty($unionField['LEFT_JOIN']))
+					foreach (self::getUnionFieldJoins($unionField) as $fieldJoin)
 					{
-						$join[] = $unionField['LEFT_JOIN'];
-					}
-					elseif (!empty($unionField['JOIN']))
-					{
-						$join[] = $unionField['JOIN'];
+						$join[$fieldJoin] = $fieldJoin;
 					}
 				}
 			}
@@ -497,6 +528,43 @@ class Sql extends Base
 		}
 
 		return $unionQuery;
+	}
+
+	/**
+	 * Joins a field of a UNION branch needs, in declaration order.
+	 *
+	 * A field declares them either as a single statement or as a list, the same two shapes
+	 * CBIConnectorSqlBuilder::GetJoins() accepts on the main branch, and LEFT_JOIN wins over JOIN
+	 * exactly as it does there. The caller keys the result by the statement itself, so a join shared
+	 * by several selected fields is printed once.
+	 *
+	 * @param array $unionField Description of a field of a UNION branch.
+	 *
+	 * @return string[]
+	 */
+	private static function getUnionFieldJoins(array $unionField): array
+	{
+		$declaredJoins = $unionField['LEFT_JOIN'] ?? null;
+		if (empty($declaredJoins))
+		{
+			$declaredJoins = $unionField['JOIN'] ?? null;
+		}
+
+		if (empty($declaredJoins))
+		{
+			return [];
+		}
+
+		$result = [];
+		foreach ((array)$declaredJoins as $declaredJoin)
+		{
+			if (is_string($declaredJoin) && $declaredJoin !== '')
+			{
+				$result[] = $declaredJoin;
+			}
+		}
+
+		return $result;
 	}
 
 	private function buildGroupByClause(?array $groupBy): string

@@ -48,17 +48,11 @@ class ProfileProvider
 			$selectedTabId = $availableTabs[0]['id'];
 		}
 
-		$themeProvider = new ThemeProvider($this->ownerId);
-		$currentTheme = $themeProvider->getCurrentTheme();
-		$currentTheme = $themeProvider->isSvgTheme($currentTheme)
-			? $themeProvider->getFallbackTheme()
-			: $currentTheme;
-
 		return [
 			'tabs' => $availableTabs,
 			'selectedTabId' => $selectedTabId,
 			'canView' => true,
-			'currentTheme' => $currentTheme,
+			'currentTheme' => (new ThemeProvider($this->ownerId))->getCurrentTheme(),
 		];
 	}
 

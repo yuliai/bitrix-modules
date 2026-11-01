@@ -2,6 +2,7 @@
 
 namespace Bitrix\Rest\V3\Mcp\Schema;
 
+use Bitrix\Main\Localization\LocalizableMessage;
 use Bitrix\Rest\V3\Documentation\Attributes\Hidden;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
@@ -268,6 +269,7 @@ final class ToolSchemaBuilder
 	{
 		return match ($typeName)
 		{
+			'mixed' => [],
 			'int' => ['type' => 'integer'],
 			'float' => ['type' => 'number'],
 			'bool' => ['type' => 'boolean'],
@@ -278,19 +280,31 @@ final class ToolSchemaBuilder
 
 	private function getFieldSchema(DtoField $field): array
 	{
-		if ($this->isDtoCollectionField($field))
+		$isDtoCollectionField = $this->isDtoCollectionField($field);
+		if ($isDtoCollectionField)
 		{
-			return [
+			$schema = [
 				'type' => 'array',
 				'items' => ['type' => 'object'],
 			];
 		}
+		elseif ($field->getPropertyType() === 'array')
+		{
+			$schema = ['type' => 'array'];
+			$items = $this->getArrayItemsSchema($field->getElementType());
+			if ($items !== null)
+			{
+				$schema['items'] = $items;
+			}
+		}
+		else
+		{
+			$schema = $this->isDtoType($field->getPropertyType())
+				? ['type' => 'object']
+				: $this->getPrimitiveSchema($field->getPropertyType());
+		}
 
-		$schema = $this->isDtoType($field->getPropertyType())
-			? ['type' => 'object']
-			: $this->getPrimitiveSchema($field->getPropertyType());
-
-		if ($field->isMultiple())
+		if ($field->isMultiple() && !$isDtoCollectionField)
 		{
 			$schema = [
 				'type' => 'array',
@@ -298,7 +312,52 @@ final class ToolSchemaBuilder
 			];
 		}
 
+		$description = $this->getFieldDescription($field);
+		if ($description !== null)
+		{
+			$schema['description'] = $description;
+		}
+
 		return $schema;
+	}
+
+	private function getArrayItemsSchema(?string $elementType): ?array
+	{
+		return match ($elementType)
+		{
+			'int' => ['type' => 'integer'],
+			'string' => ['type' => 'string'],
+			'bool' => ['type' => 'boolean'],
+			'float' => ['type' => 'number'],
+			default => null,
+		};
+	}
+
+	private function getFieldDescription(DtoField $field): ?string
+	{
+		$description = $this->localizeFieldText($field->getDescription());
+		if ($description !== '')
+		{
+			return $description;
+		}
+
+		$title = $this->localizeFieldText($field->getTitle());
+		if ($title !== '' && $title !== $field->getPropertyName())
+		{
+			return $title;
+		}
+
+		return null;
+	}
+
+	private function localizeFieldText(LocalizableMessage|string|null $text): string
+	{
+		if ($text instanceof LocalizableMessage)
+		{
+			$text = $text->localize('en');
+		}
+
+		return trim((string)$text);
 	}
 
 	private function isDtoCollectionField(DtoField $field): bool
@@ -311,8 +370,7 @@ final class ToolSchemaBuilder
 		$propertyType = $field->getPropertyType();
 
 		return $propertyType === DtoCollection::class
-			|| TypeHelper::isSubclassOf($propertyType, DtoCollection::class)
-		;
+			|| TypeHelper::isSubclassOf($propertyType, DtoCollection::class);
 	}
 
 	/**

@@ -8,6 +8,7 @@ use Bitrix\Main\Engine\ActionFilter\Base;
 use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventResult;
+use Bitrix\Main\Web\Uri;
 
 /**
  * Rejects a state-changing call that a browser made from another site.
@@ -25,6 +26,8 @@ use Bitrix\Main\EventResult;
 class SameOrigin extends Base
 {
 	public const ERROR_FOREIGN_ORIGIN = 'foreign_origin';
+
+	private const DEFAULT_PORTS = ['http' => 80, 'https' => 443];
 
 	public function onBeforeAction(Event $event): ?EventResult
 	{
@@ -49,15 +52,20 @@ class SameOrigin extends Base
 	/**
 	 * Is this Origin our own host.
 	 *
-	 * The comparison is against the raw Host header rather than against HttpRequest::getHttpHost(), which
-	 * drops the port: a browser writes the port the same way into both Host and Origin - present when it is
-	 * not the default one, absent when it is - so a portal answering on a port would otherwise never match
-	 * its own pages. Host is no less trustworthy here than the check itself: a cross-site page chooses the
-	 * Origin it is given, never the Host.
+	 * The raw Host header is taken rather than HttpRequest::getHttpHost(), which drops the port, so that a
+	 * portal answering on a port of its own still matches its own pages. Both sides are compared as host and
+	 * port with the default port dropped: behind a TLS-terminating proxy Host carries an explicit :443 that a
+	 * browser never writes into Origin. Host is no less trustworthy here than the check itself: a cross-site
+	 * page chooses the Origin it is given, never the Host.
 	 *
-	 * Both schemes of our host are accepted because the scheme is not what the check is about - a foreign
-	 * site differs by host - while a portal behind a TLS-terminating proxy cannot always tell which of the
-	 * two the browser used.
+	 * Which port counts as default differs between the two sides, and the asymmetry is the point. An Origin
+	 * names its own scheme, so only that scheme's default is dropped from it. Host names no scheme, and both
+	 * of ours are accepted - the scheme is not what the check is about, a foreign site differs by host, and a
+	 * portal behind a TLS-terminating proxy cannot always tell which of the two the browser used - so a port
+	 * that is the default of either is dropped from it.
+	 *
+	 * An Origin that is not a bare http(s) authority matches nothing: the header comes from the outside and
+	 * is no promise of a well-formed URL.
 	 */
 	private function isOwnOrigin(string $origin, string $httpHost): bool
 	{
@@ -66,7 +74,68 @@ class SameOrigin extends Base
 			return false;
 		}
 
-		return strcasecmp($origin, 'https://' . $httpHost) === 0
-			|| strcasecmp($origin, 'http://' . $httpHost) === 0;
+		$originAuthority = $this->originAuthority($origin);
+		$ownAuthority = $this->ownAuthority($httpHost);
+
+		return $originAuthority !== '' && $originAuthority === $ownAuthority;
+	}
+
+	/**
+	 * `https://portal:80` keeps its port: to a browser that is a different origin than the portal on 443, so
+	 * dropping :80 there would let a page served beside the portal, on the same name but its own listener,
+	 * pass the filter as the portal itself.
+	 */
+	private function originAuthority(string $origin): string
+	{
+		$parts = $this->bareAuthority($origin);
+		if ($parts === null)
+		{
+			return '';
+		}
+
+		[$scheme, $host, $port] = $parts;
+
+		return $port === self::DEFAULT_PORTS[$scheme] ? $host : $host . ':' . $port;
+	}
+
+	private function ownAuthority(string $httpHost): string
+	{
+		$parts = $this->bareAuthority('https://' . $httpHost);
+		if ($parts === null)
+		{
+			return '';
+		}
+
+		[, $host, $port] = $parts;
+
+		return in_array($port, self::DEFAULT_PORTS, true) ? $host : $host . ':' . $port;
+	}
+
+	/**
+	 * @return array{0: string, 1: string, 2: int}|null scheme, host and port, or null when the url is not a
+	 *                                                  bare http(s) authority
+	 */
+	private function bareAuthority(string $url): ?array
+	{
+		$uri = new Uri($url);
+
+		$scheme = $uri->getScheme();
+		$host = $uri->getHost();
+		if ($host === '' || !isset(self::DEFAULT_PORTS[$scheme]))
+		{
+			return null;
+		}
+
+		$isBareAuthority = $uri->getUserInfo() === ''
+			&& $uri->getPath() === ''
+			&& $uri->getQuery() === ''
+			&& $uri->getFragment() === ''
+		;
+		if (!$isBareAuthority)
+		{
+			return null;
+		}
+
+		return [$scheme, $host, $uri->getPort()];
 	}
 }

@@ -244,6 +244,7 @@ abstract class AbstractRelationTaskProvider
 			'id',
 			'title',
 			'responsible',
+			'creator',
 			'deadline',
 			'status',
 			'group',
@@ -259,6 +260,7 @@ abstract class AbstractRelationTaskProvider
 			'id' => 'ID',
 			'title' => 'TITLE',
 			'responsible' => 'RESPONSIBLE_ID',
+			'creator' => 'CREATED_BY',
 			'deadline' => 'DEADLINE',
 			'status' => 'STATUS',
 			'group' => 'GROUP_ID',
@@ -321,6 +323,9 @@ abstract class AbstractRelationTaskProvider
 
 	protected function getUsers(array $tasks): UserCollection
 	{
+		// Only responsible users are hydrated in bulk. RelationTaskMapper exposes the
+		// creator as an id-only user (SC-005) and never reads it from this collection,
+		// so bulk-loading CREATED_BY would be dead weight.
 		$userIds = array_column($tasks, 'RESPONSIBLE_ID');
 
 		Collection::normalizeArrayValuesByInt($userIds, false);

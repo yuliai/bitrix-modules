@@ -86,29 +86,96 @@ final class ActivityCommunicationRepository
 
 		foreach ($rows as $row)
 		{
-			$type = (string)($row['TYPE'] ?? '');
-			if ($type === '')
+			$communication = $this->communicationFromRow($row);
+			if ($communication !== null)
 			{
-				continue;
+				$communications[] = $communication;
 			}
-
-			$entityId = (int)$row['ENTITY_ID'];
-			$entityTypeId = (int)$row['ENTITY_TYPE_ID'];
-			if ($entityId <= 0 || $entityTypeId <= 0)
-			{
-				$entityId = 0;
-				$entityTypeId = OwnerType::UNDEFINED;
-			}
-
-			$communications[] = new ActivityCommunication(
-				$type,
-				(string)($row['VALUE'] ?? ''),
-				OwnerType::fromId($entityTypeId),
-				$entityId,
-			);
 		}
 
 		return $communications;
+	}
+
+	/**
+	 * Communications of the given activities in one query. Every set keeps the order of its rows and the
+	 * repetitions among them, because the write stores the given set element for element and a single read
+	 * hands it back the same way.
+	 *
+	 * NOTHING IS MASKED HERE. An activity can be readable while the client one of its communications names is
+	 * not, but the decision depends on who is asking, which the storage neither knows nor may guess, and a
+	 * repository narrowing the set would narrow it for the write paths reading the same rows back.
+	 *
+	 * An activity with no row is absent from the result.
+	 *
+	 * @param int[] $activityIds
+	 * @return array<int, ActivityCommunication[]> by activity id, each set in the order of its rows
+	 */
+	public function getByActivityIds(array $activityIds): array
+	{
+		$ids = [];
+		foreach ($activityIds as $activityId)
+		{
+			$activityId = (int)$activityId;
+			if ($activityId > 0)
+			{
+				$ids[$activityId] = $activityId;
+			}
+		}
+
+		if ($ids === [])
+		{
+			return [];
+		}
+
+		$rows =
+			ActivityCommunicationTable::query()
+				->setSelect(['ACTIVITY_ID', 'TYPE', 'VALUE', 'ENTITY_ID', 'ENTITY_TYPE_ID'])
+				->whereIn('ACTIVITY_ID', array_values($ids))
+				->setOrder(['ID' => 'ASC'])
+				->fetchAll()
+		;
+
+		$communications = [];
+		foreach ($rows as $row)
+		{
+			$communication = $this->communicationFromRow($row);
+			if ($communication !== null)
+			{
+				$communications[(int)$row['ACTIVITY_ID']][] = $communication;
+			}
+		}
+
+		return $communications;
+	}
+
+	/**
+	 * The communication a row describes, or null for the one row the model cannot - one without a channel,
+	 * which names nothing at all. The rules both reads judge a row by are stated at {@see self::getByActivityId()}.
+	 *
+	 * @param array<string, mixed> $row
+	 */
+	private function communicationFromRow(array $row): ?ActivityCommunication
+	{
+		$type = (string)($row['TYPE'] ?? '');
+		if ($type === '')
+		{
+			return null;
+		}
+
+		$entityId = (int)($row['ENTITY_ID'] ?? 0);
+		$entityTypeId = (int)($row['ENTITY_TYPE_ID'] ?? 0);
+		if ($entityId <= 0 || $entityTypeId <= 0)
+		{
+			$entityId = 0;
+			$entityTypeId = OwnerType::UNDEFINED;
+		}
+
+		return new ActivityCommunication(
+			$type,
+			(string)($row['VALUE'] ?? ''),
+			OwnerType::fromId($entityTypeId),
+			$entityId,
+		);
 	}
 
 	/**

@@ -42,7 +42,6 @@ class TranscriptionJob extends QueueJob
 				? $parameters['launchType']
 				: null
 		);
-		$isAutoTask = (bool)($parameters['isAutoTask'] ?? false);
 		$userId = isset($parameters['userId']) ? (int)$parameters['userId'] : null;
 
 		$transcribeManager = new TranscribeManager($fileId, $diskFileId, $chatId, $messageId);
@@ -62,7 +61,9 @@ class TranscriptionJob extends QueueJob
 			return;
 		}
 
-		if (!(new Restriction())->isAutoTaskActive())
+		// Only an explicit task request carries an initiator in the transcription context.
+		$taskLaunchType = $userId > 0 ? $launchType : LaunchType::Auto;
+		if (!$this->isTaskCreationAllowed($taskLaunchType))
 		{
 			return;
 		}
@@ -82,11 +83,24 @@ class TranscriptionJob extends QueueJob
 		}
 
 		$transcriptionCreator = new TranscriptionCreator($message, $fileId, $diskFileId);
-		$transcriptionCreator->sendAiQueryInternal(
-			$transcribeResult->getFileItem()->getPlainText(),
-			$recipientId,
-			$isAutoTask
-		);
+		$transcriptionCreator
+			->setContextBounds(TranscriptionCreator::extractContextBounds($parameters))
+			->sendAiQueryInternal(
+				$transcribeResult->getFileItem()->getPlainText(),
+				$recipientId,
+				$taskLaunchType
+			)
+		;
+	}
+
+	private function isTaskCreationAllowed(LaunchType $launchType): bool
+	{
+		$restriction = new Restriction();
+
+		return $launchType === LaunchType::Auto
+			? $restriction->isAutoTaskActive()
+			: $restriction->isAiTaskCreationActive()
+		;
 	}
 
 	protected function getTranscribeResult(string $text, TranscribeManager $transcribeManager): TranscribeResult
@@ -151,7 +165,8 @@ class TranscriptionJob extends QueueJob
 			return;
 		}
 
-		if (!(new Restriction())->isAutoTaskActive())
+		$taskLaunchType = $userId > 0 ? $launchType : LaunchType::Auto;
+		if (!$this->isTaskCreationAllowed($taskLaunchType))
 		{
 			return;
 		}

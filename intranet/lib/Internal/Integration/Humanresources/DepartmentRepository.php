@@ -26,6 +26,7 @@ use Bitrix\HumanResources\Builder\Structure\Sort\NodeSort;
 use Bitrix\HumanResources\Builder\Structure\NodeDataBuilder;
 use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\HumanResources\Type\StructureAction;
+use Bitrix\HumanResources\Util\StructureHelper;
 use Bitrix\HumanResources\Enum\SortDirection;
 
 class DepartmentRepository
@@ -144,6 +145,31 @@ class DepartmentRepository
 		);
 
 		return $allowedDepartments->getIds();
+	}
+
+	public function areValidDepartmentIds(array $departmentIds): bool
+	{
+		if (!$this->isAvailable)
+		{
+			return false;
+		}
+
+		$structureId = StructureHelper::getDefaultStructure()?->id;
+		if (!$structureId)
+		{
+			return false;
+		}
+
+		$nodes = PublicContainer::getNodeService()->findAllByIds(
+			nodeIds: $departmentIds,
+			structureId: $structureId,
+			nodeTypes: [NodeEntityType::DEPARTMENT],
+		);
+		$foundIds = array_map('intval', $nodes->getIds());
+		sort($foundIds);
+		sort($departmentIds);
+
+		return $foundIds === $departmentIds;
 	}
 
 	/**

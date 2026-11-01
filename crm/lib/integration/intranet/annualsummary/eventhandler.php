@@ -10,11 +10,19 @@ final class EventHandler
 {
 	public static function onInitSummaryProviders(OnInitSummaryProvidersEvent $event): void
 	{
-		if (!class_exists(WebFormSummaryProvider::class))
+		if (class_exists(WebFormSummaryProvider::class))
 		{
-			return;
+			$event->addProvider(new WebFormSummaryProvider($event->getFrom(), $event->getTo()));
 		}
 
-		$event->addProvider(new WebFormSummaryProvider($event->getFrom(), $event->getTo()));
+		self::onInitClosedDealsSummaryProvider($event);
+	}
+
+	public static function onInitClosedDealsSummaryProvider(OnInitSummaryProvidersEvent $event): void
+	{
+		if (class_exists(ClosedDealsSummaryProvider::class))
+		{
+			$event->addProvider(new ClosedDealsSummaryProvider($event->getFrom(), $event->getTo()));
+		}
 	}
 }

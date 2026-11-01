@@ -16,6 +16,8 @@ use Bitrix\Crm\V2\Public\Command\Address\DeleteOwnerAddressCommand;
 use Bitrix\Crm\V2\Public\Command\Address\OwnerAddressError;
 use Bitrix\Crm\V2\Public\Command\Address\UpdateOwnerAddressCommand;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\ItemId;
+use Bitrix\Crm\V2\Public\Entity\Address\OwnerAddress;
 use Bitrix\Crm\V2\Public\OwnerType;
 use Bitrix\Crm\V2\Public\Provider\Address\OwnerAddressProvider;
 use Bitrix\Main\Error;
@@ -98,6 +100,7 @@ final class Address extends AbstractController
 		$mapper = $this->getMapper($entityType, $request);
 		$dto = $request->fields->convertToDto(RequiredGroup::Add->value);
 		$ownerId = $mapper->getOwnerIdByDto($dto);
+		$this->assertCategoryOwnerAllowed(new ItemId($entityType, $ownerId));
 
 		$command = new AddOwnerAddressCommand(
 			$entityType->getId(),
@@ -136,6 +139,7 @@ final class Address extends AbstractController
 	 */
 	public function updateAction(UpdateRequest $request, EntityType $entityType): UpdateResponse
 	{
+		$this->assertAddressCategoryAllowed($request->id, $entityType);
 		$mapper = $this->getMapper($entityType, $request);
 		$dto = $request->fields->convertToDto(RequiredGroup::Update->value);
 
@@ -173,6 +177,7 @@ final class Address extends AbstractController
 	 */
 	public function getAction(GetRequest $request, EntityType $entityType): GetResponse
 	{
+		$this->assertAddressCategoryAllowed($request->id, $entityType);
 		try
 		{
 			$address = (new OwnerAddressProvider())->get(
@@ -197,6 +202,7 @@ final class Address extends AbstractController
 	 */
 	public function deleteAction(DeleteRequest $request, EntityType $entityType): DeleteResponse
 	{
+		$this->assertAddressCategoryAllowed($request->id, $entityType);
 		$command = new DeleteOwnerAddressCommand(
 			$request->id,
 			$entityType->getId(),
@@ -229,6 +235,7 @@ final class Address extends AbstractController
 	public function listAction(ListRequest $request, EntityType $entityType): ListResponse
 	{
 		$ownerId = $request->filter->getOwnerId();
+		$this->assertCategoryOwnerAllowed(new ItemId($entityType, $ownerId));
 
 		try
 		{
@@ -254,6 +261,33 @@ final class Address extends AbstractController
 		}
 
 		return new ListResponse($items);
+	}
+
+	private function assertAddressCategoryAllowed(int $addressId, EntityType $entityType): void
+	{
+		try
+		{
+			$address = (new OwnerAddressProvider())->get(
+				$addressId,
+				$entityType->getId(),
+				self::ANY_OWNER,
+				$this->userId,
+			);
+		}
+		catch (ObjectNotFoundException)
+		{
+			throw new EntityNotFoundException($addressId);
+		}
+
+		$this->assertOwnerAddressCategoryAllowed($address);
+	}
+
+	private function assertOwnerAddressCategoryAllowed(OwnerAddress $address): void
+	{
+		$this->assertCategoryOwnerAllowed(new ItemId(
+			EntityType::fromId($address->getOwnerTypeId()),
+			$address->getOwnerId(),
+		));
 	}
 
 	/**

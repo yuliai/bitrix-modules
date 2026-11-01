@@ -18,6 +18,8 @@ use Bitrix\Sign\Document;
 use Bitrix\Sign\Internal;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Model\ItemBinder\DocumentBinder;
+use Bitrix\Sign\Type\Document\CreationSourceMetaKey;
+use Bitrix\Sign\Type\Document\CreationSourceType;
 use Bitrix\Sign\Type\Document\ExternalDateCreateSourceType;
 use Bitrix\Sign\Type\Document\EntityType;
 use Bitrix\Sign\Type\Document\ExternalIdSourceType;
@@ -93,6 +95,10 @@ class DocumentRepository
 			->setHcmlinkDateSettingId($item->hcmLinkDateSettingId)
 			->setHcmlinkExternalIdSettingId($item->hcmLinkExternalIdSettingId)
 			->setHcmlinkDocumentTypeSettingId($item->hcmLinkDocumentTypeSettingId)
+			->setCreationSourceType(($item->creationSourceType ?? CreationSourceType::UNKNOWN)->toInt())
+			->setCreationSourceId($item->creationSourceId)
+			->setCreationSourceEntityTypeId($item->creationSourceEntityTypeId)
+			->setCreationSourceEntityId($item->creationSourceEntityId)
 			->setInviteMessage($item->inviteMessage)
 			->save()
 		;
@@ -114,6 +120,20 @@ class DocumentRepository
 	 */
 	public function update(Item\Document $item): Result
 	{
+		return $this->updateAllowingNull($item);
+	}
+
+	/**
+	 * Updates the document and writes null for the listed item properties.
+	 * DocumentBinder skips null values for the most of the properties,
+	 * so they can not be emptied through a plain update.
+	 *
+	 * @param string ...$nullableProperties item property names allowed to be written as null
+	 *
+	 * @return UpdateResult
+	 */
+	public function updateAllowingNull(Item\Document $item, string ...$nullableProperties): Result
+	{
 		if (!$item->id)
 		{
 			return (new UpdateResult())->addError(new Error('Document not found'));
@@ -126,7 +146,7 @@ class DocumentRepository
 			return (new UpdateResult())->addError(new Error('Document not found'));
 		}
 
-		$binder = new DocumentBinder($item, $document, $this);
+		$binder = new DocumentBinder($item, $document, $this, $nullableProperties);
 		$binder->setChangedItemPropertiesToModel();
 
 		if ($document->isUidChanged())
@@ -402,6 +422,46 @@ class DocumentRepository
 		return $this->extractItemCollectionByModelCollection($models);
 	}
 
+	/**
+	 * Documents created from one source entity, narrowed by status. The pair of source columns is
+	 * the whole index IX_B_SIGN_DOCUMENT_CREATION_SRC, the status stays a plain condition of the query;
+	 * the specifics of the source live in the serialized META, so a caller that needs them compares
+	 * them itself.
+	 *
+	 * Returns the newest $limit documents of the entity, never its whole history: an entity holds a
+	 * handful of them, and the cap only guards against degenerate data. An older document beyond the
+	 * limit is not returned even when it matches the filter.
+	 *
+	 * @param array<string> $statuses
+	 * @see DocumentStatus
+	 */
+	public function listByCreationSourceEntity(
+		int $entityTypeId,
+		int $entityId,
+		array $statuses,
+		int $limit = 50,
+	): Item\DocumentCollection
+	{
+		// an empty list of statuses matches nothing: read as "no filter" it would return the whole
+		// history of the entity instead
+		if ($entityTypeId < 1 || $entityId < 1 || $statuses === [] || $limit < 1)
+		{
+			return new Item\DocumentCollection();
+		}
+
+		$models = Internal\DocumentTable::query()
+			->addSelect('*')
+			->where('CREATION_SOURCE_ENTITY_TYPE_ID', $entityTypeId)
+			->where('CREATION_SOURCE_ENTITY_ID', $entityId)
+			->whereIn('STATUS', $statuses)
+			->setLimit($limit)
+			->addOrder('ID', 'DESC')
+			->fetchCollection()
+		;
+
+		return $this->extractItemCollectionByModelCollection($models);
+	}
+
 	public function getCountByGroupId(int $groupId): int
 	{
 		if ($groupId < 1)
@@ -470,8 +530,31 @@ class DocumentRepository
 			externalIdSourceType:       ExternalIdSourceType::tryFromInt($model->getExternalIdSourceType()) ?? ExternalIdSourceType::MANUAL,
 			hcmLinkExternalIdSettingId: $model->getHcmlinkExternalIdSettingId(),
 			hcmLinkDocumentTypeSettingId: $model->getHcmlinkDocumentTypeSettingId(),
+			creationSourceType: CreationSourceType::tryFromInt($model->getCreationSourceType()) ?? CreationSourceType::UNKNOWN,
+			creationSourceId: $model->getCreationSourceId(),
+			creationSourceEntityTypeId: $model->getCreationSourceEntityTypeId(),
+			creationSourceEntityId: $model->getCreationSourceEntityId(),
+			creationSourceSpecifics: $this->extractCreationSourceSpecificsFromMeta($meta),
 			inviteMessage:         $model->getInviteMessage(),
 		);
+	}
+
+	/**
+	 * @return array<string, int|string>
+	 */
+	private function extractCreationSourceSpecificsFromMeta(?array $meta): array
+	{
+		$specifics = [];
+		foreach (CreationSourceMetaKey::cases() as $metaKey)
+		{
+			$value = $meta[$metaKey->value] ?? null;
+			if ($value !== null)
+			{
+				$specifics[$metaKey->value] = $value;
+			}
+		}
+
+		return $specifics;
 	}
 
 	public function getScenarioIdByName(string $scenarioName): ?int
@@ -566,6 +649,15 @@ class DocumentRepository
 		if ($item->initiator !== null)
 		{
 			$documentModelMeta[self::INITIATOR_NAME_META_KEY] = $item->initiator;
+		}
+
+		foreach (CreationSourceMetaKey::cases() as $metaKey)
+		{
+			$value = $item->creationSourceSpecifics[$metaKey->value] ?? null;
+			if ($value !== null)
+			{
+				$documentModelMeta[$metaKey->value] = $value;
+			}
 		}
 
 		return $documentModelMeta;

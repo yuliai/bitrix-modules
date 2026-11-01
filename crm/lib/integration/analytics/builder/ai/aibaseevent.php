@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Integration\Analytics\Builder\AI;
 
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\Integration\Analytics\Builder\AbstractBuilder;
@@ -151,6 +152,7 @@ abstract class AIBaseEvent extends AbstractBuilder implements JobFinishEventCont
 		$map = [
 			Call::getId() => 'call',
 			OpenLine::getId() => 'chat',
+			Email::getId() => 'email',
 		];
 
 		$this->activityProvider = $map[$activityProvider] ?? null;

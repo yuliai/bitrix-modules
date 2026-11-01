@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Internal\Service\Settings\Presentation;
 
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingOption;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\BooleanSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\IntegerSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\MultiSelectSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\ObjectSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\SelectSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\SettingSchemaInterface;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\StringSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\BooleanSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\IntegerSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\MultiSelectSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\ObjectSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\SelectSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\SettingSchemaInterface;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\StringSchema;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 

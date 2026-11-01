@@ -39,10 +39,6 @@ class DateTimeField extends DateField
 
 	private function getKanbanDateTimeFormat(): string
 	{
-		return (string)preg_replace(
-			'/:s$/',
-			'',
-			DateTime::convertFormatToPhp(FORMAT_DATETIME),
-		);
+		return DateTime::convertFormatToPhp(FORMAT_DATETIME);
 	}
 }

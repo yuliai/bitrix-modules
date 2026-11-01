@@ -5,6 +5,8 @@ namespace Bitrix\Im\V2\Folder\System;
 
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Folder\BaseFolder;
+use Bitrix\Im\V2\Folder\Definition\FolderDefinition;
+use Bitrix\Im\V2\Folder\Definition\SectionDefinition;
 use Bitrix\Im\V2\Folder\FolderType;
 use Bitrix\Main\Localization\Loc;
 
@@ -51,6 +53,15 @@ abstract class SystemFolder extends BaseFolder
 	abstract public function getTitleLangKey(): string;
 
 	/**
+	 * Lang key used by {@see SystemFolder::getDescription}. Unlike the title, a subtitle
+	 * is optional: folders without one keep the default.
+	 */
+	public function getDescriptionLangKey(): ?string
+	{
+		return null;
+	}
+
+	/**
 	 * Per-user availability check — moved here from immobile/NavigationTab/Tab/*.
 	 *
 	 * Domain-rule (NOT a security check): availability can change between read
@@ -71,15 +82,16 @@ abstract class SystemFolder extends BaseFolder
 
 	public function containsChat(Chat $chat): bool
 	{
-		if (!in_array($this->getRecentSection(), $chat->getRecentSections(), true))
-		{
-			return false;
-		}
+		return $this->getDefinition()->containsChat((int)$chat->getChatId());
+	}
 
-		$scope = $this->getRecentParentScope();
-		$chatParent = (int)($chat->getParentChatId() ?? 0);
-
-		return $scope === null || $scope === $chatParent;
+	/**
+	 * Recent section constrained to this folder's nesting frame. Subclasses that
+	 * have no standard list (showcase/unsupported) override it.
+	 */
+	public function getDefinition(): FolderDefinition
+	{
+		return new SectionDefinition($this->getRecentSection(), $this->getRecentParentScope());
 	}
 
 	/**
@@ -100,6 +112,23 @@ abstract class SystemFolder extends BaseFolder
 		return is_string($message) && $message !== '' ? $message : '';
 	}
 
+	/**
+	 * Same as the title: resolved via Loc, no DB column behind it. A missing key and a missing
+	 * or empty phrase collapse to null - clients tell "no subtitle" from "empty subtitle" by it.
+	 */
+	public function getDescription(): ?string
+	{
+		$langKey = $this->getDescriptionLangKey();
+		if ($langKey === null)
+		{
+			return null;
+		}
+
+		$message = Loc::getMessage($langKey);
+
+		return is_string($message) && $message !== '' ? $message : null;
+	}
+
 	public function toRestFormat(array $option = []): array
 	{
 		return [
@@ -108,10 +137,10 @@ abstract class SystemFolder extends BaseFolder
 			'code' => $this->getRestCode(),
 			'title' => $this->getTitle(),
 			'sort' => $this->getSort(),
+			'visible' => $this->isVisible(),
+			'description' => $this->getDescription(),
 			'displaysNestedInRoot' => $this->displaysNestedInRoot(),
-			'definition' => [
-				'recentSection' => $this->getRecentSection(),
-			],
+			'definition' => $this->getDefinition()->toRestFormat(),
 		];
 	}
 }

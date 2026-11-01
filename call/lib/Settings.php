@@ -16,6 +16,8 @@ class Settings
 {
 	public const CALL_CLOUD_RECORDING_ENABLE = 'call_cloud_recording';
 
+	private static ?bool $cisRegion = null;
+
 	/**
 	 * Aggregates the full set of call settings exposed to the mobile client.
 	 *
@@ -81,6 +83,8 @@ class Settings
 			'isCloudRecordTariffEnabled' => static::isCloudRecordingAvailable(),
 			'isCloudRecordCisRegion' => static::isCisRegion(),
 			'isCloudRecordLogEnabled' => static::isCloudRecordLogEnabled(),
+			'isMetricsEnabled' => static::isMetricsEnabled(),
+			'isMetricsLogsEnabled' => static::isMetricsLogsEnabled(),
 			'syncCallInvitePeriod' => static::getSyncCallInvitePeriod(),
 		], self::getAdditionalMobileOptions());
 	}
@@ -121,13 +125,14 @@ class Settings
 	 */
 	public static function isCisRegion(): bool
 	{
-		static $cached = null;
-		if ($cached === null)
+		// A class property rather than a method static: the license region never changes within a
+		// process, but tests substitute it, and only a class property can be reset for that.
+		if (self::$cisRegion === null)
 		{
-			$cached = \Bitrix\Main\Application::getInstance()->getLicense()->isCis();
+			self::$cisRegion = \Bitrix\Main\Application::getInstance()->getLicense()->isCis();
 		}
 
-		return $cached;
+		return self::$cisRegion;
 	}
 
 	/**
@@ -281,6 +286,25 @@ class Settings
 		}
 
 		return $cached;
+	}
+
+	/**
+	 * TTL (in seconds) for the silent card-only conference notification delivered
+	 * on start / add-during-call reconcile. Larger than the default pull expiry
+	 * (5 s) so a slow client still surfaces the recent card, but bounded so a
+	 * stale card cannot linger.
+	 */
+	private const CONFERENCE_INVITE_TTL = 60;
+
+	/**
+	 * Returns the conference-invite pull TTL (seconds). Single source of the value
+	 * shared by the signaling, event-handler and conference-invite paths.
+	 *
+	 * @return int
+	 */
+	public static function getConferenceInviteTtl(): int
+	{
+		return self::CONFERENCE_INVITE_TTL;
 	}
 
 	/**
@@ -485,6 +509,45 @@ class Settings
 		return (bool)Option::get('call', 'view_toggle_enabled', false);
 	}
 
+	/**
+	 * Whether a guest (a user without a portal account) may start a call.
+	 *
+	 * Portal-level switch, off by default: enable with
+	 * Option::set('call', 'guest_outgoing_call_enabled', 'Y'); disable with 'N' or by deleting
+	 * the option. Guests answer calls regardless of this option - it only governs starting one.
+	 *
+	 * The value is read for what it says rather than cast to bool: 'N' is the usual way of writing
+	 * "off" for a portal switch, and (bool)'N' is true.
+	 *
+	 * @return bool
+	 */
+	public static function isGuestOutgoingCallEnabled(): bool
+	{
+		$value = Option::get('call', 'guest_outgoing_call_enabled', 'N');
+
+		return in_array($value, ['Y', '1', 'true'], true);
+	}
+
+	/**
+	 * Whether a guest may start a call at a bare user id - a 1-1 dialogue rather than a chat.
+	 *
+	 * The two shapes of a start reach the portal by different schemes: "chatNNN" goes to the conference
+	 * provider, a bare user id always goes to Plain ({@see \Bitrix\Call\Controller\Call::startCallAction}
+	 * for the JWT end of it). Only under the JWT scheme does that start arrive at the webhook, which lets a
+	 * guest through; the classic scheme sends it to CallManager::create, where a bare user id is refused for
+	 * a guest whatever the switch above says - resolving it would create a private chat with an employee.
+	 *
+	 * So the answer for a 1-1 target is the answer above narrowed by the scheme, and it is computed here
+	 * rather than reassembled on every client: three screens ask this question and would each have to know
+	 * which scheme serves which shape.
+	 *
+	 * @return bool
+	 */
+	public static function isGuestOutgoingPrivateCallEnabled(): bool
+	{
+		return self::isGuestOutgoingCallEnabled() && self::isPlainCallsUseNewScheme();
+	}
+
 	public static function isLargeMobileCallEnabled(): bool
 	{
 		static $cached = null;
@@ -571,6 +634,29 @@ class Settings
 			else
 			{
 				$cached = (bool)\CUserOptions::GetOption('call', 'call_disable_camera_new_joined_users_enabled', false);
+			}
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Whether push-to-talk is enabled for the web client.
+	 *
+	 * @return bool
+	 */
+	public static function isWebPushToTalkEnabled(): bool
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			if (Option::get('call', 'push_to_talk_web_enabled', false))
+			{
+				$cached = true;
+			}
+			else
+			{
+				$cached = (bool)\CUserOptions::GetOption('call', 'push_to_talk_web_enabled', false);
 			}
 		}
 
@@ -1018,6 +1104,34 @@ class Settings
 		return $cached;
 	}
 
+	/**
+	 * Whether the new call core (Vue) must be loaded instead of the legacy core.
+	 *
+	 * Development switch, off by default. Both storages expect the literal 'Y':
+	 *   \Bitrix\Main\Config\Option::set('call', 'call_new_core_enabled', 'Y'); // portal-wide
+	 *   \CUserOptions::SetOption('call', 'call_new_core_enabled', 'Y');       // current user only
+	 * A truthy value of another shape (true, 1) does not enable it.
+	 *
+	 * @return bool
+	 */
+	public static function isNewCoreEnabled(): bool
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			if (Option::get('call', 'call_new_core_enabled', 'N') === 'Y')
+			{
+				$cached = true;
+			}
+			else
+			{
+				$cached = (\CUserOptions::GetOption('call', 'call_new_core_enabled', 'N') === 'Y');
+			}
+		}
+
+		return $cached;
+	}
+
 
 	/**
 	 * Whether the cloud call record tariff flag is enabled (test/legacy switch).
@@ -1142,29 +1256,6 @@ class Settings
 		}
 
 		return $chatIds;
-	}
-
-	/**
-	 * Whether the Vue-based call interface is enabled.
-	 *
-	 * @return bool
-	 */
-	public static function isVueEnabled(): bool
-	{
-		static $cached = null;
-		if ($cached === null)
-		{
-			if (Option::get('call', 'call_vue_enabled', false))
-			{
-				$cached = true;
-			}
-			else
-			{
-				$cached = (bool)\CUserOptions::GetOption('call', 'call_vue_enabled', false);
-			}
-		}
-
-		return $cached;
 	}
 
 	/**
@@ -1360,6 +1451,76 @@ class Settings
 		}
 
 		return (bool)\CUserOptions::GetOption('call', 'call_sync_preset_enabled', false);
+	}
+
+	/**
+	 * Starting a call through the web SDK of syncconnector is available to the current user.
+	 *
+	 * Portal-wide or per-user, off by default: enable with
+	 * Option::set('call', 'sync_call_enabled', true) or
+	 * \CUserOptions::SetOption('call', 'sync_call_enabled', true, false, $userId).
+	 * Refused outright without syncconnector: the menu item starts a call through its web SDK.
+	 *
+	 * @return bool
+	 */
+	public static function isSyncCallEnabled(): bool
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			if (!Loader::includeModule('syncconnector'))
+			{
+				$cached = false;
+			}
+			elseif ((bool)Option::get('call', 'sync_call_enabled', false))
+			{
+				$cached = true;
+			}
+			else
+			{
+				$cached = (bool)\CUserOptions::GetOption('call', 'sync_call_enabled', false);
+			}
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * The list of active calls of Sync under the native ones in the messenger is available to the current user.
+	 *
+	 * Portal-wide or per-user, off by default: enable with
+	 * Option::set('call', 'sync_active_calls_enabled', true) or
+	 * \CUserOptions::SetOption('call', 'sync_active_calls_enabled', true, false, $userId).
+	 * Refused outright without syncconnector: the web SDK of syncconnector draws the list.
+	 * Independent of sync_call_enabled, so the list and the start button can be turned on separately.
+	 *
+	 * @return bool
+	 */
+	public static function isSyncActiveCallsEnabled(): bool
+	{
+		static $cached = null;
+		$cached ??= self::readSyncActiveCallsEnabled();
+
+		return $cached;
+	}
+
+	/**
+	 * The uncached reading behind isSyncActiveCallsEnabled(): the process caches the answer, and the suite of the
+	 * module cannot isolate a process, so the reading is pinned on its own.
+	 */
+	private static function readSyncActiveCallsEnabled(): bool
+	{
+		if (!Loader::includeModule('syncconnector'))
+		{
+			return false;
+		}
+
+		if ((bool)Option::get('call', 'sync_active_calls_enabled', false))
+		{
+			return true;
+		}
+
+		return (bool)\CUserOptions::GetOption('call', 'sync_active_calls_enabled', false);
 	}
 
 	/**

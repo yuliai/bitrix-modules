@@ -4,9 +4,16 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
 use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Integration\Superset\Model\Dashboard;
+use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboard;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Dashboard\DashboardJsonMetadataReader;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\FailureCode;
+use Bitrix\BIConnector\Internal\Operation\Builder\Refusal;
 use Bitrix\BIConnector\Superset\Logger\AiToolsLogger;
+use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 
 final class PublishDashboardTool extends BaseBiTool
@@ -14,6 +21,11 @@ final class PublishDashboardTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'publish_dashboard';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -66,7 +78,9 @@ final class PublishDashboardTool extends BaseBiTool
 		$dashboardId = (int)($args['dashboardId'] ?? 0);
 		if ($dashboardId <= 0)
 		{
-			throw new McpException('dashboardId is required and must be a positive integer.');
+			throw self::toMcpException(
+				Refusal::error(FailureCode::InvalidArgument, 'dashboardId is required and must be a positive integer.'),
+			);
 		}
 
 		$loadResult = $this->loadDashboardForWrite($dashboardId, $userId);
@@ -113,6 +127,66 @@ final class PublishDashboardTool extends BaseBiTool
 			];
 		}
 
+		if ((new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_ALIGNMENT, $userId))
+		{
+			return $this->publishThroughDomain($dashboard, $userId, $dashboardId, $externalId);
+		}
+
+		return $this->legacyPublish($dashboard, $userId, $dashboardId, $externalId);
+	}
+
+	/**
+	 * The portal user and the agent go through the same transition, so the remote answer is judged
+	 * by the domain. Its reasons stay in the log: the agent gets the same refusal as before.
+	 */
+	private function publishThroughDomain(
+		SupersetDashboard $dashboard,
+		int $userId,
+		int $dashboardId,
+		int $externalId,
+	): array
+	{
+		$context = [
+			'stage' => 'publish_dashboard',
+			'user_id' => $userId,
+			'dashboard_id' => $dashboardId,
+			'external_id' => $externalId,
+		];
+
+		$publishResult = (new Dashboard($dashboard))->toggleDraft(true);
+		if (!$publishResult->isSuccess())
+		{
+			throw self::unavailableBiException($publishResult->getErrors(), $context);
+		}
+
+		// The domain does not check its local save, so the status is read back: the agent must not
+		// report a dashboard as published while it is still a draft. A repeated call is safe.
+		$savedStatus = SupersetDashboardTable::getRow([
+			'select' => ['STATUS'],
+			'filter' => ['=ID' => $dashboardId],
+		])['STATUS'] ?? null;
+		if ($savedStatus !== SupersetDashboardTable::DASHBOARD_STATUS_READY)
+		{
+			throw self::unavailableBiException(
+				[new Error('Dashboard was published in BI, but its local status was not saved.')],
+				['stage' => 'publish_dashboard.local_save'] + $context,
+			);
+		}
+
+		return [
+			'id' => $dashboardId,
+			'name' => (string)$dashboard->getTitle(),
+			'published' => true,
+		];
+	}
+
+	private function legacyPublish(
+		SupersetDashboard $dashboard,
+		int $userId,
+		int $dashboardId,
+		int $externalId,
+	): array
+	{
 		$response = IntegratorFactory::getInstance()->updateDashboard($externalId, [
 			'published' => true,
 		]);

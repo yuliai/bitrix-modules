@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace Bitrix\Im\V2\Integration\AI\TaskCreation;
 
 use Bitrix\AI\Context;
+use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Result;
-use Bitrix\Main\Application;
 
 class SingleMessageCreator extends AbstractCreator
 {
 	public const CONTEXT_ID = 'chat_task_creation_from_single_message';
-	private const LOCK_TIMEOUT = 3;
 
 	public function __construct(Message $message)
 	{
@@ -25,7 +24,7 @@ class SingleMessageCreator extends AbstractCreator
 
 		if (!$this->canSendQuery())
 		{
-			return $result;
+			return $result->addError(new CreationError(CreationError::AI_TASK_SOURCE_NOT_SUPPORTED));
 		}
 
 		$messageId = (int)$this->message->getId();
@@ -33,31 +32,16 @@ class SingleMessageCreator extends AbstractCreator
 		$sourceText = $this->extractSourceText();
 		$queueManager = AutoTaskQueueManager::getInstance();
 
-		if (!Application::getConnection()->lock($this->getLockName($messageId), self::LOCK_TIMEOUT))
+		if (!$this->reserveSingleMessageSlot($messageId))
 		{
-			// a concurrent attempt for the same message holds the lock - let it finish
-			return $result;
-		}
-
-		try
-		{
-			if ($queueManager->inQueue([$messageId]))
-			{
-				return $result;
-			}
-
-			$queueManager->add([$messageId]);
-		}
-		finally
-		{
-			Application::getConnection()->unlock($this->getLockName($messageId));
+			return $this->refuseTakenSlot();
 		}
 
 		if ($sourceText === '')
 		{
 			try
 			{
-				$this->createMinimalTask($userId);
+				$this->createMinimalTask($userId, LaunchType::Manual);
 			}
 			finally
 			{
@@ -76,11 +60,6 @@ class SingleMessageCreator extends AbstractCreator
 		return $result;
 	}
 
-	private function getLockName(int $messageId): string
-	{
-		return "im_auto_task_creation_single_message_{$messageId}";
-	}
-
 	private function sendAiQueryInternal(int $userId, string $sourceText): Result
 	{
 		$context = new Context(self::MODULE_ID, self::CONTEXT_ID);
@@ -89,12 +68,12 @@ class SingleMessageCreator extends AbstractCreator
 			'userId' => $userId,
 		]);
 
-		return $this->dispatchTaskExtractionQuery($context, $sourceText, $userId);
+		return $this->dispatchTaskExtractionQuery($context, $sourceText, $userId, LaunchType::Manual);
 	}
 
 	public function extractSourceText(): string
 	{
-		return self::extractSourceTextFrom($this->message);
+		return $this->buildSourceLine($this->message, self::extractSourceTextFrom($this->message));
 	}
 
 	public function isMessageDeleted(): bool
@@ -107,6 +86,10 @@ class SingleMessageCreator extends AbstractCreator
 		return $this->messageHasMinimalTaskContent($this->message);
 	}
 
+	/**
+	 * Tells an unsupported source (which the caller reports synchronously) from a source without
+	 * text: the latter is not a refusal, it degrades to createMinimalTask().
+	 */
 	protected function canSendQuery(): bool
 	{
 		if ($this->isEmptyMessage() || $this->isContentlessMessage($this->message))
@@ -114,19 +97,6 @@ class SingleMessageCreator extends AbstractCreator
 			return false;
 		}
 
-		if (
-			$this->extractSourceText() === ''
-			&& !$this->hasMinimalTaskContent()
-		)
-		{
-			return false;
-		}
-
 		return !$this->isDeniedChatForAutoTask();
-	}
-
-	protected function getMinimalTaskTitle(): string
-	{
-		return $this->getFileBasedTitle($this->message) ?? $this->getDefaultTaskTitle();
 	}
 }

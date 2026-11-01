@@ -258,10 +258,12 @@ class CCrmDocumentContact extends CCrmDocument implements IBPWorkflowDocument
 					'COMPANY_ID',
 					GetMessage('CRM_DOCUMENT_CRM_ENTITY_TYPE_COMPANY')
 				),
-				"Type" => "string",
+				"Type" => "UF:crm",
+				"Options" => ['COMPANY' => 'Y'],
 				"Filterable" => true,
 				"Editable" => true,
 				"Required" => false,
+				"Multiple" => false,
 			],
 			"COMPANY_IDS" => [
 				"Name" => static::getEntityFieldCaption(

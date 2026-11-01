@@ -11,4 +11,6 @@ final class DashboardListFilter extends Dto
 	public string $searchString = '';
 	public int $groupId = 0;
 	public string $scopeCode = '';
+	public string $presetId = '';
+	public array $tmpFields = [];
 }

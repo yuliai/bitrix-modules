@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Internal\Service\Settings;
 
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\SettingSchemaInterface;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\SettingSchemaInterface;
 use Bitrix\Main\Result;
 
 /**

@@ -10,7 +10,7 @@ use Bitrix\Main\SystemException;
 use Bitrix\Main\UI\PageNavigation;
 use Bitrix\Market\Application\Action;
 use Bitrix\Market\Application\License;
-use Bitrix\Market\Application\VibePlusApplicationLimit;
+use Bitrix\Market\Application\ApplicationLimit;
 use Bitrix\Market\Application\Versions;
 use Bitrix\Market\Rest\Actions;
 use Bitrix\Market\Rest\Transport;
@@ -83,9 +83,9 @@ class Installed extends BaseTemplate
 			$this->result['SELECTED_TAG'] = Installed::FILTER_UPDATES;
 		}
 
-		$isVibePlusLimitMode = $this->isVibePlusLimitMode();
-		if ($isVibePlusLimitMode) {
-			$countedApplicationCodes = (new VibePlusApplicationLimit())->getCountedApplicationCodes();
+		$isApplicationLimitMode = $this->isApplicationLimitMode();
+		if ($isApplicationLimitMode) {
+			$countedApplicationCodes = (new ApplicationLimit())->getCountedApplicationCodes();
 			$filter = [
 				'!=STATUS' => AppTable::STATUS_LOCAL,
 				'=INSTALLED' => AppTable::INSTALLED,
@@ -105,7 +105,7 @@ class Installed extends BaseTemplate
 		}
 
 		if (
-			!$isVibePlusLimitMode
+			!$isApplicationLimitMode
 			&& (
 				(isset($this->filter['tag']) && $this->filter['tag'] == Installed::FILTER_UPDATES)
 				|| $isFilterUpdates
@@ -254,7 +254,7 @@ class Installed extends BaseTemplate
 		return $dbApps->getCount();
 	}
 
-	private function isVibePlusLimitMode(): bool
+	private function isApplicationLimitMode(): bool
 	{
 		$request = Context::getCurrent()->getRequest();
 

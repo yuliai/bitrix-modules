@@ -3,6 +3,8 @@
 namespace Bitrix\ImMobile\NavigationTab;
 
 use Bitrix\Im\V2\Folder\FolderCollection;
+use Bitrix\Im\V2\Folder\Eligibility\EligibleChatTypeDictionary;
+use Bitrix\Im\V2\Folder\FolderLimits;
 use Bitrix\Im\V2\Folder\FolderProvider;
 use Bitrix\Im\V2\Folder\System\SystemFolder;
 use Bitrix\Im\V2\Integration\AI\CopilotNameResolver;
@@ -19,6 +21,7 @@ use Bitrix\MobileApp;
 use Bitrix\Im\V2\Chat\GeneralChat;
 use Bitrix\Im\V2\Chat\InputAction\StatusMessageProvider;
 use Bitrix\Im\V2\Chat\InputAction\Platform;
+use Bitrix\ImMobile\Public\Feature\AudioPlayerV2Flag;
 use Bitrix\ImMobile\Settings;
 use Bitrix\ImMobile\User;
 use Bitrix\Im\Integration\Imopenlines\Localize;
@@ -27,6 +30,7 @@ use Bitrix\Intranet\Invitation;
 use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Query\Filter\Helper;
@@ -62,9 +66,7 @@ class Manager
 		 * @type Tab\BaseRecent[] $items
 		 */
 		$items = array_values(
-			array_filter($sortedTabs, static fn ($item) => $item->isWidgetAvailable()
-				|| ($item->getId() === 'openlines' && $item->isAvailable())
-			)
+			array_filter($sortedTabs, fn ($item) => $this->isRenderableTab($item))
 		);
 
 		$params = $this->getMessengerV2Params($sortedTabs);
@@ -125,6 +127,33 @@ class Manager
 				],
 			],
 		];
+	}
+
+	/**
+	 * Whether the tab really gets into the tabs widget. The only source of this rule:
+	 * both the widget items and FIRST_TAB_ID are built with it.
+	 */
+	private function isRenderableTab(Tab\BaseRecent $tab): bool
+	{
+		return $tab->isWidgetAvailable()
+			|| ($tab->getId() === 'openlines' && $tab->isAvailable())
+		;
+	}
+
+	/**
+	 * @param Tab\BaseRecent[] $tabs tabs in server order (SORT ASC, ID ASC)
+	 */
+	private function resolveFirstTabId(array $tabs): string
+	{
+		foreach ($tabs as $tab)
+		{
+			if ($this->isRenderableTab($tab))
+			{
+				return $tab->getId();
+			}
+		}
+
+		return '';
 	}
 
 	private function getCacheId($additionalString = ''): string
@@ -192,16 +221,26 @@ class Manager
 		foreach ($folders as $folder)
 		{
 			$folderId = $folder->getId();
-			if ($folderId === null)
+			if ($folderId === null || !$folder->isVisible())
 			{
 				continue;
 			}
 
-			$tab = $folder instanceof SystemFolder
-				? $this->createSystemTab($folder->getCode(), $folder)
-				: null;
+			if (!($folder instanceof SystemFolder))
+			{
+				$tabs[] = new Tab\Folder($folder);
 
-			$tabs[] = $tab ?? new Tab\Folder($folder);
+				continue;
+			}
+
+			$tab = $this->createSystemTab($folder->getCode(), $folder);
+			// a system folder whose code the app does not know must not become a personal folder tab
+			if ($tab === null)
+			{
+				continue;
+			}
+
+			$tabs[] = $tab;
 		}
 
 		return $tabs;
@@ -232,6 +271,7 @@ class Manager
 	private function createSystemTab(string $code, ?\Bitrix\Im\V2\Folder\Folder $folder = null): ?Tab\BaseRecent
 	{
 		return match ($code) {
+			'all'         => new Tab\All($folder),
 			'default'     => new Tab\Messenger($folder),
 			'tasksTask'   => new Tab\Task($folder),
 			'copilot'     => new Tab\Copilot($folder),
@@ -252,6 +292,7 @@ class Manager
 			$this->createSystemTab('copilot'),
 			$this->createSystemTab('openChannel'),
 			$this->createSystemTab('collab'),
+			$this->createSystemTab('all'),
 		];
 	}
 
@@ -264,6 +305,7 @@ class Manager
 			$this->createSystemTab('copilot'),
 			$this->createSystemTab('openChannel'),
 			$this->createSystemTab('collab'),
+			$this->createSystemTab('all'),
 		];
 	}
 
@@ -276,6 +318,7 @@ class Manager
 			$this->createSystemTab('openChannel'),
 			$this->createSystemTab('collab'),
 			$this->createSystemTab('openlines'),
+			$this->createSystemTab('all'),
 		];
 	}
 
@@ -300,7 +343,7 @@ class Manager
 	}
 
 	/**
-	 * @param Tab\TabInterface[] $tabs
+	 * @param Tab\BaseRecent[] $tabs
 	 * @return array
 	 * @throws \Bitrix\Main\LoaderException
 	 */
@@ -320,13 +363,14 @@ class Manager
 	}
 
 	/**
-	 * @param Tab\TabInterface[] $tabs
+	 * @param Tab\BaseRecent[] $tabs
 	 * @return array
 	 * @throws \Bitrix\Main\LoaderException
 	 */
 	private function getSharedParams(array $tabs): array
 	{
 		$permissions = [];
+		$folders = (object)[];
 		if (Loader::includeModule('im'))
 		{
 			$permissionManager = new \Bitrix\Im\V2\Permission(true);
@@ -335,6 +379,14 @@ class Manager
 				'byUserType' => $permissionManager->getByUserTypes(),
 				'actionGroups' => $permissionManager->getActionGroupDefinitions(),
 				'actionGroupsDefaults' => $permissionManager->getDefaultPermissionForGroupActions(),
+			];
+			$folders = [
+				'allowedTypes' => EligibleChatTypeDictionary::forMobile(),
+				'limits' => [
+					'maxFolders' => FolderLimits::MAX_FOLDERS_PER_USER,
+					'maxChatsPerFolder' => FolderLimits::MAX_CHATS_PER_FOLDER,
+					'maxTitleLength' => FolderLimits::MAX_TITLE_LENGTH,
+				],
 			];
 		}
 
@@ -354,11 +406,8 @@ class Manager
 			}
 		}
 
-		$firstTabId = '';
-		if (count($tabs) > 0)
-		{
-			$firstTabId = $tabs[0]->getId();
-		}
+		$firstTabId = $this->resolveFirstTabId($tabs);
+
 		$enableDevWorkspace = false;
 		if (Option::get('mobile', 'developers_menu_section', 'N') === 'Y')
 		{
@@ -407,6 +456,7 @@ class Manager
 			'IS_COPILOT_SELECT_MODEL_ENABLED' => Settings::isCopilotSelectModelEnabled(),
 			'IS_CHAT_LOCAL_STORAGE_AVAILABLE' => Settings::isChatLocalStorageAvailable(),
 			'IS_MARKDOWN_PARSER_ENABLED' => Settings::isMarkdownParserEnabled(),
+			'IS_MARKDOWN_NATIVE_RENDERER_AVAILABLE' => Settings::isMarkdownNativeRendererAvailable(),
 			'IS_OPENLINES_IN_MESSENGER_V2_AVAILABLE' => Settings::isOpenlinesInMessengerV2Available(),
 			'IS_TASKS_RECENT_LIST_AVAILABLE' => Settings::isTasksRecentListAvailable(),
 			'IS_MARKET_AVAILABLE' => Settings::isMarketAvailable(),
@@ -431,6 +481,7 @@ class Manager
 			'REQUEST_GUEST_NAME' => $this->context->requestGuestName,
 			'GUEST_CODE' => $this->context->guestCode,
 			'PERMISSIONS' => $permissions,
+			'FOLDERS' => $folders,
 			'MULTIPLE_ACTION_MESSAGE_LIMIT' => Settings::getMultipleActionMessageLimit(),
 			'CALL_SERVER_MAX_USERS' => $this->getCallServerMaxUsers(),
 			'SERVICE_HEALTH_URL' => $this->getServiceHealthUrl(),
@@ -602,7 +653,7 @@ class Manager
 
 	private function canUseAudioPanel(): bool
 	{
-		return Mobile\Config\Feature::isEnabled(Mobile\Feature\AudioPlayerV2Feature::class);
+		return Feature::isEnabled(AudioPlayerV2Flag::class);
 	}
 
 	private function getNavigationTabTitles(): array

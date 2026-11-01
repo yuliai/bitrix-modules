@@ -6,7 +6,6 @@ namespace Bitrix\Im\V2\Integration\AI\TaskCreation;
 
 use Bitrix\AI\Context;
 use Bitrix\Im\V2\Entity\File\FileItem;
-use Bitrix\Im\V2\Integration\AI\CopilotError;
 use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\Integration\AI\Transcription\TranscribeManager;
 use Bitrix\Im\V2\Integration\Tasks\Service\Transcription\MultipleMessagesTaskHandler;
@@ -21,22 +20,60 @@ use Bitrix\Main\DI\ServiceLocator;
 class MultipleMessagesCreator extends AbstractCreator
 {
 	public const CONTEXT_ID = 'chat_task_creation_from_multiple_messages';
+
+	/** @see MultipleMessagesCreator::addExcludedSource() */
+	public const EXCLUSION_REASON_TRANSCRIPTION_FAILED = 'transcriptionFailed';
+	public const EXCLUSION_REASON_MESSAGE_UNAVAILABLE = 'messageUnavailable';
+
 	private const LOCK_TIMEOUT = 3;
 	private const AUTO_TASK_TYPE = AutoTaskType::TaskCreationMulti;
 
 	private MessageCollection $messages;
 
-	public function __construct(MessageCollection $messages)
+	/**
+	 * The selection registered in the queue record: it keys the record, the lock and every
+	 * callback, and it resolves the anchor. Excluding a source never shrinks it.
+	 *
+	 * @var int[]
+	 */
+	private array $sourceMessageIds;
+
+	/** @var array<int, array{messageId: int, fileId: int|null, reason: string}> */
+	private array $excludedSources;
+
+	/** @see self::preloadSelection() */
+	private bool $isSelectionPreloaded = false;
+
+	/**
+	 * @param int[]|null $sourceMessageIds identity of the batch, defaults to the selection being
+	 *        registered; the queue callbacks pass back the set the record was registered with,
+	 *        which may be wider than the collection they managed to reload
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 */
+	public function __construct(
+		MessageCollection $messages,
+		?array $sourceMessageIds = null,
+		array $excludedSources = []
+	)
 	{
-		// collection entries are keyed by message id and the combined text must follow
-		// the chat order, so sort once here; params, files and completed transcriptions
-		// are pre-loaded in batch to avoid per-message queries during the scans below
+		// collection entries are keyed by message id and the combined text must follow the chat
+		// order, so sort once here; the batch loads the scans need are lazy, @see self::preloadSelection()
 		$messages->ksort();
-		$messages->fillParams();
-		$messages->getFiles()->fillTranscriptions();
 
 		$this->messages = $messages;
-		$this->message = self::resolveAnchorMessage($this->messages);
+		$this->sourceMessageIds = self::normalizeIds($sourceMessageIds ?? $messages->getIds());
+		$this->excludedSources = $excludedSources;
+		$this->message = self::resolveAnchorMessage($this->sourceMessageIds, $messages);
+	}
+
+	/**
+	 * True when the task was built without part of the selection because a transcription never
+	 * arrived. An unavailable message alone does not make the result partial: it is not explained
+	 * to the user either.
+	 */
+	public function isPartialResult(): bool
+	{
+		return self::hasFailedTranscription($this->excludedSources);
 	}
 
 	public function sendAiQuery(): Result
@@ -48,21 +85,21 @@ class MultipleMessagesCreator extends AbstractCreator
 			return $result;
 		}
 
-		$messageIds = $this->messages->getIds();
+		$messageIds = $this->sourceMessageIds;
 		$userId = $this->getContext()->getUserId();
 		$queueManager = AutoTaskQueueManager::getInstance();
 
 		// cheap dedup pre-check, so duplicate clicks skip the selection scan below
 		if ($queueManager->inQueue($messageIds, self::AUTO_TASK_TYPE))
 		{
-			return $result;
+			return $this->refuseTakenSlot();
 		}
 
 		$pendingTargets = $this->getPendingTranscriptionTargets();
 
 		if (!$this->registerBatch($queueManager, $messageIds, array_keys($pendingTargets)))
 		{
-			return $result;
+			return $this->refuseTakenSlot();
 		}
 
 		if (empty($pendingTargets))
@@ -80,22 +117,54 @@ class MultipleMessagesCreator extends AbstractCreator
 		return $result;
 	}
 
-	public function createTask(array $data, string $sourceText, int $userId): void
+	public function createTask(
+		array $data,
+		string $sourceText,
+		int $userId,
+		LaunchType $launchType = LaunchType::Auto
+	): void
 	{
 		if ($this->isEmptyMessage())
 		{
+			$this->reportLostSource($userId, $launchType);
+
 			return;
 		}
+
+		// the selection is forwarded into the chat of the task, and the queue job may reach this
+		// without any of the scans - it reuses the combined text the live creator built
+		$this->preloadSelection();
 
 		Locator::getContext()->setUser($userId);
 
 		/** @var MultipleMessagesTaskHandler $handler */
 		$handler = ServiceLocator::getInstance()->get(MultipleMessagesTaskHandler::class);
-		$handler->handle($data, $this->messages, $this->message, $sourceText, $userId);
+		$handler->handle(
+			$data,
+			$this->getMessagesToForward(),
+			$this->message,
+			$userId,
+			$launchType,
+			$this->isPartialResult()
+		);
+	}
+
+	/**
+	 * A soft-deleted message carries the "message deleted" placeholder instead of its text, so it
+	 * is left out of the forwarding just as it is left out of the sources (AC-074). The selection
+	 * itself keeps every id: it identifies the batch. An empty result is a legitimate one - the
+	 * handler tells the multiselect flow from the single-message one by a collection being passed
+	 * at all, not by its size.
+	 */
+	private function getMessagesToForward(): MessageCollection
+	{
+		return $this->messages->filter(fn (Message $message) => !$this->isDeletedMessage($message));
 	}
 
 	public function buildCombinedSourceText(): string
 	{
+		$this->preloadSelection();
+
 		$parts = [];
 		$usedTranscriptions = [];
 
@@ -109,7 +178,7 @@ class MultipleMessagesCreator extends AbstractCreator
 			$text = self::extractSourceTextFrom($message);
 			if ($text !== '')
 			{
-				$parts[] = $text;
+				$parts[] = $this->buildSourceLine($message, $text);
 			}
 
 			$fileItem = $this->getTranscribableFile($message);
@@ -120,10 +189,10 @@ class MultipleMessagesCreator extends AbstractCreator
 
 			$usedTranscriptions[$fileItem->getOriginalFileId()] = true;
 
-			$transcriptText = trim((string)($fileItem->getCompletedTranscription()?->transcriptText ?? ''));
+			$transcriptText = trim((string)($fileItem->getCompletedTranscription()?->getPlainText() ?? ''));
 			if ($transcriptText !== '')
 			{
-				$parts[] = $transcriptText;
+				$parts[] = $this->buildSourceLine($message, $transcriptText);
 			}
 		}
 
@@ -135,27 +204,80 @@ class MultipleMessagesCreator extends AbstractCreator
 	 * from the pending set and, once the batch has no pending transcriptions left, fires
 	 * the combined AI query for the whole selection (SC-002, AC-029).
 	 *
-	 * A failed transcription ($failed) means the content of that message is unavailable, so
-	 * the whole batch is aborted instead of building a partial/minimal task (PRD ERR-013).
+	 * A failed transcription ($failed) makes its own source unusable, not the whole batch:
+	 * the source is marked excluded in the record params and the rest of the selection still
+	 * feeds the task. The batch is aborted only when nothing usable is left.
 	 *
 	 * Static on purpose: the partial-callback path only needs the message ids and the
 	 * finished file id, so the whole MessageCollection is loaded only once the batch
-	 * is actually drained.
+	 * is actually drained (or a source has to be excluded).
+	 *
+	 * The entry point of an asynchronous callback, which brings one finished file at a time. A
+	 * caller that already holds a whole set of them drains it in one pass, @see
+	 * self::drainPendingFiles().
+	 *
+	 * @param int[] $messageIds the selection the record was registered with, never the survivors
+	 * @param int|null $sourceMessageId owner of the finished file when the caller already knows it
 	 */
-	public static function onTranscriptionFinished(array $messageIds, int $fileId, int $userId, bool $failed = false): void
+	public static function onTranscriptionFinished(
+		array $messageIds,
+		int $fileId,
+		int $userId,
+		bool $failed = false,
+		?int $sourceMessageId = null
+	): void
 	{
+		// resolving the owner of a failed file needs the collection: doing it before the lock
+		// keeps the critical section as short as the sibling callbacks of this batch expect
+		$failedSourceId = $failed
+			? ($sourceMessageId ?? self::resolveMessageIdByFile($messageIds, $fileId))
+			: 0
+		;
+
+		self::drainPendingFiles(
+			$messageIds,
+			[$fileId => ['failed' => $failed, 'messageId' => $failedSourceId]],
+			$userId
+		);
+	}
+
+	/**
+	 * Accounts for a whole set of finished transcriptions at once: one lock, one read of the
+	 * record, one write of its params. Draining file by file would take the same lock and rewrite
+	 * the same row once per file, and only the last of those writes is ever read.
+	 *
+	 * The outcome is the one a file-by-file drain arrives at: the pending set loses exactly the
+	 * files that were still in it, every failed one of them excludes its source, and the batch
+	 * advances once - after the lock is released, and only when nothing is pending anymore.
+	 *
+	 * @param int[] $messageIds the selection the record was registered with, never the survivors
+	 * @param array<int, array{failed: bool, messageId: int}> $finishedFiles keyed by original file
+	 *        id; messageId is the owner of a failed file and is ignored for a successful one
+	 */
+	private static function drainPendingFiles(array $messageIds, array $finishedFiles, int $userId): void
+	{
+		if (empty($finishedFiles))
+		{
+			return;
+		}
+
 		$queueManager = AutoTaskQueueManager::getInstance();
 		$lockName = self::buildLockName($messageIds);
 
 		if (!Application::getConnection()->lock($lockName, self::LOCK_TIMEOUT))
 		{
-			// proceeding without the lock could lose a concurrent advance or fire the
-			// combined query twice; an abandoned batch is covered by the record TTL
-			// in AutoTaskQueueManager
+			// proceeding without the lock could lose a concurrent advance or fire the combined query
+			// twice, and these files come back no other way: they stay in the pending set of the
+			// record, and a batch with a pending file neither advances nor closes. So the operation
+			// ends here instead - a terminal status, even a duplicate one, costs the initiator less
+			// than an indication that hangs until the record expires
+			self::abortBatchByIds($messageIds, $userId);
+
 			return;
 		}
 
-		$aborted = false;
+		$sourceMessageIds = [];
+		$excludedSources = [];
 		try
 		{
 			$row = $queueManager->getRow($messageIds, self::AUTO_TASK_TYPE);
@@ -166,34 +288,39 @@ class MultipleMessagesCreator extends AbstractCreator
 			}
 
 			$pendingBefore = array_map('intval', $params['pendingFileIds'] ?? []);
-			if (!in_array($fileId, $pendingBefore, true))
+			$accounted = array_intersect_key($finishedFiles, array_flip($pendingBefore));
+			if (empty($accounted))
 			{
-				// this file is already accounted for (duplicate or late callback);
+				// every one of these files is already accounted for (duplicate or late callback);
 				// falling through here would fire the combined query a second time
 				return;
 			}
 
-			if ($failed)
-			{
-				// failed transcription = this message's content is unavailable: abort the whole
-				// task creation (no partial/minimal task). Deleting the record under the lock makes
-				// any later callback for the other batch files a no-op (getRow() === null).
-				$queueManager->delete($messageIds, self::AUTO_TASK_TYPE);
-				$aborted = true;
-			}
-			else
-			{
-				$pending = array_values(array_filter(
-					$pendingBefore,
-					static fn (int $id) => $id !== $fileId
-				));
-				$params['pendingFileIds'] = $pending;
-				$queueManager->updateParamsById($row['id'], $params);
+			$sourceMessageIds = self::readSourceMessageIds($params, $messageIds);
+			$excludedSources = self::readExcludedSources($params);
+			$pending = array_values(array_diff($pendingBefore, array_keys($accounted)));
 
-				if (!empty($pending))
+			foreach ($accounted as $fileId => $finishedFile)
+			{
+				if ($finishedFile['failed'])
 				{
-					return;
+					$excludedSources = self::addExcludedSource(
+						$excludedSources,
+						$finishedFile['messageId'],
+						(int)$fileId,
+						self::EXCLUSION_REASON_TRANSCRIPTION_FAILED
+					);
 				}
+			}
+
+			$queueManager->updateParamsById(
+				$row['id'],
+				self::buildParams($sourceMessageIds, $pending, $excludedSources)
+			);
+
+			if (!empty($pending))
+			{
+				return;
 			}
 		}
 		finally
@@ -201,31 +328,46 @@ class MultipleMessagesCreator extends AbstractCreator
 			Application::getConnection()->unlock($lockName);
 		}
 
-		if ($aborted)
+		self::advanceDrainedBatch($sourceMessageIds, $excludedSources, $userId);
+	}
+
+	/**
+	 * Every expected transcription is accounted for: reload the selection, exclude the messages
+	 * that disappeared meanwhile and either fire the combined query or close the operation.
+	 *
+	 * Runs outside the batch lock on purpose - it dispatches the AI query. No sibling callback can
+	 * interfere anymore: with an empty pending set every later callback stops at the pending check.
+	 */
+	private static function advanceDrainedBatch(array $sourceMessageIds, array $excludedSources, int $userId): void
+	{
+		$messages = new MessageCollection($sourceMessageIds);
+		$excludedAfterReload = self::excludeUnavailableSources($excludedSources, $sourceMessageIds, $messages);
+
+		if (count($excludedAfterReload) !== count($excludedSources))
 		{
-			// the record was already deleted under the lock above; only notify the initiator
-			self::sendTerminalNotFound($messageIds, $userId, new MessageCollection($messageIds));
+			self::persistExcludedSources($sourceMessageIds, $excludedAfterReload);
+		}
+
+		if (self::hasEligibleSource($sourceMessageIds, $excludedAfterReload))
+		{
+			(new self($messages, $sourceMessageIds, $excludedAfterReload))->sendCombinedQuery($userId);
 
 			return;
 		}
 
-		$messages = new MessageCollection($messageIds);
-		if (!self::isSelectionComplete($messageIds, $messages))
-		{
-			// at least one selected message was deleted before the batch drained (ERR-015)
-			self::abortBatchByIds($messageIds, $userId, $messages);
-
-			return;
-		}
-
-		(new self($messages))->sendCombinedQuery($userId);
+		// Nothing usable is left. With a failed transcription there is no content to build the task
+		// from; without one every selected message is gone, so there is no chat to create it in
+		// either - both ways the only possible outcome is the terminal status.
+		self::abortBatchByIds($sourceMessageIds, $userId, $messages);
 	}
 
 	/**
 	 * The selection is intact only when every originally selected message is still available.
-	 * A fully deleted message drops out of the reloaded MessageCollection, so a shorter
-	 * collection means at least one message disappeared and the whole batch must be aborted
-	 * (PRD ERR-015). Soft-delete is intentionally NOT treated as a break (decision 2026-06-25).
+	 * A fully deleted message drops out of the reloaded MessageCollection, so a shorter collection
+	 * means at least one message disappeared and has to be excluded from the sources and from the
+	 * forwarding. Soft-delete does not break the batch (decision 2026-06-25) - the row is still
+	 * there and the rest of the selection feeds the task - but such a message keeps neither its
+	 * place among the sources nor its place in the forwarding, @see self::getMessagesToForward()
 	 */
 	public static function isSelectionComplete(array $expectedIds, MessageCollection $messages): bool
 	{
@@ -234,38 +376,27 @@ class MultipleMessagesCreator extends AbstractCreator
 
 	/**
 	 * Aborts the batch from a static context (transcription barrier / queue job): deletes the
-	 * dedup record and sends the initiator a terminal status, so the magic panel closes. The
-	 * status anchor is resolved from the surviving collection, falling back to the formal anchor
-	 * id when the whole selection is gone.
+	 * dedup record and sends the initiator a terminal status, so the magic panel closes.
 	 */
 	public static function abortBatchByIds(array $messageIds, int $userId, ?MessageCollection $messages = null): void
 	{
 		AutoTaskQueueManager::getInstance()->delete($messageIds, self::AUTO_TASK_TYPE);
-		self::sendTerminalNotFound($messageIds, $userId, $messages);
-	}
 
-	/**
-	 * Sends the terminal NotFound status to the initiator without touching the queue record
-	 * (used when the record was already deleted under the lock — re-deleting it key-based and
-	 * outside the lock could wipe a batch that a concurrent identical selection just re-registered).
-	 */
-	private static function sendTerminalNotFound(array $messageIds, int $userId, ?MessageCollection $messages = null): void
-	{
 		if ($userId <= 0)
 		{
 			return;
 		}
 
-		$anchor = ($messages !== null && !$messages->isEmpty())
-			? self::resolveAnchorMessage($messages)
-			: (new Message())->setMessageId(self::resolveAnchorMessageId($messageIds));
-
-		(new AutoTaskStatus($anchor, $userId, Status::NotFound))->send();
+		(new AutoTaskStatus(self::resolveAnchorMessage($messageIds, $messages), $userId, Status::NotFound))->send();
 	}
 
 	/**
-	 * The anchor (the newest message of the selection) keys all pull statuses, the chat-task
-	 * link and the notification, so every reporter must resolve it the same way.
+	 * The anchor (the newest message of the original selection) keys all pull statuses, the
+	 * chat-task link and the notification. Both clients compute it the same way before sending
+	 * the request and silently drop events addressed to any other message, so it must never be
+	 * recomputed from the surviving messages.
+	 *
+	 * @param int[] $messageIds the selection the batch was registered with
 	 */
 	public static function resolveAnchorMessageId(array $messageIds): int
 	{
@@ -291,9 +422,11 @@ class MultipleMessagesCreator extends AbstractCreator
 				return false;
 			}
 
-			$queueManager->add($messageIds, self::AUTO_TASK_TYPE, [
-				'pendingFileIds' => $pendingFileIds,
-			]);
+			$queueManager->add(
+				$messageIds,
+				self::AUTO_TASK_TYPE,
+				self::buildParams($messageIds, $pendingFileIds, [])
+			);
 
 			return true;
 		}
@@ -317,22 +450,17 @@ class MultipleMessagesCreator extends AbstractCreator
 
 		if ($sourceText === '')
 		{
-			$this->createMinimalTask($userId);
-			AutoTaskQueueManager::getInstance()->delete($this->messages->getIds(), self::AUTO_TASK_TYPE);
+			$this->createMinimalTask($userId, LaunchType::Manual);
+			AutoTaskQueueManager::getInstance()->delete($this->sourceMessageIds, self::AUTO_TASK_TYPE);
 
 			return $result;
 		}
 
-		if (mb_strlen($sourceText) > TranscribeManager::MAX_TRANSCRIPTION_CHARS)
-		{
-			$this->abortBatch($userId);
-
-			return $result->addError(new CopilotError(CopilotError::MAX_TRANSCRIPTION_CHARS));
-		}
-
 		$context = new Context(self::MODULE_ID, self::CONTEXT_ID);
 		$context->setParameters([
-			'messageIds' => $this->messages->getIds(),
+			// the identity of the batch, not the survivors: the queue job reads the record and
+			// deletes it by this very set, and it addresses its terminal status by its anchor
+			'messageIds' => $this->sourceMessageIds,
 			'userId' => $userId,
 			'sourceText' => $sourceText,
 		]);
@@ -354,7 +482,7 @@ class MultipleMessagesCreator extends AbstractCreator
 	 */
 	private function abortBatch(int $userId): void
 	{
-		self::abortBatchByIds($this->messages->getIds(), $userId, $this->messages);
+		self::abortBatchByIds($this->sourceMessageIds, $userId, $this->messages);
 	}
 
 	protected function hasMinimalTaskContent(): bool
@@ -368,20 +496,6 @@ class MultipleMessagesCreator extends AbstractCreator
 		}
 
 		return false;
-	}
-
-	protected function getMinimalTaskTitle(): string
-	{
-		foreach ($this->messages as $message)
-		{
-			$title = $this->getFileBasedTitle($message);
-			if ($title !== null)
-			{
-				return $title;
-			}
-		}
-
-		return $this->getDefaultTaskTitle();
 	}
 
 	/**
@@ -415,20 +529,22 @@ class MultipleMessagesCreator extends AbstractCreator
 			{
 				// A short-circuit means the transcription is already complete or owned by another
 				// flow (isSuccess), or it failed synchronously (!isSuccess). A synchronous failure
-				// makes the content unavailable, so the batch must fail-fast exactly like an async
-				// transcription failure (ERR-013, Phase 5) instead of building a partial task.
-				$skipped[(int)$originalFileId] = !$transcribeResult->isSuccess();
+				// leaves that source without content, exactly like an async transcription failure.
+				$skipped[(int)$originalFileId] = [
+					'failed' => !$transcribeResult->isSuccess(),
+					'messageId' => (int)$message->getMessageId(),
+				];
 			}
 		}
 
 		// No queue callback with our batch context will arrive for these files. Advance the barrier
-		// right away (failed=true aborts the whole batch), otherwise it would wait until the TTL.
-		// A file owned by another flow joins the combined text only when its transcript lands
-		// before the batch drains - an accepted limitation (SDD Q-1).
-		foreach ($skipped as $skippedFileId => $failed)
-		{
-			self::onTranscriptionFinished($messageIds, $skippedFileId, $userId, $failed);
-		}
+		// right away, otherwise it would wait until the TTL. A file owned by another flow joins the
+		// combined text only when its transcript lands before the batch drains - an accepted
+		// limitation (SDD Q-1).
+		//
+		// The whole set goes in one pass: every one of these files belongs to the same record under
+		// the same lock, and their owners are already known, so nothing here needs a round of its own.
+		self::drainPendingFiles($messageIds, $skipped, $userId);
 	}
 
 	/**
@@ -436,6 +552,8 @@ class MultipleMessagesCreator extends AbstractCreator
 	 */
 	private function getTranscribableTargets(): array
 	{
+		$this->preloadSelection();
+
 		$targets = [];
 
 		foreach ($this->messages as $message)
@@ -491,6 +609,30 @@ class MultipleMessagesCreator extends AbstractCreator
 		return $fileItem;
 	}
 
+	/**
+	 * Params, files and completed transcriptions of the whole selection, in batch and once: the
+	 * scans read them per message, so without this warm-up every message would query for its own.
+	 * Two to four queries, and none of them for a selection without files.
+	 *
+	 * Lazy on purpose, and called by every consumer of the prepared collection. A repeated click
+	 * over the same selection is refused by the dedup pre-check of sendAiQuery() before a single
+	 * scan runs, and it used to pay these queries in the constructor regardless. The background
+	 * paths (advanceDrainedBatch, MultipleMessageTaskCreationJob) always need the selection
+	 * prepared, and they reach it through those same consumers.
+	 */
+	private function preloadSelection(): void
+	{
+		if ($this->isSelectionPreloaded)
+		{
+			return;
+		}
+
+		$this->isSelectionPreloaded = true;
+
+		$this->messages->fillParams();
+		$this->messages->getFiles()->fillTranscriptions();
+	}
+
 	protected function canSendQuery(): bool
 	{
 		return !$this->isEmptyMessage() && !$this->isDeniedChatForAutoTask();
@@ -498,7 +640,7 @@ class MultipleMessagesCreator extends AbstractCreator
 
 	private function getLockName(): string
 	{
-		return self::buildLockName($this->messages->getIds());
+		return self::buildLockName($this->sourceMessageIds);
 	}
 
 	private static function buildLockName(array $messageIds): string
@@ -507,16 +649,234 @@ class MultipleMessagesCreator extends AbstractCreator
 	}
 
 	/**
-	 * Resolves the anchor for an already-loaded selection, preferring a surviving message:
-	 * the newest message that still exists in the collection, or any survivor, falling back
-	 * to a bare Message keyed by the formal anchor id only for an empty collection. Both the
-	 * live creator and the queue job must resolve it from the real collection the same way,
-	 * so terminal statuses target one and the same message id.
+	 * Resolves the anchor message of the batch. The id always comes from the original selection;
+	 * the loaded collection is only a source of an already-hydrated instance, so an excluded or
+	 * deleted anchor still addresses the events the clients are waiting for.
+	 *
+	 * @param int[] $sourceMessageIds the selection the batch was registered with
 	 */
-	public static function resolveAnchorMessage(MessageCollection $messages): Message
+	public static function resolveAnchorMessage(array $sourceMessageIds, ?MessageCollection $messages = null): Message
 	{
-		$anchorId = self::resolveAnchorMessageId($messages->getIds());
+		$anchorId = self::resolveAnchorMessageId($sourceMessageIds);
 
-		return $messages[$anchorId] ?? $messages->getAny() ?? new Message($anchorId);
+		if ($messages !== null && isset($messages[$anchorId]))
+		{
+			return $messages[$anchorId];
+		}
+
+		// loading is best effort: the row may be gone, and a failed load leaves the message
+		// without its id, while the id is exactly what addresses every event of the operation
+		$anchor = (new Message($anchorId))->setMessageId($anchorId);
+		$survivedChatId = (int)($messages?->getAny()?->getChatId() ?? 0);
+
+		if ($anchor->getChatId() === null && $survivedChatId > 0)
+		{
+			// the newest selected message is gone: its id still addresses every event of the
+			// operation, but the chat behind the task has to come from a message that survived
+			$anchor->setChatId($survivedChatId);
+		}
+
+		return $anchor;
+	}
+
+	/**
+	 * Single owner of the batch record params format: every writer goes through here, so the
+	 * shape a reader may rely on is declared in exactly one place.
+	 *
+	 * @param int[] $sourceMessageIds
+	 * @param int[] $pendingFileIds
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 */
+	private static function buildParams(array $sourceMessageIds, array $pendingFileIds, array $excludedSources): array
+	{
+		return [
+			'pendingFileIds' => array_values(array_map('intval', $pendingFileIds)),
+			'sourceMessageIds' => self::normalizeIds($sourceMessageIds),
+			'excludedSources' => array_values($excludedSources),
+		];
+	}
+
+	/**
+	 * Records written before this field existed carry the identity only in the callback arguments,
+	 * so an absent list falls back to the set the caller was registered with.
+	 *
+	 * @param int[] $fallbackIds
+	 * @return int[]
+	 */
+	public static function readSourceMessageIds(?array $params, array $fallbackIds): array
+	{
+		$storedIds = $params['sourceMessageIds'] ?? null;
+		$sourceMessageIds = is_array($storedIds) ? self::normalizeIds($storedIds) : [];
+
+		return empty($sourceMessageIds) ? self::normalizeIds($fallbackIds) : $sourceMessageIds;
+	}
+
+	/**
+	 * An absent list means nothing was excluded - that is how records written before this field
+	 * existed keep working.
+	 *
+	 * @return array<int, array{messageId: int, fileId: int|null, reason: string}>
+	 */
+	public static function readExcludedSources(?array $params): array
+	{
+		$excludedSources = [];
+		$storedSources = $params['excludedSources'] ?? null;
+
+		foreach (is_array($storedSources) ? $storedSources : [] as $excludedSource)
+		{
+			if (!is_array($excludedSource) || !isset($excludedSource['reason']))
+			{
+				continue;
+			}
+
+			$fileId = $excludedSource['fileId'] ?? null;
+			$excludedSources[] = [
+				'messageId' => (int)($excludedSource['messageId'] ?? 0),
+				'fileId' => $fileId === null ? null : (int)$fileId,
+				'reason' => (string)$excludedSource['reason'],
+			];
+		}
+
+		return $excludedSources;
+	}
+
+	/**
+	 * The partial result is computed, never stored: only a transcription that never arrived is
+	 * explained to the task chat, an unavailable message is not.
+	 *
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 */
+	public static function hasFailedTranscription(array $excludedSources): bool
+	{
+		foreach ($excludedSources as $excludedSource)
+		{
+			if (($excludedSource['reason'] ?? '') === self::EXCLUSION_REASON_TRANSCRIPTION_FAILED)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param int[] $sourceMessageIds
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 */
+	public static function hasEligibleSource(array $sourceMessageIds, array $excludedSources): bool
+	{
+		$excludedIds = array_map('intval', array_column($excludedSources, 'messageId'));
+
+		return !empty(array_diff(self::normalizeIds($sourceMessageIds), $excludedIds));
+	}
+
+	/**
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 * @return array<int, array{messageId: int, fileId: int|null, reason: string}>
+	 */
+	private static function addExcludedSource(
+		array $excludedSources,
+		int $messageId,
+		?int $fileId,
+		string $reason
+	): array
+	{
+		foreach ($excludedSources as $excludedSource)
+		{
+			if ($excludedSource['messageId'] === $messageId)
+			{
+				return $excludedSources;
+			}
+		}
+
+		$excludedSources[] = [
+			'messageId' => $messageId,
+			'fileId' => $fileId,
+			'reason' => $reason,
+		];
+
+		return $excludedSources;
+	}
+
+	/**
+	 * @param array<int, array{messageId: int, fileId: int|null, reason: string}> $excludedSources
+	 * @return array<int, array{messageId: int, fileId: int|null, reason: string}>
+	 */
+	private static function excludeUnavailableSources(
+		array $excludedSources,
+		array $sourceMessageIds,
+		MessageCollection $messages
+	): array
+	{
+		if (self::isSelectionComplete($sourceMessageIds, $messages))
+		{
+			return $excludedSources;
+		}
+
+		// a set and not a list: the loop below asks about every id of the original selection
+		$survived = array_flip(array_map('intval', $messages->getIds()));
+
+		foreach (self::normalizeIds($sourceMessageIds) as $messageId)
+		{
+			if (!isset($survived[$messageId]))
+			{
+				$excludedSources = self::addExcludedSource(
+					$excludedSources,
+					$messageId,
+					null,
+					self::EXCLUSION_REASON_MESSAGE_UNAVAILABLE
+				);
+			}
+		}
+
+		return $excludedSources;
+	}
+
+	/**
+	 * Re-reads the record instead of reusing the id captured under the lock: by the time the batch
+	 * drains the record may already be gone, and updating it by a stale id would resurrect nothing.
+	 */
+	private static function persistExcludedSources(array $sourceMessageIds, array $excludedSources): void
+	{
+		$queueManager = AutoTaskQueueManager::getInstance();
+		$row = $queueManager->getRow($sourceMessageIds, self::AUTO_TASK_TYPE);
+
+		if ($row === null)
+		{
+			return;
+		}
+
+		$queueManager->updateParamsById($row['id'], self::buildParams($sourceMessageIds, [], $excludedSources));
+	}
+
+	/**
+	 * Maps a finished transcription back to its source message. Only the failure path needs it,
+	 * so the collection is loaded here instead of being carried through every callback.
+	 */
+	private static function resolveMessageIdByFile(array $messageIds, int $fileId): int
+	{
+		$messages = new MessageCollection($messageIds);
+		$messages->fillFiles();
+
+		foreach ($messages as $message)
+		{
+			foreach ($message->getFiles() as $fileItem)
+			{
+				if ($fileItem->getOriginalFileId() === $fileId)
+				{
+					return (int)$message->getMessageId();
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private static function normalizeIds(array $messageIds): array
+	{
+		return array_values(array_unique(array_map('intval', $messageIds)));
 	}
 }

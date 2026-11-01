@@ -6,6 +6,12 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dataset\WriteDatasetOperations;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class CreateDatasetFromSqlTool extends BaseBiTool
@@ -13,6 +19,11 @@ final class CreateDatasetFromSqlTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'create_dataset_from_sql';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -51,6 +62,30 @@ final class CreateDatasetFromSqlTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$result = ServiceLocator::getInstance()->get(WriteDatasetOperations::class)->createFromSql(
+			(string)($args['datasetName'] ?? ''),
+			// Raw read bypasses the Proactive Filter (WAF), which otherwise mangles SQL keywords.
+			(string)$this->getRawArgument('sql', $args),
+			new Actor($userId, Channel::Mcp),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

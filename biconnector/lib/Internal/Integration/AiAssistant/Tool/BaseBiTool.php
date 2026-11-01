@@ -4,94 +4,78 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
 use Bitrix\AiAssistant\Definition\Tool\Contract\ToolContract;
 use Bitrix\AiAssistant\Exceptions\McpException;
-use Bitrix\BIConnector\Access\AccessController;
-use Bitrix\BIConnector\Access\ActionDictionary;
-use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
-use Bitrix\BIConnector\Configuration\Feature;
-use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
-use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboard;
-use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
-use Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\ImpactAwareTool;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\RateLimit\BiToolsRateLimiter;
-use Bitrix\BIConnector\Superset\DomainLinkService;
-use Bitrix\BIConnector\Superset\Logger\AiToolsLogger;
-use Bitrix\BIConnector\Superset\MarketDashboardManager;
-use Bitrix\Intranet\Settings\Tools\ToolsManager;
-use Bitrix\Main\Application;
-use Bitrix\Main\Config\Option;
-use Bitrix\Main\Error;
-use Bitrix\Main\Loader;
-use Bitrix\Main\Result;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\DestructiveBudget;
+use Bitrix\Main\DI\ServiceLocator;
 
-abstract class BaseBiTool extends ToolContract
+abstract class BaseBiTool extends ToolContract implements ImpactAwareTool
 {
-	private const UNAVAILABLE_DASHBOARD_MESSAGE = 'Dashboard is temporarily unavailable. Try again in a moment, or pick another report.';
-	// Longest refusal the API composes is a couple of sentences plus a value list.
-	private const MAX_REFUSAL_LENGTH = 500;
-	// {@see Integrator\Sender::parseJsonResponse()} wraps a body it could not
-	// decode into an error of its own, carrying that body verbatim.
-	private const UNPARSED_RESPONSE_PREFIX = 'Could not parse server response';
-
-	/**
-	 * Charts, datasets, BI tables and SQL Lab have no dashboard to fall back to,
-	 * so they report the failure in terms of the BI service instead.
-	 */
-	private const UNAVAILABLE_BI_MESSAGE = 'The BI request could not be completed right now — the BI service may be busy or still syncing. Try again in a moment.';
-
-	private static function isBiAvailable(): bool
-	{
-		if (!Feature::isBitrixGptBiConstructorEnabled())
-		{
-			return false;
-		}
-
-		if (!Loader::includeModule('biconnector'))
-		{
-			return false;
-		}
-
-		if (!Feature::isBuilderEnabled())
-		{
-			return false;
-		}
-
-		if (
-			Loader::includeModule('intranet')
-			&& !ToolsManager::getInstance()->checkAvailabilityByToolId('crm_bi')
-		)
-		{
-			return false;
-		}
-
-		if (!DomainLinkService::getInstance()->isLinked())
-		{
-			return false;
-		}
-
-		return true;
-	}
+	use BiToolBehaviour;
 
 	/**
 	 * Enforces the per-user BI-tools rate limit before delegating to the base
-	 * runner. All BI tools (read and write) extend this class, so every call is
-	 * counted against the same sliding window.
+	 * runner. The check itself is shared with {@see BaseSubjectAwareBiTool::run()}
+	 * through {@see BiToolBehaviour::enforceRateLimit()}, so both branches count
+	 * into one budget.
 	 *
 	 * @inheritDoc
 	 * @throws McpException When the per-user rate limit is exceeded.
 	 */
 	public function run(int $userId, ...$args): array
 	{
-		$limit = (new BiToolsRateLimiter())->consume($userId);
+		$this->callerUserId = $userId;
+		$this->enforceRateLimit($userId);
+
+		return parent::run($userId, ...$args);
+	}
+
+	/**
+	 * Charges an irreversible operation to the per-user destructive budget, which
+	 * counts distinct objects rather than calls: retrying the same object is free,
+	 * a sweep across many objects is not.
+	 *
+	 * Stays for good: UnpublishDashboardTool never moves onto a builder operation.
+	 *
+	 * @param string $objectType `dashboard`, `chart` or `dataset`.
+	 * @throws McpException When the destructive budget is spent.
+	 */
+	protected function spendDestructiveBudget(int $userId, string $objectType, int $objectId): void
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			$this->legacySpendDestructiveBudget($userId, $objectType, $objectId);
+
+			return;
+		}
+
+		// Resolved per call, not injected: aiassistant keeps a tool as a process-wide singleton,
+		// while the limiter behind the service code may be replaced (tests do it per case).
+		$budget = DestructiveBudget::forCurrentLimiter();
+		$result = $budget->spend(new Actor($userId, Channel::Mcp), $objectType, $objectId);
+		if (!$result->isSuccess())
+		{
+			throw new McpException($result->getError()->getMessage());
+		}
+	}
+
+	private function legacySpendDestructiveBudget(int $userId, string $objectType, int $objectId): void
+	{
+		$limiter = ServiceLocator::getInstance()->get('biconnector.service.biToolsRateLimiter');
+
+		$limit = $limiter->consumeObject($userId, $objectType . ':' . $objectId);
 		if (!$limit['allowed'])
 		{
 			throw new McpException(
-				'Rate limit exceeded: не более ' . BiToolsRateLimiter::MAX_REQUESTS
-				. ' запросов BI-инструментов в минуту. Повтори через ' . $limit['retryAfter'] . ' сек.'
+				'Destructive limit exceeded: at most ' . BiToolsRateLimiter::DESTRUCTIVE_MAX_OBJECTS
+				. ' irreversible operations on distinct objects per minute. Retry in '
+				. $limit['retryAfter'] . ' seconds.'
 			);
 		}
-
-		return parent::run($userId, ...$args);
 	}
 
 	public function canList(int $userId): bool
@@ -109,526 +93,5 @@ abstract class BaseBiTool extends ToolContract
 		SupersetInitializer::initializeOrCheckSupersetStatus();
 
 		return true;
-	}
-
-	protected function getAccessController(int $userId): AccessController
-	{
-		return new AccessController($userId);
-	}
-
-	/**
-	 * Object-level write scope for charts. A chart may be modified or deleted
-	 * only if the user has EDIT rights on at least one dashboard that uses it —
-	 * the same rule the web UI applies, where charts are managed through their
-	 * dashboards.
-	 *
-	 * `$chartDashboards` is the raw Superset `dashboards` list from
-	 * getChartById(): each entry's `id` is the dashboard's Superset EXTERNAL_ID,
-	 * translated here to the local {@see SupersetDashboardTable} PK before the ACL
-	 * check.
-	 *
-	 * Denies (throws) an orphan chart with no dashboards, dashboards not known
-	 * locally, or none the user can edit.
-	 *
-	 * @param array $chartDashboards Raw Superset dashboards from the chart payload.
-	 * @throws McpException When the user cannot edit any consumer dashboard.
-	 */
-	protected function assertChartEditableByDashboards(int $userId, array $chartDashboards): void
-	{
-		$accessController = $this->getAccessController($userId);
-
-		$externalIds = [];
-		foreach ($chartDashboards as $dashboard)
-		{
-			if (!is_array($dashboard))
-			{
-				continue;
-			}
-
-			$externalId = (int)($dashboard['id'] ?? 0);
-			if ($externalId > 0)
-			{
-				$externalIds[$externalId] = $externalId;
-			}
-		}
-
-		if (empty($externalIds))
-		{
-			throw new McpException(
-				'You can edit this chart only if you have edit rights on at least one dashboard that uses it.'
-			);
-		}
-
-		// One query for all consumer dashboards instead of one per dashboard.
-		$rows = SupersetDashboardTable::getList([
-			'select' => ['ID', 'EXTERNAL_ID'],
-			'filter' => ['=EXTERNAL_ID' => array_values($externalIds)],
-		])->fetchAll();
-
-		$localIdByExternalId = [];
-		foreach ($rows as $row)
-		{
-			$externalId = (int)($row['EXTERNAL_ID'] ?? 0);
-			$localId = (int)($row['ID'] ?? 0);
-			if ($externalId > 0 && $localId > 0)
-			{
-				$localIdByExternalId[$externalId] = $localId;
-			}
-		}
-
-		foreach ($externalIds as $externalId)
-		{
-			$localId = $localIdByExternalId[$externalId] ?? 0;
-			if ($localId <= 0)
-			{
-				continue;
-			}
-
-			$accessItem = DashboardAccessItem::createFromId($localId);
-			if ($accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem))
-			{
-				return;
-			}
-		}
-
-		throw new McpException(
-			'You can edit this chart only if you have edit rights on at least one dashboard that uses it.'
-		);
-	}
-
-	/**
-	 * Object-level write scope for datasets. A dataset may be modified or deleted
-	 * only by one of its owners. Ownership is compared on CLIENT_ID, the
-	 * cross-mode (box/cloud) user key: `$datasetOwners` is the owners list from
-	 * getDatasetById() already mapped to CLIENT_IDs, and the current user's
-	 * CLIENT_ID is resolved from the local biconnector user mapping.
-	 *
-	 * Denies (throws) a dataset without owners, an unknown current identity, or a
-	 * user who is not among the owners.
-	 *
-	 * @param array $datasetOwners Dataset owners as CLIENT_ID strings.
-	 * @throws McpException When the current user does not own the dataset.
-	 */
-	protected function assertDatasetOwned(int $userId, array $datasetOwners): void
-	{
-		$row = SupersetUserTable::getRow([
-			'select' => ['CLIENT_ID'],
-			'filter' => ['=USER_ID' => $userId],
-		]);
-		$clientId = (string)($row['CLIENT_ID'] ?? '');
-
-		$owners = [];
-		foreach ($datasetOwners as $owner)
-		{
-			if (is_string($owner) && $owner !== '')
-			{
-				$owners[] = $owner;
-			}
-		}
-
-		if ($clientId === '' || !in_array($clientId, $owners, true))
-		{
-			throw new McpException('You can modify or delete only datasets you own.');
-		}
-	}
-
-	/**
-	 * Returns a tool argument as it was sent by the client
-	 *
-	 * @param string $name Argument name to extract.
-	 * @param array $args filtered arguments passed to the tool.
-	 * @return mixed Raw client value, or the filtered value as a fallback.
-	 */
-	protected function getRawArgument(string $name, array $args): mixed
-	{
-		$request = Application::getInstance()->getContext()->getRequest();
-
-		$rawArgs = $request->getJsonList()->getRaw('arguments');
-		if (is_array($rawArgs) && array_key_exists($name, $rawArgs))
-		{
-			return $rawArgs[$name];
-		}
-
-		try
-		{
-			$raw = $request->getInput();
-			if (is_string($raw) && $raw !== '')
-			{
-				$decoded = \Bitrix\Main\Web\Json::decode($raw);
-				$bodyArgs = $decoded['arguments'] ?? $decoded['params']['arguments'] ?? null;
-				if (is_array($bodyArgs) && array_key_exists($name, $bodyArgs))
-				{
-					return $bodyArgs[$name];
-				}
-			}
-		}
-		catch (\Throwable)
-		{
-		}
-
-		return $args[$name] ?? null;
-	}
-
-	protected function loadViewableDashboard(int $dashboardId, int $userId): Result
-	{
-		$result = new Result();
-
-		$dashboard = SupersetDashboardTable::getById($dashboardId)->fetchObject();
-		if (!$dashboard)
-		{
-			return $result->addError(new Error('Dashboard not found.', 'dashboard_not_found'));
-		}
-
-		$accessItem = DashboardAccessItem::createFromId($dashboardId);
-		if (!$this->getAccessController($userId)->check(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $accessItem))
-		{
-			return $result->addError(new Error('Access denied.', 'access_denied'));
-		}
-
-		return $result->setData(['dashboard' => $dashboard]);
-	}
-
-	protected function loadReadyDashboard(int $dashboardId, int $userId): Result
-	{
-		$result = new Result();
-
-		$instanceStatus = SupersetInitializer::getSupersetStatus();
-		if ($instanceStatus !== SupersetInitializer::SUPERSET_STATUS_READY)
-		{
-			return $this->handleInstanceNotReady($instanceStatus, $dashboardId, $userId);
-		}
-
-		$accessResult = $this->loadViewableDashboard($dashboardId, $userId);
-		if (!$accessResult->isSuccess())
-		{
-			return $accessResult;
-		}
-		$dashboard = $accessResult->getData()['dashboard'];
-
-		$status = $dashboard->getStatus();
-		$installableStatuses = [
-			SupersetDashboardTable::DASHBOARD_STATUS_NOT_INSTALLED,
-			SupersetDashboardTable::DASHBOARD_STATUS_FAILED,
-		];
-		if (in_array($status, $installableStatuses, true))
-		{
-			Application::getInstance()->addBackgroundJob(static function () use ($dashboardId) {
-				MarketDashboardManager::getInstance()->reinstallDashboard($dashboardId);
-			});
-
-			return $result->addError(new Error(
-				'Dashboard is preparing, first open takes a moment. Try again shortly.',
-				'dashboard_preparing',
-			));
-		}
-
-		if ($status === SupersetDashboardTable::DASHBOARD_STATUS_LOAD)
-		{
-			return $result->addError(new Error(
-				'Dashboard is preparing, first open takes a moment. Try again shortly.',
-				'dashboard_preparing',
-			));
-		}
-
-		$readyStatuses = [
-			SupersetDashboardTable::DASHBOARD_STATUS_READY,
-			SupersetDashboardTable::DASHBOARD_STATUS_DRAFT,
-		];
-		if (!in_array($status, $readyStatuses, true))
-		{
-			$detail = 'Dashboard ' . $dashboardId . ' status not ready: ' . $status;
-			AiToolsLogger::logErrors(
-				[new Error($detail)],
-				['stage' => 'load_dashboard.status', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
-			);
-
-			$message = self::appendDebugDetail(self::UNAVAILABLE_DASHBOARD_MESSAGE, $detail);
-
-			return $result->addError(new Error($message, 'dashboard_unavailable'));
-		}
-
-		if (!$dashboard->getExternalId())
-		{
-			$detail = 'Dashboard ' . $dashboardId . ' has no external id (not synced yet)';
-			AiToolsLogger::logErrors(
-				[new Error($detail)],
-				['stage' => 'load_dashboard.no_external_id', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
-			);
-
-			$message = self::appendDebugDetail(self::UNAVAILABLE_DASHBOARD_MESSAGE, $detail);
-
-			return $result->addError(new Error($message, 'dashboard_unavailable'));
-		}
-
-		return $result->setData(['dashboard' => $dashboard]);
-	}
-
-	/**
-	 * Loads a dashboard for write access: feature flag + existence + custom-type +
-	 * status (READY/DRAFT only) + EDIT ACL + sync state. On success,
-	 * `getData()['dashboard']` holds the {@see SupersetDashboard}.
-	 *
-	 * Mirrors {@see self::loadDashboard()} but with two write-specific tweaks:
-	 *   - `ACTION_BIC_DASHBOARD_EDIT` instead of `_VIEW`;
-	 *   - rejects non-custom dashboards (system/marketplace dashboards are
-	 *     read-only for the agent).
-	 *
-	 * The feature gate is enforced here so each write tool doesn't duplicate the
-	 * `Feature::isBuilderEnabled()` check.
-	 */
-	protected function loadDashboardForWrite(int $dashboardId, int $userId): Result
-	{
-		$result = new Result();
-
-		if (!Feature::isBuilderEnabled())
-		{
-			return $result->addError(new Error('BI Builder feature is not enabled on this portal.', 'feature_disabled'));
-		}
-
-		$dashboard = SupersetDashboardTable::getById($dashboardId)->fetchObject();
-		if (!$dashboard)
-		{
-			return $result->addError(new Error('Dashboard not found.', 'dashboard_not_found'));
-		}
-
-		if ($dashboard->getType() !== SupersetDashboardTable::DASHBOARD_TYPE_CUSTOM)
-		{
-			return $result->addError(new Error('Only custom dashboards can be updated.', 'not_custom'));
-		}
-
-		// Status invariant matches loadDashboard(): list_dashboards / get_dashboard_meta
-		// only surface READY/DRAFT dashboards; writes follow the same rule so the
-		// toolset never accepts updates to an ERROR/LIMIT_EXCEEDED/LOAD dashboard
-		// that is hidden everywhere else.
-		$status = $dashboard->getStatus();
-		$allowed = [
-			SupersetDashboardTable::DASHBOARD_STATUS_READY,
-			SupersetDashboardTable::DASHBOARD_STATUS_DRAFT,
-		];
-		if (!in_array($status, $allowed, true))
-		{
-			AiToolsLogger::logErrors(
-				[new Error('Dashboard ' . $dashboardId . ' status not editable: ' . $status)],
-				['stage' => 'load_dashboard_for_write.status', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
-			);
-
-			return $result->addError(new Error(self::UNAVAILABLE_DASHBOARD_MESSAGE, 'dashboard_unavailable'));
-		}
-
-		$accessItem = DashboardAccessItem::createFromId($dashboardId);
-		if (!$this->getAccessController($userId)->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem))
-		{
-			return $result->addError(new Error('Access denied.', 'access_denied'));
-		}
-
-		if (!$dashboard->getExternalId())
-		{
-			AiToolsLogger::logErrors(
-				[new Error('Dashboard ' . $dashboardId . ' has no external id (not synced yet)')],
-				['stage' => 'load_dashboard_for_write.no_external_id', 'dashboard_id' => $dashboardId, 'user_id' => $userId],
-			);
-
-			return $result->addError(new Error(self::UNAVAILABLE_DASHBOARD_MESSAGE, 'dashboard_unavailable'));
-		}
-
-		return $result->setData(['dashboard' => $dashboard]);
-	}
-
-	private function handleInstanceNotReady(string $instanceStatus, int $dashboardId, int $userId): Result
-	{
-		$result = new Result();
-
-		if ($instanceStatus === SupersetInitializer::SUPERSET_STATUS_DOESNT_EXISTS)
-		{
-			SupersetInitializer::startupSuperset();
-		}
-
-		if (in_array($instanceStatus, [
-			SupersetInitializer::SUPERSET_STATUS_DOESNT_EXISTS,
-			SupersetInitializer::SUPERSET_STATUS_LOAD,
-		], true))
-		{
-			return $result->addError(new Error(
-				'BI is preparing, this can take a moment on first use. Try again shortly.',
-				'bi_preparing',
-			));
-		}
-
-		if ($instanceStatus === SupersetInitializer::SUPERSET_STATUS_LIMIT_EXCEEDED)
-		{
-			return $result->addError(new Error(
-				'Maximum number of BI Builder instances reached for this license key. '
-				. 'Disable BI Builder on any other Bitrix24 that uses the same license key, '
-				. 'then try again.',
-				'bi_limit_exceeded',
-			));
-		}
-
-		$detail = 'Instance status ' . $instanceStatus . ' for dashboard ' . $dashboardId;
-		AiToolsLogger::logErrors(
-			[new Error($detail)],
-			[
-				'stage' => 'load_dashboard.instance_status',
-				'dashboard_id' => $dashboardId,
-				'user_id' => $userId,
-				'instance_status' => $instanceStatus,
-			],
-		);
-
-		$message = self::appendDebugDetail('BI is temporarily unavailable. Try again later.', $detail);
-
-		return $result->addError(new Error($message, 'bi_unavailable'));
-	}
-
-	/**
-	 * Translate the first {@see Error} of a failing Result into an McpException
-	 * with structured payload (if any) appended as JSON. Throw sites stay in
-	 * `executeStructured()` — helpers below the tool layer return Results.
-	 */
-	protected static function toMcpException(Result $result): McpException
-	{
-		$errors = $result->getErrors();
-		$error = $errors[0] ?? new Error('The BI operation failed for an unknown reason. Try again; if it keeps failing, report it.');
-		$message = $error->getMessage();
-		$payload = $error->getCustomData();
-		if (is_array($payload) && !empty($payload))
-		{
-			$message .= '. ' . json_encode($payload, JSON_UNESCAPED_UNICODE);
-		}
-
-		return new McpException($message);
-	}
-
-	/**
-	 * Translate a failed Integrator response for the agent. A `400` carries its
-	 * reason through: what has to change is the request itself, so answering
-	 * "try again later" both hides the cause and advises the wrong action.
-	 * Everything else — transport, instance status, upstream failure — stays
-	 * masked by {@see unavailableDashboardException()}. `403`/`404` are masked
-	 * too: access and existence are decided locally before any Integrator call,
-	 * so a remote one speaks about our sync state, not about the user's request.
-	 */
-	protected static function integratorFailureException(
-		IntegratorResponse $response,
-		array $context,
-	): McpException
-	{
-		$errors = $response->getErrors();
-		// A response can fail by carrying no data at all, with no error attached.
-		$message = trim(($errors[0] ?? null)?->getMessage() ?? '');
-		if (
-			$response->getStatus() !== IntegratorResponse::STATUS_BAD_REQUEST
-			|| !self::isRecognizedRefusal($message)
-		)
-		{
-			return self::unavailableDashboardException($errors, $context);
-		}
-
-		AiToolsLogger::logWarning($errors, $context);
-
-		return new McpException($message);
-	}
-
-	/**
-	 * Whether a `400` text is a refusal formulated by the API rather than an
-	 * arbitrary response body. Anything the remote side did not phrase for the
-	 * agent — a proxy error page, an unparsed body wrapped by the Integrator —
-	 * lands verbatim in the model context, so it is both noise and an indirect
-	 * prompt-injection channel, and gets masked instead.
-	 */
-	private static function isRecognizedRefusal(string $message): bool
-	{
-		if ($message === '' || mb_strlen($message) > self::MAX_REFUSAL_LENGTH)
-		{
-			return false;
-		}
-
-		if (str_contains($message, '<'))
-		{
-			return false;
-		}
-
-		return !str_starts_with($message, self::UNPARSED_RESPONSE_PREFIX);
-	}
-
-	/**
-	 * Wrap an Integrator failure in a generic agent-facing message + a detailed
-	 * event log entry. Real cause never leaks to the LLM context.
-	 *
-	 * Logged at WARNING, not ERROR: a failure to read data from Superset is not
-	 * something this module can fix (it is a downstream/transient condition — e.g.
-	 * a just-installed report whose charts are not queryable yet), so it must not
-	 * raise error-level noise. Genuine module-side problems (bad dashboard status,
-	 * instance error) are still logged as errors from their own call sites.
-	 *
-	 * @param \Bitrix\Main\Error[] $errors
-	 */
-	protected static function unavailableDashboardException(array $errors, array $context): McpException
-	{
-		return self::unavailableException(self::UNAVAILABLE_DASHBOARD_MESSAGE, $errors, $context);
-	}
-
-	/**
-	 * Same as {@see self::unavailableDashboardException()} for tools that operate
-	 * on charts, datasets, BI tables or SQL Lab, where a dashboard-worded message
-	 * would misdirect the agent.
-	 *
-	 * @param \Bitrix\Main\Error[] $errors
-	 */
-	protected static function unavailableBiException(array $errors, array $context): McpException
-	{
-		return self::unavailableException(self::UNAVAILABLE_BI_MESSAGE, $errors, $context);
-	}
-
-	/**
-	 * @param \Bitrix\Main\Error[] $errors
-	 */
-	private static function unavailableException(string $message, array $errors, array $context): McpException
-	{
-		AiToolsLogger::logWarning($errors, $context);
-
-		if (self::isDebugLogEnabled())
-		{
-			$details = implode('; ', array_map(static fn(Error $e): string => $e->getMessage(), $errors));
-			$message .= ' | bi_debug: ' . $details . ' | ctx: ' . json_encode($context, JSON_UNESCAPED_UNICODE);
-		}
-
-		return new McpException($message);
-	}
-
-	/**
-	 * SQL Lab errors (syntax, timeout, table access reported by Superset) are
-	 * user-actionable — the agent is expected to fix and retry its query. Unlike
-	 * {@see self::unavailableDashboardException()} the real Superset message is
-	 * surfaced to the agent (PRD AC-008 / AC-031), while still being logged.
-	 *
-	 * @param \Bitrix\Main\Error[] $errors
-	 */
-	protected static function sqlLabException(array $errors, array $context): McpException
-	{
-		AiToolsLogger::logErrors($errors, $context);
-
-		$message = implode('; ', array_map(static fn(Error $e): string => $e->getMessage(), $errors));
-		if ($message === '')
-		{
-			$message = 'SQL execution failed and Superset returned no error text. Check the query syntax and table/column names, then retry.';
-		}
-
-		return new McpException($message);
-	}
-
-	private static function isDebugLogEnabled(): bool
-	{
-		return Option::get('biconnector', 'bgpt_bi_expand_log', 'N') === 'Y';
-	}
-
-	private static function appendDebugDetail(string $message, string $detail): string
-	{
-		if (self::isDebugLogEnabled())
-		{
-			$message .= ' | bi_debug: ' . $detail;
-		}
-
-		return $message;
 	}
 }

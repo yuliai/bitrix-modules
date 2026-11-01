@@ -25,6 +25,7 @@ class Params extends Registry
 
 	public const
 		FILE_ID = 'FILE_ID',
+		FILE_ORDER = 'FILE_ORDER',
 		ATTACH = 'ATTACH',
 		MENU = 'MENU',
 		KEYBOARD = 'KEYBOARD',
@@ -98,6 +99,12 @@ class Params extends Registry
 	protected static array $typeMap = [
 		self::FILE_ID => [
 			'type' => Param::TYPE_INT_ARRAY,
+		],
+		// Service parameter over the composition of FILE_ID: clients do not read it, so it stays inside
+		self::FILE_ORDER => [
+			'className' => Message\Param\FileOrder::class,
+			'type' => Param::TYPE_JSON,
+			'isHidden' => true,
 		],
 		self::IS_DELETED => [
 			'type' => Param::TYPE_BOOL,

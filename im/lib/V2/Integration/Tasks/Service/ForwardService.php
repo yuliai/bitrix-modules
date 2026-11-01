@@ -38,7 +38,12 @@ class ForwardService
 			return (new Result())->addError(new ChatError(ChatError::NOT_FOUND));
 		}
 
-		$service = (new Message\Forward\ForwardService($chat))->setContextUser($userId);
+		// the forward is the only trace of the source the task gets, so it carries a message of a
+		// discussion as well: the chat of the task is not a place a user forwards anything into
+		$service = (new Message\Forward\ForwardService($chat))
+			->markAsSystemForward()
+			->setContextUser($userId)
+		;
 
 		return $service->createMessages($messages);
 	}

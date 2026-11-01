@@ -2,7 +2,10 @@
 
 use Bitrix\Main\EventManager;
 use Bitrix\Main\EventResult;
+use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Copyright;
+
+Loader::registerNamespace('Bitrix\\Mobile\\Tab\\Preset', __DIR__ . '/lib/tab/Preset');
 
 CModule::AddAutoloadClasses(
 	'mobile',
@@ -14,13 +17,15 @@ CModule::AddAutoloadClasses(
 );
 
 // Dev/QA tools live outside the shipped module tree, so they exist only in a developer checkout.
-if (is_dir(__DIR__ . '/dev/public/integrator'))
+if (is_dir(__DIR__ . '/dev/public/my-company'))
 {
 	CModule::AddAutoloadClasses(
 		'mobile',
 		[
-			'Bitrix\\Mobile\\Dev\\Integrator\\IntegratorMock' => 'dev/public/integrator/IntegratorMock.php',
-			'Bitrix\\Mobile\\Controller\\IntegratorDev' => 'dev/public/integrator/IntegratorDevController.php',
+			'Bitrix\\Mobile\\Dev\\Integrator\\IntegratorMock' => 'dev/public/my-company/IntegratorMock.php',
+			'Bitrix\\Mobile\\Controller\\IntegratorDev' => 'dev/public/my-company/IntegratorDevController.php',
+			'Bitrix\\Mobile\\Dev\\MyCompany\\ImplementationSpecialistsSandbox'
+				=> 'dev/public/my-company/ImplementationSpecialistsSandbox.php',
 		]
 	);
 }

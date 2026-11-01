@@ -258,7 +258,12 @@ class Controller
 				true,
 			))
 			{
-				$data[Dictionary::CONTEXT_APPLICATION_SOURCE] = static::resolveApplicationSource($data);
+				$application = static::resolveApplicationAnalyticsData($data);
+				$data[Dictionary::CONTEXT_APPLICATION_SOURCE] = $application['source'];
+				if ($application['code'] !== null)
+				{
+					$data[Dictionary::CONTEXT_APPLICATION_CODE] = $application['code'];
+				}
 			}
 
 			try
@@ -314,24 +319,28 @@ class Controller
 		return $result;
 	}
 
-	private static function resolveApplicationSource(array $data): ?string
+	private static function resolveApplicationAnalyticsData(array $data): array
 	{
 		$appId = (int)($data['APP_ID'] ?? 0);
 		if ($appId <= 0)
 		{
-			return null;
+			return ['source' => null, 'code' => null];
 		}
 
 		try
 		{
 			$app = \Bitrix\Rest\AppTable::getByClientId($appId);
 			$clientId = $app['CLIENT_ID'] ?? null;
+			$code = $app['CODE'] ?? null;
 
-			return is_string($clientId) ? Dictionary::getApplicationSource($clientId) : null;
+			return [
+				'source' => is_string($clientId) ? Dictionary::getApplicationSource($clientId) : null,
+				'code' => is_string($code) && $code !== '' ? $code : null,
+			];
 		}
 		catch (\Throwable)
 		{
-			return null;
+			return ['source' => null, 'code' => null];
 		}
 	}
 }

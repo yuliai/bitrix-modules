@@ -31,6 +31,16 @@ final class DashboardJsonMetadataReader
 	 */
 	public static function fetch(int $externalId, int $userId, int $dashboardId, string $stage): array
 	{
+		return self::fetchDashboard($externalId, $userId, $dashboardId, $stage)?->jsonMetadata ?? [];
+	}
+
+	/**
+	 * The same read as fetch(), telling a failure apart from a dashboard with empty metadata.
+	 *
+	 * @return DashboardDto|null The dashboard as Superset holds it, or null when it could not be read.
+	 */
+	public static function fetchDashboard(int $externalId, int $userId, int $dashboardId, string $stage): ?DashboardDto
+	{
 		$response = IntegratorFactory::getInstance()->getDashboardById($externalId);
 		if ($response->hasErrors())
 		{
@@ -44,7 +54,7 @@ final class DashboardJsonMetadataReader
 				],
 			);
 
-			return [];
+			return null;
 		}
 
 		$dto = $response->getData();
@@ -60,10 +70,10 @@ final class DashboardJsonMetadataReader
 				],
 			);
 
-			return [];
+			return null;
 		}
 
-		return $dto->jsonMetadata;
+		return $dto;
 	}
 
 	/**

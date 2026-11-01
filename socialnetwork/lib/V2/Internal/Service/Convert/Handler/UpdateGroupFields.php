@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Socialnetwork\V2\Internal\Service\Convert\Handler;
 
 use Bitrix\Socialnetwork\Collab\Control\Command\ValueObject\CollabSiteIds;
+use Bitrix\Socialnetwork\Collab\Integration\Extranet\Extranet;
 use Bitrix\Socialnetwork\Internals\Registry\GroupRegistry;
 use Bitrix\Socialnetwork\Item\Workgroup;
 use Bitrix\Socialnetwork\Item\Workgroup\Type;
+use Bitrix\Socialnetwork\V2\Internal\DI\Container;
 use Bitrix\Socialnetwork\V2\Internal\Exceptions\ProjectUpdateFieldsException;
 use Bitrix\Socialnetwork\WorkgroupTable;
 use CSocNetGroup;
@@ -56,8 +58,13 @@ class UpdateGroupFields implements HandlerInterface
 		if ($group->getType() !== Type::Collab)
 		{
 			$fieldsToUpdate['TYPE'] = Type::Collab->value;
-			$fieldsToUpdate['SITE_ID'] = CollabSiteIds::createWithDefaultValue()->getValue();
 			$fieldsToUpdate['PROJECT'] = 'Y';
+
+			$siteIds = $this->resolveSiteIds($group);
+			if ($siteIds !== null)
+			{
+				$fieldsToUpdate['SITE_ID'] = $siteIds;
+			}
 		}
 
 		if (
@@ -69,6 +76,79 @@ class UpdateGroupFields implements HandlerInterface
 		}
 
 		return $fieldsToUpdate;
+	}
+
+	private function resolveSiteIds(Workgroup $group): ?array
+	{
+		$linkedSiteIds = $this->normalizeSiteIds($group->getSiteIds());
+		$resolvedSiteIds = $this->normalizeSiteIds($this->getStoredSiteIds($group->getId()));
+
+		if (empty($resolvedSiteIds))
+		{
+			$targetSiteIds = $this->normalizeSiteIds($this->getDefaultSiteIds());
+		}
+		else
+		{
+			$targetSiteIds = $resolvedSiteIds;
+			$extranetSiteId = $this->getExtranetSiteId();
+
+			if ($extranetSiteId !== '' && !in_array($extranetSiteId, $targetSiteIds, true))
+			{
+				$targetSiteIds[] = $extranetSiteId;
+			}
+		}
+
+		if (empty($targetSiteIds))
+		{
+			return null;
+		}
+
+		if (!empty($linkedSiteIds) && $this->isSameSiteSet($linkedSiteIds, $targetSiteIds))
+		{
+			return null;
+		}
+
+		return $targetSiteIds;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function normalizeSiteIds(array $siteIds): array
+	{
+		return array_values(array_unique(array_filter(
+			$siteIds,
+			static fn (mixed $siteId): bool => is_string($siteId) && $siteId !== '',
+		)));
+	}
+
+	private function isSameSiteSet(array $first, array $second): bool
+	{
+		sort($first);
+		sort($second);
+
+		return $first === $second;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	protected function getStoredSiteIds(int $groupId): array
+	{
+		return Container::getInstance()->getProjectRepository()->getSiteIds($groupId);
+	}
+
+	protected function getExtranetSiteId(): string
+	{
+		return Extranet::getSiteId();
+	}
+
+	/**
+	 * @return string[]
+	 */
+	protected function getDefaultSiteIds(): array
+	{
+		return CollabSiteIds::createWithDefaultValue()->getValue();
 	}
 
 	protected function updateGroup(int $groupId, array $fields): int|bool

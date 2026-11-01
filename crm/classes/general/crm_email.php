@@ -831,16 +831,15 @@ class CCrmEMail
 		// skip employees
 		$employeesEmails = array();
 		{
-			$filter = array(
-				'=ACTIVE' => 'Y',
-				'=EMAIL' => $isIncome ? $sender : $rcpt,
-				'IS_REAL_USER' => 'Y',
-			);
-
-			$res = \Bitrix\Main\UserTable::getList(array(
-				'select' => array('ID', 'EMAIL', 'UF_DEPARTMENT'),
-				'filter' => $filter,
-			));
+			$res = \Bitrix\Main\UserTable::query()
+				->setSelect(['ID', 'EMAIL', 'UF_DEPARTMENT'])
+				->setFilter([
+					'=ACTIVE' => 'Y',
+					'=EMAIL' => $isIncome ? $sender : $rcpt,
+				])
+				->where('REAL_USER', 'expr', true)
+				->exec()
+			;
 
 			if ($isIncome)
 			{

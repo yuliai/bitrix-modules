@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Infrastructure\Rest\Provider\Item;
 
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\SchemaProvider;
 use Bitrix\Crm\V2\Public\Entity\Item\Company;
 use Bitrix\Crm\V2\Public\Entity\Item\Contact;
 use Bitrix\Crm\V2\Public\Entity\Item\Item;
@@ -140,7 +141,9 @@ class RestItemProvider
 			$item instanceof Company
 			&& (
 				$item->getIsMyCompany() === true
-				|| ($this->isCompanyCategoryRestrictionEnabled() && $item->getCategoryId() !== 0)
+				|| ($this->isCompanyCategoryRestrictionEnabled()
+					&& $this->getRouteCategoryId() !== null
+					&& $item->getCategoryId() !== $this->getRouteCategoryId())
 			)
 		);
 	}
@@ -150,7 +153,8 @@ class RestItemProvider
 		return !(
 			$item instanceof Contact
 			&& $this->isContactCategoryRestrictionEnabled()
-			&& $item->getCategoryId() !== 0
+			&& $this->getRouteCategoryId() !== null
+			&& $item->getCategoryId() !== $this->getRouteCategoryId()
 		);
 	}
 
@@ -168,11 +172,17 @@ class RestItemProvider
 		if ($this->isCompanyCategoryRestrictionEnabled())
 		{
 			$restrictions['=isMyCompany'] = 'N';
-			$restrictions['=categoryId'] = 0;
+			if ($this->getRouteCategoryId() !== null)
+			{
+				$restrictions['=categoryId'] = $this->getRouteCategoryId();
+			}
 		}
 		elseif ($this->isContactCategoryRestrictionEnabled())
 		{
-			$restrictions['=categoryId'] = 0;
+			if ($this->getRouteCategoryId() !== null)
+			{
+				$restrictions['=categoryId'] = $this->getRouteCategoryId();
+			}
 		}
 
 		return $restrictions;
@@ -215,6 +225,11 @@ class RestItemProvider
 	private function isContactCategoryRestrictionEnabled(): bool
 	{
 		return $this->entityType->getId() === OwnerType::CONTACT;
+	}
+
+	private function getRouteCategoryId(): ?int
+	{
+		return SchemaProvider::getItemRouteCategoryId($this->entityType);
 	}
 
 	private function getProvider(): AbstractItemProvider

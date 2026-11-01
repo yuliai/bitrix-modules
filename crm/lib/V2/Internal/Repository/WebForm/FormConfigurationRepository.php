@@ -14,8 +14,8 @@ use Bitrix\Crm\V2\Internal\Entity\WebForm\Configuration\FormConfiguration;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\Section;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormChangeSet;
-use Bitrix\Crm\V2\Internal\Integration\Bitrix24\WebFormWriteRestriction;
 use Bitrix\Crm\V2\Internal\Integration\Sale\PaySystemGateway;
+use Bitrix\Crm\V2\Internal\Service\WebForm\ActiveFormLimit;
 use Bitrix\Crm\WebForm\Helper;
 use Bitrix\Crm\WebForm\Internals\FieldTable;
 use Bitrix\Crm\WebForm\Options\Dictionary;
@@ -473,25 +473,14 @@ final class FormConfigurationRepository
 	 * The limit the portal counts working forms against, and nothing on a portal where turning a
 	 * form on is not limited at all.
 	 *
-	 * Both numbers are asked of the repository reading forms, and so is the scenario turning a form
-	 * on: what the dictionary publishes and what that scenario refuses by are one count and one
-	 * maximum rather than two that can drift apart. Whether the limit applies is a question of the
-	 * plan and is answered where the questions of the plan live.
+	 * The pair is asked of the very object the scenarios refuse by ({@see ActiveFormLimit}): what
+	 * the dictionary publishes and what a creation or an activation is refused by are one count and
+	 * one maximum rather than two that can drift apart.
 	 *
 	 * @return null|array{current: int, maximum: int}
 	 */
 	private static function getActiveFormsLimit(): ?array
 	{
-		if (!(new WebFormWriteRestriction())->isActivationLimited())
-		{
-			return null;
-		}
-
-		$forms = new FormRepository();
-
-		return [
-			'current' => $forms->getActiveFormCount(),
-			'maximum' => $forms->getActiveFormMaximum(),
-		];
+		return (new ActiveFormLimit())->describe();
 	}
 }

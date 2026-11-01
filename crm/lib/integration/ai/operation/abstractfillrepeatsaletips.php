@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 
 use Bitrix\Crm\Dto\Dto;
 use Bitrix\Crm\Format\TextHelper;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Dto\RepeatSale\FillRepeatSaleTipsPayload;
 use Bitrix\Crm\Integration\AI\EventHandler;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
@@ -67,6 +68,8 @@ abstract class AbstractFillRepeatSaleTips extends AbstractOperation
 			return new FillRepeatSaleTipsPayload([]);
 		}
 
+		self::logUnreadableSections($json, $job);
+
 		$customerInfo = self::readSectionFields($json, 'customer_info');
 		$actionPlan = self::readSectionFields($json, 'action_plan');
 
@@ -89,6 +92,27 @@ abstract class AbstractFillRepeatSaleTips extends AbstractOperation
 		return new FillRepeatSaleTipsPayload($fields);
 	}
 
+	private static function logUnreadableSections(array $json, EO_Queue $job): void
+	{
+		foreach (['customer_info', 'action_plan'] as $sectionKey)
+		{
+			if (self::isSectionReadable($json, $sectionKey))
+			{
+				continue;
+			}
+
+			AIManager::logger()->warning(
+				'{date}: {class}: Unreadable section {sectionKey} in AI answer for job {jobHash},'
+				. ' valid fields are kept' . PHP_EOL,
+				[
+					'class' => static::class,
+					'sectionKey' => $sectionKey,
+					'jobHash' => (string)$job->getHash(),
+				],
+			);
+		}
+	}
+
 	/**
 	 * An answer nobody could read carries no verdict and stays a parse error.
 	 */
@@ -96,8 +120,7 @@ abstract class AbstractFillRepeatSaleTips extends AbstractOperation
 	{
 		return (self::isSectionPresent($json, 'customer_info') || self::isSectionPresent($json, 'action_plan'))
 			&& self::isSectionReadable($json, 'customer_info')
-			&& self::isSectionReadable($json, 'action_plan')
-		;
+			&& self::isSectionReadable($json, 'action_plan');
 	}
 
 	/**

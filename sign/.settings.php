@@ -238,6 +238,74 @@ return [
 		],
 		'readonly' => true,
 	],
+	'service.b2e.bizproc-chain.publicity' => [
+		'value' => [
+			'ru' => false,
+			'by' => false,
+			'eu' => false,
+			'de' => false,
+			'fr' => false,
+			'it' => false,
+			'pl' => false,
+			'uk' => false,
+			'ur' => false,
+			'us' => false,
+			'en' => false,
+			'br' => false,
+			'la' => false,
+			'tr' => false,
+			'jp' => false,
+			'tc' => false,
+			'sc' => false,
+			'hi' => false,
+			'vn' => false,
+			'id' => false,
+			'ms' => false,
+			'th' => false,
+			'cn' => false,
+			'in' => false,
+			'co' => false,
+			'mx' => false,
+			'ar' => false,
+			'ae' => false,
+			'md' => false,
+		],
+		'readonly' => true,
+	],
+	'service.b2e.run-process.publicity' => [
+		'value' => [
+			'ru' => false,
+			'by' => false,
+			'eu' => false,
+			'de' => false,
+			'fr' => false,
+			'it' => false,
+			'pl' => false,
+			'uk' => false,
+			'ur' => false,
+			'us' => false,
+			'en' => false,
+			'br' => false,
+			'la' => false,
+			'tr' => false,
+			'jp' => false,
+			'tc' => false,
+			'sc' => false,
+			'hi' => false,
+			'vn' => false,
+			'id' => false,
+			'ms' => false,
+			'th' => false,
+			'cn' => false,
+			'in' => false,
+			'co' => false,
+			'mx' => false,
+			'ar' => false,
+			'ae' => false,
+			'md' => false,
+		],
+		'readonly' => true,
+	],
 	'service.publicity' => [
 		'value' => [
 			'ru' => true,
@@ -341,6 +409,15 @@ return [
 			],
 			'sign.service.integration.disk' => [
 				'className' => Service\Integration\Disk\DiskService::class,
+			],
+			'sign.service.integration.bizproc.documentDraftCreator' => [
+				'className' => Service\Integration\Bizproc\DocumentDraftCreator::class,
+			],
+			'sign.service.integration.bizproc.draftFileSourceResolver' => [
+				'className' => Service\Integration\Bizproc\DraftFileSourceResolver::class,
+			],
+			'sign.service.integration.bizproc.draftIdempotencyService' => [
+				'className' => Service\Integration\Bizproc\DraftIdempotencyService::class,
 			],
 			Service\Integration\Socialnetwork\FeedPostService::class => [
 				'className' => Service\Integration\Socialnetwork\FeedPostService::class,
@@ -699,6 +776,36 @@ return [
 			],
 			'sign.service.integration.crm.entity.relation' => [
 				'className' => Service\Integration\Crm\EntityRelationService::class,
+			],
+			'sign.service.integration.crm.processType' => [
+				'className' => Service\Integration\Crm\ProcessTypeService::class,
+			],
+			'sign.service.integration.crm.processActivity' => [
+				'className' => \Bitrix\Sign\Integration\CRM\Activity\ProcessActivityHandler::class,
+				'constructorParams' => static fn() => [
+					'launchRepository' => Service\Container::instance()->getProcessLaunchRepository(),
+					'processTypeService' => Service\Container::instance()->getCrmProcessTypeService(),
+				],
+			],
+			'sign.service.integration.bizproc.processCatalog' => [
+				'className' => Service\Integration\Bizproc\ProcessCatalogService::class,
+			],
+			'sign.repository.process.launch' => [
+				'className' => Repository\Process\LaunchRepository::class,
+			],
+			'sign.service.process.launch' => [
+				'className' => Service\Process\LaunchService::class,
+				'constructorParams' => static fn() => [
+					'launchRepository' => Service\Container::instance()->getProcessLaunchRepository(),
+				],
+			],
+			'sign.service.process.running' => [
+				'className' => Service\Process\RunningProcessService::class,
+				'constructorParams' => static fn() => [
+					'launchRepository' => Service\Container::instance()->getProcessLaunchRepository(),
+					'processTypeService' => Service\Container::instance()->getCrmProcessTypeService(),
+					'documentRepository' => Service\Container::instance()->getDocumentRepository(),
+				],
 			],
 			'sign.service.provider.memberDynamic' => [
 				'className' => Service\Providers\MemberDynamicFieldInfoProvider::class,

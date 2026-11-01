@@ -15,10 +15,14 @@ use Bitrix\Main\Engine\Response\Converter;
 class RecentConfigManager
 {
 	public const DEFAULT_SECTION_NAME = 'default';
+	public const CHAT_SECTION_NAME = 'chat';
+	public const CHANNEL_SECTION_NAME = 'channel';
 
 	private array $configByTypes = [];
 	/** @var array<string, ComposedSection> */
 	private array $composedAliases = [];
+	/** @var array<string, string[]> */
+	private array $additionalSectionsByLiteral;
 	private bool $isLoaded = false;
 	private Converter $converterToCamelCase;
 
@@ -27,6 +31,7 @@ class RecentConfigManager
 	)
 	{
 		$this->converterToCamelCase = new Converter(Converter::TO_CAMEL | Converter::LC_FIRST);
+		$this->additionalSectionsByLiteral = $this->buildAdditionalSectionsMap();
 	}
 
 	public static function getInstance(): self
@@ -65,7 +70,7 @@ class RecentConfigManager
 
 	public function getRecentSectionsByChat(Chat $chat): array
 	{
-		$type = $chat->getExtendedType(false);
+		$type = $chat->getChatType();
 
 		if ($chat->hasParent())
 		{
@@ -75,7 +80,7 @@ class RecentConfigManager
 		return $this->getBaseRecentSections($type);
 	}
 
-	public function getAllRecentSectionsByType(string $type): array
+	public function getAllRecentSectionsByType(Chat\Type $type): array
 	{
 		$baseSections = $this->getBaseRecentSections($type);
 		$allSections = $baseSections;
@@ -91,7 +96,7 @@ class RecentConfigManager
 		return $allSections;
 	}
 
-	public function getExcludedComposedSections(string $type): array
+	public function getExcludedComposedSections(Chat\Type $type): array
 	{
 		$baseSections = $this->getBaseRecentSections($type);
 		$excluded = [];
@@ -107,9 +112,10 @@ class RecentConfigManager
 		return $excluded;
 	}
 
-	public function getBaseRecentSections(string $type): array
+	public function getBaseRecentSections(Chat\Type $type): array
 	{
-		$config = $this->getByExtendedType($type);
+		$extendedType = $type->getExtendedType(false);
+		$config = $this->getByExtendedType($extendedType);
 		$recentSections = [];
 
 		if ($config->useDefaultRecentSection)
@@ -119,10 +125,54 @@ class RecentConfigManager
 
 		if ($config->hasOwnRecentSection)
 		{
-			$recentSections[] = $config->getOwnSectionName() ?? $this->converterToCamelCase->process($type);
+			$recentSections[] = $config->getOwnSectionName() ?? $this->converterToCamelCase->process($extendedType);
+		}
+
+		foreach ($this->additionalSectionsByLiteral[$type->literal] ?? [] as $section)
+		{
+			$recentSections[] = $section;
 		}
 
 		return $recentSections;
+	}
+
+	/**
+	 * Membership of the additive 'chat' and 'channel' sections, decided by the chat letter alone.
+	 * Both sit on top of the sections a type declares for itself (double membership) and never
+	 * replace 'default'. Membership is a rule, not an enumeration of chat kinds: a letter carries
+	 * its section whatever the ENTITY_TYPE of the chat is, including a value no module registered.
+	 *
+	 * A pair kept out of a section is subtracted apart from this rule, at the single owner of such
+	 * exclusions ({@see \Bitrix\Im\V2\Chat\Type\TypeRegistry::isTypeExcludedFromSection()}).
+	 *
+	 * @return array<string, string[]>
+	 */
+	private function buildAdditionalSectionsMap(): array
+	{
+		$map = [];
+
+		// 'chat' - regular conversations: dialogs, group chats and open chats.
+		$chatLiterals = [
+			Chat::IM_TYPE_PRIVATE,
+			Chat::IM_TYPE_CHAT,
+			Chat::IM_TYPE_OPEN,
+		];
+		foreach ($chatLiterals as $literal)
+		{
+			$map[$literal][] = self::CHAT_SECTION_NAME;
+		}
+
+		// 'channel' - channels by membership: closed channels plus subscribed open channels.
+		$channelLiterals = [
+			Chat::IM_TYPE_CHANNEL,
+			Chat::IM_TYPE_OPEN_CHANNEL,
+		];
+		foreach ($channelLiterals as $literal)
+		{
+			$map[$literal][] = self::CHANNEL_SECTION_NAME;
+		}
+
+		return $map;
 	}
 
 	private function load(): void

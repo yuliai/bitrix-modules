@@ -2,6 +2,7 @@
 
 namespace Bitrix\Rest\V3\Realisation\Controller;
 
+use Bitrix\Rest\V3\Controller\ActionFilter\FieldAccessFilter;
 use Bitrix\Rest\V3\Controller\RestController;
 use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\AccessDeniedException;
@@ -15,6 +16,14 @@ use Bitrix\Rest\V3\Realisation\Request\Field\ListRequest;
 final class Field extends RestController
 {
 	private FieldMapper $mapper;
+
+	protected function getDefaultPreFilters()
+	{
+		$filters = parent::getDefaultPreFilters();
+		$filters[] = new FieldAccessFilter();
+
+		return $filters;
+	}
 
 	public function listAction(ListRequest $request): ListResponse
 	{

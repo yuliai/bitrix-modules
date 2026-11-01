@@ -6,9 +6,9 @@ namespace Bitrix\Rest\Internal\Service\Admission\Strategy;
 
 use Bitrix\Main\Application;
 use Bitrix\Rest\Internal\Exception\Admission\RestAccessDenialExceptionInterface;
+use Bitrix\Rest\Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanException;
 use Bitrix\Rest\Internal\Exception\Payment\MarketSubscriptionRequiredException;
 use Bitrix\Rest\Internal\Exception\Payment\RestUnavailableException;
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
 use Bitrix\Rest\Internal\Service\Admission\GrantingStrategyInterface;
 use Bitrix\Rest\Public\Event\RestAccessGrantEvent;
 

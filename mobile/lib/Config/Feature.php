@@ -7,6 +7,9 @@ namespace Bitrix\Mobile\Config;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
 
+/**
+ * @deprecated Use Bitrix\Main\Config\Feature instead
+ */
 final class Feature
 {
 	/**

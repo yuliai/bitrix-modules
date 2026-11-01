@@ -3,6 +3,7 @@
 namespace Bitrix\Im\V2\Analytics\Event;
 
 use Bitrix\Im\V2\Analytics\ChatAnalytics;
+use Bitrix\Im\V2\Application\Features;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Chat\Ai\AiAssistantPrivateChat;
 use Bitrix\Im\V2\Chat\ChannelChat;
@@ -177,7 +178,7 @@ class ChatEvent extends Event
 
 	protected function setChatP2(): self
 	{
-		if ($this->chat instanceof CopilotChat)
+		if ($this->chat instanceof CopilotChat && !Features::isBitrixGptV2Available())
 		{
 			$engineCode = $this->chat->getEngineCode();
 			$engineName = (new EngineManager())->getEngineNameByCode($engineCode) ?? '';
@@ -230,8 +231,11 @@ class ChatEvent extends Event
 
 		if ($this->chat instanceof CopilotChat)
 		{
-			$role = (new RoleManager())->getMainRole($this->chat->getChatId()) ?? '';
-			$this->p4 = 'role_' . self::convertUnderscore($role);
+			if (!Features::isBitrixGptV2Available())
+			{
+				$role = (new RoleManager())->getMainRole($this->chat->getChatId()) ?? '';
+				$this->p4 = 'role_' . self::convertUnderscore($role);
+			}
 
 			return $this;
 		}

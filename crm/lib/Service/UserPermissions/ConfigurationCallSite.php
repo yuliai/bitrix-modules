@@ -106,9 +106,9 @@ namespace Bitrix\Crm\Service\UserPermissions;
  * the card on. The field screen the control links to is a surface of its own and keeps its own case,
  * `FieldsEditComponent`.
  *
- * `RequirementProvider` reads the requirement settings of a field in the resolved entity and category.
- * Its former check was contextual and passed the category on; the registered model answers it through
- * {@see Configuration::canManageFields()}.
+ * `RequirementProvider` reads the requirement settings of a field in the resolved entity and category,
+ * while `RequirementCommand` changes them. Their former check was contextual and passed the category on;
+ * the registered model answers both through {@see Configuration::canManageFields()}.
  *
  * The common views and the common card layout are four surfaces of one screen, told apart by what
  * names the card: `EntityEditorPermissions` is
@@ -150,6 +150,7 @@ enum ConfigurationCallSite: string
 	case ItemDetailsFieldCreation = 'itemDetailsFieldCreation';
 	case FactoryBasedFieldCreation = 'factoryBasedFieldCreation';
 	case RequirementProvider = 'requirementProvider';
+	case RequirementCommand = 'requirementCommand';
 
 	// common views and the common card layout
 	case EntityEditorPermissions = 'entityEditorPermissions';

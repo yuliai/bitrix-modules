@@ -36,6 +36,11 @@ final class CopilotFolder extends SystemFolder
 		return ['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()];
 	}
 
+	public function getDescriptionLangKey(): ?string
+	{
+		return 'IM_FOLDER_SYSTEM_COPILOT_DESCRIPTION';
+	}
+
 	public function isAvailable(int $userId): bool
 	{
 		return CopilotChat::isActive();

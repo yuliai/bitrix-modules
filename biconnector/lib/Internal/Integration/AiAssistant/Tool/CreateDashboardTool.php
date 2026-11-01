@@ -9,7 +9,13 @@ use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\CreateDashboardOperation;
 use Bitrix\BIConnector\Superset\Logger\AiToolsLogger;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 
@@ -18,6 +24,11 @@ final class CreateDashboardTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'create_dashboard';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -49,6 +60,28 @@ final class CreateDashboardTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		Loader::includeModule('biconnector');
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$result = ServiceLocator::getInstance()->get(CreateDashboardOperation::class)->execute(
+			(string)($args['name'] ?? ''),
+			new Actor($userId, Channel::Mcp),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

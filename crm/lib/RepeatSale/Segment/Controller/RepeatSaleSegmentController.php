@@ -168,6 +168,19 @@ final class RepeatSaleSegmentController
 		return $this->getItem('ID', $id, $loadAssignmentUsers);
 	}
 
+	public function getFoundClientsCount(): int
+	{
+		$segment = RepeatSaleSegmentTable::query()
+			->setSelect(['CLIENT_FOUND'])
+			->where('CLIENT_FOUND', '>', 0)
+			->setOrder(['ID' => 'ASC'])
+			->setLimit(1)
+			->fetch()
+		;
+
+		return (int)($segment['CLIENT_FOUND'] ?? 0);
+	}
+
 	public function getByCode(string $code, bool $loadAssignmentUsers = false): ?RepeatSaleSegment
 	{
 		return $this->getItem('CODE', $code, $loadAssignmentUsers);
@@ -187,7 +200,6 @@ final class RepeatSaleSegmentController
 			->fetchObject()
 		;
 	}
-
 
 	public function getTotalCount(array $filter = []): int
 	{

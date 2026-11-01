@@ -359,10 +359,6 @@ class SmartInvoice extends Dynamic
 		);
 		$operation->addAction(
 			Operation::ACTION_AFTER_SAVE,
-			new Operation\Action\ActualizeDocuments()
-		);
-		$operation->addAction(
-			Operation::ACTION_AFTER_SAVE,
 			new Operation\Action\CreateFinalSummaryTimelineHistoryItem()
 		);
 

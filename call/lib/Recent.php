@@ -21,6 +21,13 @@ class Recent
 	 */
 	private const SCHEDULE_TOKEN_TTL = 60;
 
+	/**
+	 * Minimum interval (seconds) between two forceRecalc-driven snapshot rebuilds
+	 * for the same user in {@see self::updateUserActiveCallsCacheThrottled()}.
+	 * Bounds the roster-wide rebuild cost a single caller can trigger.
+	 */
+	private const FORCE_RECALC_COOLDOWN_TTL = 10;
+
 	private static ?ActiveCallsCache $callsCache = null;
 
 	/**
@@ -75,6 +82,24 @@ class Recent
 		return self::callsCache()->getActiveCallsForUser($userId);
 	}
 
+	/**
+	 * Cache-first active calls for an explicit user id, without touching global
+	 * $USER. Lets callers (e.g. the recent read-endpoint) resolve the snapshot
+	 * for the already-authenticated user and stay testable.
+	 *
+	 * @param int $userId User ID
+	 * @return array [callId => callData]
+	 */
+	public static function getActiveCallsForUser(int $userId): array
+	{
+		if (!Settings::isNewCallsEnabled())
+		{
+			return [];
+		}
+
+		return self::callsCache()->getActiveCallsForUser($userId);
+	}
+
 	public static function finishActiveCalls(int $depthHours = self::ACTIVE_CALLS_DEPTH_HOURS): void
 	{
 		Loader::includeModule('im');
@@ -104,6 +129,61 @@ class Recent
 	public static function updateUserActiveCallsCache(int $userId): array
 	{
 		return self::callsCache()->updateUserActiveCallsCache($userId);
+	}
+
+	/**
+	 * forceRecalc entry point behind {@see Controller\Recent::getActiveAction()},
+	 * throttled per user.
+	 *
+	 * A forced rebuild ({@see self::updateUserActiveCallsCache()}) is expensive: it
+	 * primes the whole participant roster through {@see Util::getUsers()} and
+	 * rewrites the file cache. Left ungated, any authenticated caller could hammer
+	 * `forceRecalc=Y` and drive unbounded parallel rebuilds — a cheap DoS vector.
+	 *
+	 * This coalesces bursts to at most one rebuild per
+	 * {@see self::FORCE_RECALC_COOLDOWN_TTL} seconds per user: an atomic KV claim
+	 * ({@see KeyValueEngine::setNotExists()}) admits exactly one rebuild while the
+	 * stamp is held; other callers get the current cache-first snapshot (the same
+	 * payload a plain read returns), so a warm portal answers from cache and a cold
+	 * one still rebuilds lazily on the cache miss.
+	 *
+	 * Falls back to an unconditional rebuild on file-cache deployments (no shared
+	 * KV): correctness over storm-cost, mirroring {@see self::scheduleUpdateCallCache()}.
+	 *
+	 * @param int $userId User ID
+	 * @return array [callId => callData]
+	 */
+	public static function updateUserActiveCallsCacheThrottled(int $userId): array
+	{
+		$engine = self::getKvCacheEngine();
+		if ($engine === null)
+		{
+			return self::updateUserActiveCallsCache($userId);
+		}
+
+		// Atomic claim: setNotExists() admits exactly one caller per cooldown window,
+		// so concurrent forceRecalc bursts collapse to a single rebuild. A separate
+		// get()/set() pair would race -- two requests could both read an empty stamp
+		// and both trigger the expensive rebuild before either wrote it back.
+		$cooldownKey = self::forceRecalcCooldownKey($userId);
+		if (!$engine->setNotExists($cooldownKey, self::FORCE_RECALC_COOLDOWN_TTL, 1))
+		{
+			// Cooldown already claimed: skip the rebuild and serve the current
+			// snapshot, exactly as a non-forced read would.
+			return self::getActiveCallsForUser($userId);
+		}
+
+		return self::updateUserActiveCallsCache($userId);
+	}
+
+	/**
+	 * Drops the forceRecalc cooldown stamp for a user so the next forced read
+	 * rebuilds immediately. No-op on file-cache deployments (no shared KV).
+	 * Kept for tests, which must reset this non-transactional state between runs.
+	 */
+	public static function clearForceRecalcCooldown(int $userId): void
+	{
+		self::getKvCacheEngine()?->del(self::forceRecalcCooldownKey($userId));
 	}
 
 	/**
@@ -220,21 +300,27 @@ class Recent
 		return $engine instanceof KeyValueEngine ? $engine : null;
 	}
 
-	private static function cacheSid(): string
+	private static function cacheKeyPrefix(): string
 	{
 		$cacheConfig = Configuration::getValue('cache');
+		$sid = (is_array($cacheConfig) && !empty($cacheConfig['sid'])) ? $cacheConfig['sid'] : 'BX';
 
-		return (is_array($cacheConfig) && !empty($cacheConfig['sid'])) ? $cacheConfig['sid'] : 'BX';
+		return $sid . '|call:';
 	}
 
 	private static function scheduleTokenKey(int $callId): string
 	{
-		return self::cacheSid() . '|call:sched_token:' . $callId;
+		return self::cacheKeyPrefix() . 'sched_token:' . $callId;
 	}
 
 	private static function scheduleTeardownTokenKey(int $chatId): string
 	{
-		return self::cacheSid() . '|call:sched_teardown_token:' . $chatId;
+		return self::cacheKeyPrefix() . 'sched_teardown_token:' . $chatId;
+	}
+
+	private static function forceRecalcCooldownKey(int $userId): string
+	{
+		return self::cacheKeyPrefix() . 'recent_force_recalc:' . $userId;
 	}
 
 	/**

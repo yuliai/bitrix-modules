@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Infrastructure\Rest\Controller\Form;
 
+use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Form\FormDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Form\FormRequestMapper;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Form\FormWriteRequestMapper;
@@ -24,6 +25,7 @@ use Bitrix\Crm\V2\Internal\Exception\WebForm;
 use Bitrix\Crm\V2\Internal\Service\WebForm\FormActivator;
 use Bitrix\Crm\V2\Internal\Service\WebForm\FormChecker;
 use Bitrix\Crm\V2\Internal\Service\WebForm\FormReader;
+use Bitrix\Crm\V2\Internal\Service\WebForm\FormStorageRefusal;
 use Bitrix\Crm\V2\Internal\Service\WebForm\FormWriter;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
@@ -43,6 +45,8 @@ use UnexpectedValueException;
 final class Form extends RestController
 {
 	use TranslatesWriteRefusals;
+
+	private const LOGGER_ID = 'Default';
 
 	private ?FormReader $reader = null;
 	private ?FormWriter $writer = null;
@@ -235,7 +239,7 @@ final class Form extends RestController
 	 */
 	public function activateAction(ActivateFormRequest $request): FormStateResponse
 	{
-		return $this->switchActivity($request->id, true);
+		return $this->switchActivity($request->id, true, $request->updatedTime);
 	}
 
 	/**
@@ -247,7 +251,7 @@ final class Form extends RestController
 	 */
 	public function deactivateAction(DeactivateFormRequest $request): FormStateResponse
 	{
-		return $this->switchActivity($request->id, false);
+		return $this->switchActivity($request->id, false, $request->updatedTime);
 	}
 
 	/**
@@ -255,17 +259,31 @@ final class Form extends RestController
 	 * else. What each direction takes is decided by the scenario, which owns the operation, so a
 	 * second body here would be a second place for those rules to drift apart in.
 	 *
+	 * The expected version is read the way the change and the removal read it, and by the same
+	 * mapper: every method of the family carrying that property answers a malformed value with one
+	 * refusal. It is optional here, so a request carrying none switches the form comparing no
+	 * versions.
+	 *
 	 * The projection the scenario answers with is read rather than assumed: it carries the state and
 	 * the version by contract, and one that lost either would otherwise answer the client with a
 	 * state that is not the state of the form.
 	 */
-	private function switchActivity(int $formId, bool $isActive): FormStateResponse
+	private function switchActivity(int $formId, bool $isActive, ?string $updatedTime): FormStateResponse
 	{
 		$userId = (int)$this->getCurrentUser()->getId();
+		$expectedVersion = $updatedTime === null
+			? null
+			: $this->getRequestMapper()->mapExpectedVersion($updatedTime)
+		;
 
 		$state = $this->runWrite(
 			$formId,
-			fn (): Entity\WebForm\WebForm => $this->getActivator()->setActive($userId, $formId, $isActive),
+			fn (): Entity\WebForm\WebForm => $this->getActivator()->setActive(
+				$userId,
+				$formId,
+				$isActive,
+				$expectedVersion,
+			),
 		);
 
 		if ($state->active === null || !$state->modifiedTime instanceof DateTime)
@@ -306,17 +324,43 @@ final class Form extends RestController
 
 	private function getWriter(): FormWriter
 	{
-		return $this->writer ??= new FormWriter();
+		return $this->writer ??= new FormWriter(permissionChecker: self::permissionChecker());
 	}
 
+	/**
+	 * The dry run of a write, assembled here rather than by itself: the scenario answers about a
+	 * user, and who that user is and where the refusals of the portal are written down are known to
+	 * this side alone.
+	 */
 	private function getChecker(): FormChecker
 	{
-		return $this->checker ??= new FormChecker();
+		return $this->checker ??= new FormChecker(self::permissionChecker());
 	}
 
+	/**
+	 * The switch of the activity, given the very check `crm.form.validate` is answered by: one
+	 * verdict over one stored form, because both are the same object here.
+	 */
 	private function getActivator(): FormActivator
 	{
-		return $this->activator ??= new FormActivator();
+		$checker = $this->getChecker();
+
+		return $this->activator ??= new FormActivator(
+			permissionChecker: self::permissionChecker(),
+			formChecker: static fn (int $userId, int $formId): Result => $checker->check($userId, $formId),
+			storageRefusal: new FormStorageRefusal(Container::getInstance()->getLogger(self::LOGGER_ID)),
+		);
+	}
+
+	/** The right to change CRM forms, asked the way every scenario of the family asks it. */
+	private static function permissionChecker(): \Closure
+	{
+		return static fn (int $userId): bool =>
+			Container::getInstance()
+				->getUserPermissions($userId)
+				->webForm()
+				->canEdit()
+		;
 	}
 
 	private function getRequestMapper(): FormRequestMapper

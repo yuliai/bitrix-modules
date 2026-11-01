@@ -40,6 +40,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Request;
 use Bitrix\Main\Result;
+use Bitrix\Main\UserField\Types\DoubleType;
 use Bitrix\Main\Web\Json;
 use CComponentEngine;
 use CCrmComponentHelper;
@@ -214,7 +215,11 @@ class EditorAdapter
 
 			$itemOwnEditorEntityFields[] = $fieldData;
 
-			$fieldValueNormalized = $this->normalizeFieldValue($item->get($fieldName), $fieldData['type']);
+			$fieldValueNormalized = $this->normalizeFieldValue(
+				$item->get($fieldName),
+				$fieldData['type'],
+				$this->getUserFieldFloatPrecision($fieldData),
+			);
 
 			if ($fieldData['type'] === 'userField')
 			{
@@ -1435,9 +1440,25 @@ class EditorAdapter
 		return $configs;
 	}
 
-	protected function normalizeFieldValue($value, string $fieldType): mixed
+	protected function normalizeFieldValue($value, string $fieldType, ?int $floatPrecision = null): mixed
 	{
-		return (new FieldValueNormalizer($fieldType))->normalize($value);
+		return (new FieldValueNormalizer($fieldType, $floatPrecision))->normalize($value);
+	}
+
+	protected function getUserFieldFloatPrecision(array $fieldData): ?int
+	{
+		$fieldInfo = $fieldData['data']['fieldInfo'] ?? null;
+		if (
+			!is_array($fieldInfo)
+			|| ($fieldInfo['USER_TYPE_ID'] ?? null) !== DoubleType::USER_TYPE_ID
+		)
+		{
+			return null;
+		}
+
+		$precision = (int)($fieldInfo['SETTINGS']['PRECISION'] ?? 0);
+
+		return min(12, max(0, $precision));
 	}
 
 	protected function normalizeUserFieldValue($fieldValue, bool $isValueEmpty, array $fieldParams): array

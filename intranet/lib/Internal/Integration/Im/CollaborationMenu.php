@@ -41,9 +41,7 @@ class CollaborationMenu
 
 		$context = Context::getCurrent();
 		if (
-			!is_callable([$context, 'isDesktop'])
-			|| !is_callable([$context, 'isMobile'])
-			|| $context->isDesktop()
+			!is_callable([$context, 'isMobile'])
 			|| $context->isMobile()
 		)
 		{

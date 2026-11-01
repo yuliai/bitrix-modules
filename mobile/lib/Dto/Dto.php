@@ -7,7 +7,7 @@ use Bitrix\Mobile\Dto\Validator\Validator;
 use Bitrix\Mobile\Dto\Transformer\Transformer;
 
 /**
- * @deprected Just use plain readonly php-classes instead.
+ * @deprecated Just use plain readonly php-classes instead.
  */
 abstract class Dto implements \JsonSerializable
 {

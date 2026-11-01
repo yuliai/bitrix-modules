@@ -14,6 +14,7 @@ return [
 		'value' => [
 			Bitrix\TimemanMobile\Public\Features\WorkReportsFeature::class,
 			Bitrix\TimemanMobile\Public\Features\WorkReportsWithoutAiFeature::class,
+			Bitrix\TimemanMobile\Public\Features\WorkReportsWithAiFeature::class,
 		],
 		'readonly' => true,
 	],

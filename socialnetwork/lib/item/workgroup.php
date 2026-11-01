@@ -256,6 +256,11 @@ class Workgroup implements Main\Type\Contract\Arrayable, Main\Type\Contract\Json
 		return $invited + $ordinary + $moderators + $owner;
 	}
 
+	/**
+	 * Returns whether the container carries the project flag.
+	 *
+	 * @see Workgroup::isCollabProject() for the new Project only
+	 */
 	public function isProject(): bool
 	{
 		if ($this->getType() === Type::Project)
@@ -282,6 +287,16 @@ class Workgroup implements Main\Type\Contract\Arrayable, Main\Type\Contract\Json
 	public function isCollab(): bool
 	{
 		return $this->getType() === Type::Collab;
+	}
+
+	/**
+	 * Returns whether the container is a new Project.
+	 *
+	 * @see \Bitrix\Socialnetwork\Provider\GroupProvider::isCollabProject() the same predicate by group id
+	 */
+	public function isCollabProject(): bool
+	{
+		return $this->isCollab() && $this->isProject();
 	}
 
 	public function getDefaultSprintDuration(): int

@@ -16,6 +16,7 @@ use Bitrix\Socialnetwork\EO_Workgroup;
 use Bitrix\Socialnetwork\EO_WorkgroupFavorites;
 use Bitrix\Socialnetwork\Permission\Trait\AccessErrorTrait;
 use Bitrix\Socialnetwork\Permission\User\UserModel;
+use Bitrix\Socialnetwork\Permission\Verdict\GroupViewVerdict;
 use Bitrix\Socialnetwork\Provider\GroupProvider;
 use Bitrix\Socialnetwork\UserToGroupTable;
 
@@ -49,22 +50,7 @@ class AccessManager
 		if (isset($additionalParams['userId']))
 		{
 			$this->currentUserId = (int)$additionalParams['userId'];
-
-			// Phase 0 (task 718250): superadmin project chat access.
-			// For the acting user in a real (stateful) session honor the SONET_ADMIN mode (fail-closed);
-			// REST/webhook/OAuth/CLI and foreign userId keep the non-session grant (fail-open).
-			if (
-				$this->currentUserId > 0
-				&& $this->currentUserId === \Bitrix\Socialnetwork\Helper\User::getCurrentUserId()
-				&& self::isRealSession()
-			)
-			{
-				$this->isCurrentUserModuleAdmin = self::isCurrentUserModuleAdmin(true);
-			}
-			else
-			{
-				$this->isCurrentUserModuleAdmin = \CSocNetUser::IsUserModuleAdmin($this->currentUserId);
-			}
+			$this->isCurrentUserModuleAdmin = self::isModuleAdmin($this->currentUserId);
 		}
 		else
 		{
@@ -84,6 +70,21 @@ class AccessManager
 				$this->currentUserFavorites = $additionalEntityList['currentUserFavorites'];
 			}
 		}
+	}
+
+	// Session admin mode applies only to the active user; foreign users require a module-admin check.
+	public static function isModuleAdmin(int $userId): bool
+	{
+		if (
+			$userId > 0
+			&& $userId === \Bitrix\Socialnetwork\Helper\User::getCurrentUserId()
+			&& self::isRealSession()
+		)
+		{
+			return self::isCurrentUserModuleAdmin(true);
+		}
+
+		return \CSocNetUser::IsUserModuleAdmin($userId);
 	}
 
 	private static function isCurrentUserModuleAdmin(bool $checkSession = false): bool
@@ -124,35 +125,14 @@ class AccessManager
 			'ROLE',
 		]);
 
-		static $visibilityCache = [];
+		$currentUserRole = $this->currentUserRelation?->get('ROLE');
 
-		$groupId = $this->group->getId();
-
-		if (!isset($visibilityCache[$groupId]))
-		{
-			$isVisible = $this->group->get('VISIBLE');
-			if (!$this->isExtranetGroup($groupId))
-			{
-				$isVisible = ($isVisible && !$this->user->isExtranet());
-			}
-			$visibilityCache[$groupId] = $isVisible;
-		}
-		else
-		{
-			$isVisible = $visibilityCache[$groupId];
-		}
-
-		return (
-			$this->isCurrentUserModuleAdmin
-			|| $isVisible
-			|| (
-				$this->currentUserRelation
-				&& in_array(
-					$this->currentUserRelation->get('ROLE'),
-					UserToGroupTable::getRolesMember(),
-					true,
-				)
-			)
+		return GroupViewVerdict::canView(
+			isVisibleFlagOn: (bool)$this->group->get('VISIBLE'),
+			isExtranetGroup: $this->isExtranetGroup($this->group->getId()),
+			isExtranetUser: $this->user->isExtranet(),
+			currentUserRole: $currentUserRole === null ? null : (string)$currentUserRole,
+			isModuleAdmin: $this->isCurrentUserModuleAdmin,
 		);
 	}
 
@@ -915,13 +895,20 @@ class AccessManager
 		);
 	}
 
+	/**
+	 * Extranet-site membership is container-specific and can be cached for the request.
+	 */
 	private function isExtranetGroup(int $groupId): bool
 	{
-		if (!Loader::includeModule('extranet'))
+		static $cache = [];
+
+		if (!isset($cache[$groupId]))
 		{
-			return false;
+			$cache[$groupId] = Loader::includeModule('extranet')
+				&& \CExtranet::IsExtranetSocNetGroup($groupId)
+			;
 		}
 
-		return \CExtranet::IsExtranetSocNetGroup($groupId);
+		return $cache[$groupId];
 	}
 }

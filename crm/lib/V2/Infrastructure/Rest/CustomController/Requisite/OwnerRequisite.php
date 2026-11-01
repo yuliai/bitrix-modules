@@ -19,6 +19,7 @@ use Bitrix\Crm\V2\Public\Command\Requisite\DeleteRequisiteCommand;
 use Bitrix\Crm\V2\Public\Command\Requisite\UpdateRequisiteCommand;
 use Bitrix\Crm\V2\Public\Entity\Requisite\RequisiteError;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\ItemId;
 use Bitrix\Crm\V2\Public\Provider\Requisite\Exception\NotFoundException;
 use Bitrix\Crm\V2\Public\Provider\Requisite\RequisiteProvider;
 use Bitrix\Main\Error;
@@ -87,6 +88,7 @@ final class OwnerRequisite extends AbstractController
 	{
 		$dto = $request->fields->convertToDto((RequiredGroup::Add)->value);
 		$requisite = (new OwnerRequisiteDtoMapper($entityType))->getRequisiteByDto($dto);
+		$this->assertCategoryOwnerAllowed(new ItemId($entityType, (int)$requisite->getOwnerId()));
 
 		$result =
 			(new AddRequisiteCommand($requisite, $this->userId))
@@ -115,6 +117,7 @@ final class OwnerRequisite extends AbstractController
 	 */
 	public function updateAction(UpdateOwnerRequisiteRequest $request, EntityType $entityType): UpdateResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->id);
 		$dto = $request->fields->convertToDto((RequiredGroup::Update)->value);
 		self::refuseOwnerOfAnUpdate($dto, AbstractOwnerRequisiteDto::ownerFieldName($entityType));
 
@@ -140,6 +143,7 @@ final class OwnerRequisite extends AbstractController
 
 	public function getAction(GetOwnerRequisiteRequest $request, EntityType $entityType): GetResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->id);
 		$requestMapper = new OwnerRequisiteRequestMapper($entityType);
 		$selectedFields = $requestMapper->mapSelect($request);
 
@@ -165,6 +169,7 @@ final class OwnerRequisite extends AbstractController
 
 	public function deleteAction(DeleteOwnerRequisiteRequest $request, EntityType $entityType): DeleteResponse
 	{
+		$this->assertRequisiteCategoryAllowed($request->id);
 		$result =
 			(new DeleteRequisiteCommand($entityType, $request->id, $this->userId))
 				->setScope(Scope::Rest)
@@ -194,6 +199,7 @@ final class OwnerRequisite extends AbstractController
 		$requestMapper = new OwnerRequisiteRequestMapper($entityType);
 		$selectedFields = $requestMapper->mapSelect($request);
 		$ownerId = $requestMapper->mapOwnerId($request);
+		$this->assertCategoryOwnerAllowed(new ItemId($entityType, $ownerId));
 		$pager = $requestMapper->mapPager($request->pagination);
 
 		try
@@ -217,6 +223,18 @@ final class OwnerRequisite extends AbstractController
 			(new OwnerRequisiteDtoMapper($entityType))
 				->getDtoCollectionByRequisites($requisites, $request->getDtoClass(), $selectedFields),
 		);
+	}
+
+	private function assertRequisiteCategoryAllowed(int $requisiteId): void
+	{
+		$result = (new RequisiteProvider($this->userId))->resolveRequisiteOwner($requisiteId, $this->userId);
+		$owner = $result->getData()['owner'] ?? null;
+		if (!$result->isSuccess() || !$owner instanceof ItemId)
+		{
+			throw new EntityNotFoundException($requisiteId);
+		}
+
+		$this->assertCategoryOwnerAllowed($owner);
 	}
 
 	/**

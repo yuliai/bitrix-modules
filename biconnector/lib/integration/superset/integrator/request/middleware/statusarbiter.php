@@ -12,8 +12,15 @@ final class StatusArbiter extends Base
 {
 	private const ID = 'STATUS_ARBITER';
 
+	/**
+	 * @param bool $arbitrateServiceFailure Whether a service failure may move the instance to ERROR.
+	 *        A request made behind an unattended schedule passes false: the recovery series out of
+	 *        ERROR is opened by a user visit only, so on such a path a single failure would become
+	 *        a permanent one. Frozen answers and the return to READY are arbitrated either way.
+	 */
 	public function __construct(
-		private readonly IntegratorLogger $logger
+		private readonly IntegratorLogger $logger,
+		private readonly bool $arbitrateServiceFailure = true,
 	)
 	{}
 
@@ -65,7 +72,7 @@ final class StatusArbiter extends Base
 
 			// Don't overwrite PENDING_DELETE with ERROR — a transient proxy error must not
 			// prevent the cleanup agent from performing the actual deletion after timeout.
-			if (!SupersetInitializer::isSupersetPendingDelete())
+			if ($this->arbitrateServiceFailure && !SupersetInitializer::isSupersetPendingDelete())
 			{
 				SupersetInitializer::setSupersetStatus(SupersetInitializer::SUPERSET_STATUS_ERROR);
 			}

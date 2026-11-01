@@ -10,7 +10,7 @@ use Bitrix\Rest\V3\Schema\ModuleManager;
 
 final class CacheManager
 {
-	private const CACHE_DIR = 'rest/v3.0.5'; // cache directory
+	private const CACHE_DIR = 'rest/v3.0.8'; // cache directory
 
 	private const CACHE_TTL = 31536000; // One year TTL
 
@@ -22,7 +22,7 @@ final class CacheManager
 
 	private static ?string $globalCacheKeyPart = null;
 
-	public static function get(string $key): mixed
+	public static function get(string $key, int $ttl = self::CACHE_TTL): mixed
 	{
 		if (self::isCacheDisabled())
 		{
@@ -30,7 +30,7 @@ final class CacheManager
 		}
 		$cacheKey = self::getCacheKey($key);
 		$cache = Application::getInstance()->getManagedCache();
-		if ($cache->read(self::CACHE_TTL, $cacheKey, self::CACHE_DIR))
+		if ($cache->read($ttl, $cacheKey, self::CACHE_DIR))
 		{
 			return $cache->get($cacheKey);
 		}

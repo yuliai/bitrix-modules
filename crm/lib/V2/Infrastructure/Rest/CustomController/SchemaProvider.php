@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Infrastructure\Rest\CustomController;
 
 use Bitrix\Crm\Multifield\Type;
+use Bitrix\Crm\V2\Infrastructure\Rest\Access\ActivityFieldAccessProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Controller;
+use Bitrix\Crm\V2\Infrastructure\Rest\Controller\Availability\ActivityEnabledProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Activity\Mail;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Address\Address as OwnerAddressController;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Category\RouteBuilder;
@@ -13,6 +15,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Dictionary\AddressType;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Dictionary\StageSemantic;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Field\Custom;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Field\Field;
+use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Field\Requirement;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Field\Custom\Enum as CustomEnum;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Item\Item;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Item\MyCompany;
@@ -27,6 +30,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Requisite\OwnerRequisite;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Requisite\Preset;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Requisite\Requisite;
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Timeline\Activity\Email\Email;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Activity\ActivityDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Address\OwnerAddressDtoGenerator;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Dictionary\AddressTypeDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Dictionary\CommunicationTypeDto;
@@ -34,6 +38,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Dictionary\DictionaryValueDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Dictionary\EntityTypeDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Dictionary\StageSemanticDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Field\CrmFieldMetadataDto;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Field\FieldRequirementDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Field\CustomFieldConfigDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Field\Custom\EnumDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Form\Configuration\ConfigurationDto;
@@ -56,6 +61,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Requisite\OwnerRequisiteDtoGenerator;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Requisite\PresetDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Requisite\RequisiteDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Timeline\Activity\Email\EmailActivityDto;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Tracking\TraceDto;
 use Bitrix\Crm\V2\Internal\Entity\Dictionary\DictionaryType;
 use Bitrix\Crm\V2\Internal\Repository\ProductRow\ProductEnabledTypeRepository;
 use Bitrix\Crm\V2\Internal\Service\Requisite\EntityLinkService;
@@ -63,6 +69,7 @@ use Bitrix\Crm\V2\Public\EntityType;
 use Bitrix\Crm\V2\Public\OwnerType;
 use Bitrix\Crm\Feature;
 use Bitrix\Crm\Feature\RestV3CrudDeal;
+use Bitrix\Crm\Feature\RestV3Tracking;
 use Bitrix\Crm\Feature\RestV3WebForm;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Application;
@@ -70,6 +77,8 @@ use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoField;
 use Bitrix\Rest\V3\Mcp\McpToolMetadata;
+use Bitrix\Rest\V3\Realisation\Controller\Field as DtoFieldController;
+use Bitrix\Rest\V3\Realisation\Dto\DtoFieldDto;
 use Bitrix\Rest\V3\Schema\ControllerData;
 use Bitrix\Rest\V3\Schema\GeneratedDto;
 use Bitrix\Rest\V3\Schema\MethodDescription;
@@ -77,7 +86,23 @@ use Bitrix\Rest\V3\Structure\Structure;
 
 class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 {
+	public const CONTACT_CATEGORY_ID = 0;
+	public const COMPANY_CATEGORY_ID = 0;
+
+	public static function getItemRouteCategoryId(EntityType $entityType): ?int
+	{
+		return match ($entityType->getId())
+		{
+			OwnerType::CONTACT => self::CONTACT_CATEGORY_ID,
+			OwnerType::COMPANY => self::COMPANY_CATEGORY_ID,
+			default => null,
+		};
+	}
+
 	protected const MODULE = 'crm';
+
+	/** The namespace the controllers of the module are found by: the `defaultNamespace` of `.settings.php`. */
+	protected const CONTROLLER_NAMESPACE = '\\Bitrix\\Crm\\V2\\Infrastructure\\Rest\\Controller';
 
 	protected const MCP_SMART_PROCESS_TOOL_SET_CODE = 'crm_rest_v3_smart_process';
 
@@ -90,6 +115,8 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	protected const MCP_DICTIONARY_TOOL_SET_CODE = 'crm_rest_v3_dictionary';
 
 	protected const MCP_FORM_TOOL_SET_CODE = 'crm_rest_v3_form';
+	protected const MCP_TRACKING_TOOL_SET_CODE = 'crm_rest_v3_tracking';
+	protected const MCP_FIELD_REQUIREMENT_TOOL_SET_CODE = 'crm_rest_v3_field_requirement';
 
 	protected const LEAD_CONTROLLER_METHODS = ['isEnabled', 'enable', 'disable'];
 	protected const MY_COMPANY_BASIC_CONTROLLER_METHODS = ['get', 'list'];
@@ -101,6 +128,22 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		OwnerType::COMPANY => 'company',
 		OwnerType::QUOTE => 'quote',
 		OwnerType::SMART_INVOICE => 'smartInvoice',
+	];
+	protected const CUSTOM_FIELD_TOOL_SET_CODES = [
+		OwnerType::DEAL => 'crm_rest_v3_deal',
+		OwnerType::CONTACT => 'crm_rest_v3_contact',
+		OwnerType::LEAD => 'crm_rest_v3_lead',
+		OwnerType::COMPANY => 'crm_rest_v3_company',
+		OwnerType::QUOTE => 'crm_rest_v3_quote',
+		OwnerType::SMART_INVOICE => 'crm_rest_v3_smart_invoice',
+	];
+	private const CUSTOM_FIELD_OWNER_NAMES = [
+		OwnerType::DEAL => 'CRM deal',
+		OwnerType::CONTACT => 'CRM contact',
+		OwnerType::LEAD => 'CRM lead',
+		OwnerType::COMPANY => 'CRM company',
+		OwnerType::QUOTE => 'CRM quote',
+		OwnerType::SMART_INVOICE => 'CRM smart invoice',
 	];
 	protected const ROUTES_WITHOUT_NORMALIZATION = [
 		'crm.activity.mail.getContent',
@@ -116,8 +159,14 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		'crm.company.timeline.activity.email.send',
 	];
 
-	/** @var array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> */
+	/** @var array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> */
 	protected array $featureByRoute = [
+		'crm.deal.field.required.get' => RestV3CrudDeal::class,
+		'crm.lead.field.required.get' => RestV3CrudDeal::class,
+		'crm.contact.field.required.get' => RestV3CrudDeal::class,
+		'crm.company.field.required.get' => RestV3CrudDeal::class,
+		'crm.quote.field.required.get' => RestV3CrudDeal::class,
+		'crm.smartInvoice.field.required.get' => RestV3CrudDeal::class,
 		'crm.deal.add' => RestV3CrudDeal::class,
 		'crm.contact.add' => RestV3CrudDeal::class,
 		'crm.lead.add' => RestV3CrudDeal::class,
@@ -297,11 +346,15 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		'crm.form.field.list' => RestV3WebForm::class,
 		'crm.form.embedding.get' => RestV3WebForm::class,
 		'crm.form.embedding.update' => RestV3WebForm::class,
-		'crm.form.siteButton.list' => RestV3WebForm::class,
-		'crm.form.openLine.list' => RestV3WebForm::class,
+		'crm.form.sitebutton.list' => RestV3WebForm::class,
+		'crm.form.openline.list' => RestV3WebForm::class,
 		'crm.form.scenario.list' => RestV3WebForm::class,
-		'crm.form.scenarioCategory.list' => RestV3WebForm::class,
-		'crm.form.entityField.list' => RestV3WebForm::class,
+		'crm.form.scenariocategory.list' => RestV3WebForm::class,
+		'crm.form.entityfield.list' => RestV3WebForm::class,
+		'crm.tracking.trace.get' => RestV3Tracking::class,
+		'crm.tracking.trace.list' => RestV3Tracking::class,
+		'crm.tracking.trace.add' => RestV3Tracking::class,
+		'crm.tracking.trace.delete' => RestV3Tracking::class,
 	];
 
 	/**
@@ -355,6 +408,35 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	protected const CLIENT_REQUISITE_SCOPES = ['crm'];
 
 	/**
+	 * The scope of the global activity methods. Written out for the reason the addresses write theirs out:
+	 * the scopes built from the segments of the name would offer `crm.activity`, `crm.activity.get` and
+	 * `crm.activity.field` as scopes of the portal, and an activity is a resource of CRM rather than a
+	 * portal scope of its own.
+	 */
+	protected const ACTIVITY_SCOPES = ['crm'];
+	protected const ACTIVITY_MCP_TOOL_SET_CODE = 'crm_rest_v3_activity';
+
+	/**
+	 * The global methods of {@see Controller\Activity}: the name a client calls => the action serving it.
+	 * They are routed by the namespace of the module like any ordinary controller, and this map exists to
+	 * describe them, not to route them - see {@see self::buildActivityControllerData()}.
+	 */
+	protected const ACTIVITY_ACTIONS = [
+		'crm.activity.get' => 'get',
+	];
+
+	/**
+	 * The field methods of {@see ActivityDto}: the name a client calls => the action of the system controller
+	 * of REST serving it. REST builds a pair like this for every controller that carries a DTO, and builds it
+	 * unconditionally - only a route the module declares itself is left alone. So the pair is declared here,
+	 * and the group answers by one switch of the wave rather than by two.
+	 */
+	protected const ACTIVITY_FIELD_ACTIONS = [
+		'crm.activity.field.list' => 'list',
+		'crm.activity.field.get' => 'get',
+	];
+
+	/**
 	 * The five actions of the values of a basic dictionary, in the order of {@see Dictionary\DictionaryValue}.
 	 * The last segment of the name of a method and the action serving it are the same word for every one of
 	 * them, so there is nothing to map here.
@@ -380,11 +462,84 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	];
 
 	protected array $routesConfig = [
+		'crm.deal.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::DEAL,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a deal.',
+			],
+		],
+		'crm.lead.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::LEAD,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a lead.',
+			],
+		],
+		'crm.contact.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::CONTACT,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a contact.',
+			],
+		],
+		'crm.company.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::COMPANY,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a company.',
+			],
+		],
+		'crm.quote.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::QUOTE,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a quote.',
+			],
+		],
+		'crm.smartInvoice.field.required.get' => [
+			'controller' => Requirement::class,
+			'method' => 'get',
+			'dtoFqcn' => FieldRequirementDto::class,
+			'entityTypeId' => OwnerType::SMART_INVOICE,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get field requirement settings for a smart invoice.',
+			],
+		],
 		'crm.contact.requisite.bankRequisite.add' => [
 			'controller' => BankRequisite::class,
 			'method' => 'add',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -396,6 +551,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -407,6 +563,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -418,6 +575,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'listByRequisite',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -429,6 +587,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -440,6 +599,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'listByContact',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -451,6 +611,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -462,6 +623,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -473,6 +635,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -484,6 +647,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'listByRequisite',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -495,6 +659,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -506,6 +671,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'listByCompany',
 			'dtoFqcn' => BankRequisiteDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
@@ -528,6 +694,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -550,6 +717,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -561,6 +729,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -638,6 +807,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'addFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -649,6 +819,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'addFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -660,6 +831,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'addFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -682,6 +854,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -704,6 +877,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -715,6 +889,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -836,6 +1011,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => DeleteItemDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -847,6 +1023,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => DeleteItemDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -869,6 +1046,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'deleteFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -880,6 +1058,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'deleteFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -891,6 +1070,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'deleteFieldValue',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -913,6 +1093,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -924,6 +1105,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -935,6 +1117,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -990,6 +1173,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -1001,6 +1185,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -1012,6 +1197,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -1067,6 +1253,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'aggregate',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_contact',
@@ -1078,6 +1265,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'aggregate',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_company',
@@ -1089,6 +1277,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'aggregate',
 			'dtoGenerator' => ItemDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'dtoGeneratorArgs' => ['isMyCompany' => true],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => 'crm_rest_v3_my_company',
@@ -1402,6 +1591,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::CONTACT],
 			],
@@ -1417,6 +1607,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::CONTACT],
 			],
@@ -1432,6 +1623,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::CONTACT],
 			],
@@ -1447,6 +1639,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::CONTACT],
 			],
@@ -1462,6 +1655,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::CONTACT],
 			],
@@ -1477,6 +1671,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::COMPANY],
 			],
@@ -1492,6 +1687,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::COMPANY],
 			],
@@ -1507,6 +1703,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::COMPANY],
 			],
@@ -1522,6 +1719,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::COMPANY],
 			],
@@ -1537,6 +1735,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => OwnerAddressDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'dtoGeneratorArgs' => [
 				'ownerFieldName' => OwnerAddressController::OWNER_FIELD_NAME_BY_ENTITY_TYPE_ID[OwnerType::COMPANY],
 			],
@@ -1986,6 +2185,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -1998,6 +2198,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2010,6 +2211,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2022,6 +2224,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2034,6 +2237,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2070,6 +2274,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2082,6 +2287,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2094,6 +2300,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2106,6 +2313,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2118,6 +2326,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoGenerator' => OwnerRequisiteDtoGenerator::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
@@ -2154,6 +2363,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2166,6 +2376,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2178,6 +2389,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2190,6 +2402,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2202,6 +2415,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::CONTACT,
+			'categoryId' => self::CONTACT_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2214,6 +2428,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'add',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2226,6 +2441,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'get',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2238,6 +2454,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'list',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2250,6 +2467,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'update',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2262,6 +2480,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'delete',
 			'dtoFqcn' => RequisiteAddressDto::class,
 			'entityTypeId' => OwnerType::COMPANY,
+			'categoryId' => self::COMPANY_CATEGORY_ID,
 			'scopes' => self::ADDRESS_SCOPES,
 			'mcp' => [
 				'export' => true,
@@ -2280,6 +2499,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::DEAL,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get the client requisites of a CRM deal by ID.',
+			],
 		],
 		'crm.deal.clientRequisite.set' => [
 			'controller' => ClientRequisite::class,
@@ -2287,6 +2511,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::DEAL,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Set the client requisites of a CRM deal.',
+			],
 		],
 		'crm.quote.clientRequisite.get' => [
 			'controller' => ClientRequisite::class,
@@ -2294,6 +2523,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::QUOTE,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get the client requisites of a CRM quote by ID.',
+			],
 		],
 		'crm.quote.clientRequisite.set' => [
 			'controller' => ClientRequisite::class,
@@ -2301,6 +2535,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::QUOTE,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Set the client requisites of a CRM quote.',
+			],
 		],
 		'crm.smartInvoice.clientRequisite.get' => [
 			'controller' => ClientRequisite::class,
@@ -2308,6 +2547,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::SMART_INVOICE,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get the client requisites of a CRM smart invoice by ID.',
+			],
 		],
 		'crm.smartInvoice.clientRequisite.set' => [
 			'controller' => ClientRequisite::class,
@@ -2315,6 +2559,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'dtoFqcn' => ClientRequisiteDto::class,
 			'entityTypeId' => OwnerType::SMART_INVOICE,
 			'scopes' => self::CLIENT_REQUISITE_SCOPES,
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+				'descriptionOverride' => 'Set the client requisites of a CRM smart invoice.',
+			],
 		],
 		'crm.form.get' => [
 			'controller' => Controller\Form\Form::class,
@@ -2336,23 +2585,25 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
+		// MCP cannot describe fields handled by FormWriteRequestMapper or fields of nested DTOs.
 		'crm.form.add' => [
 			'controller' => Controller\Form\Form::class,
 			'method' => 'add',
 			'dtoFqcn' => FormDto::class,
 			'scopes' => ['crm'],
 			'mcp' => [
-				'export' => true,
+				'export' => false,
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
+		// MCP cannot describe fields handled by FormWriteRequestMapper or fields of nested DTOs.
 		'crm.form.update' => [
 			'controller' => Controller\Form\Form::class,
 			'method' => 'update',
 			'dtoFqcn' => FormDto::class,
 			'scopes' => ['crm'],
 			'mcp' => [
-				'export' => true,
+				'export' => false,
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
@@ -2373,6 +2624,10 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'validate',
 			'dtoFqcn' => FormDto::class,
 			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => false,
+				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
+			],
 		],
 		// Both switches change the form and stand on the right to change forms, so they keep the
 		// scope of its writes. Neither answers with the document, yet both keep its DTO: the one
@@ -2382,15 +2637,25 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			'method' => 'activate',
 			'dtoFqcn' => FormDto::class,
 			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
+				'descriptionOverride' => 'Activate a CRM form by ID.',
+			],
 		],
 		'crm.form.deactivate' => [
 			'controller' => Controller\Form\Form::class,
 			'method' => 'deactivate',
 			'dtoFqcn' => FormDto::class,
 			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
+				'descriptionOverride' => 'Deactivate a CRM form by ID.',
+			],
 		],
 		'crm.form.configuration.get' => [
-			'controller' => Controller\Form\Configuration::class,
+			'controller' => Form\Configuration::class,
 			'method' => 'get',
 			'dtoFqcn' => ConfigurationDto::class,
 			'scopes' => ['crm'],
@@ -2400,7 +2665,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			],
 		],
 		'crm.form.field.get' => [
-			'controller' => Controller\Form\Field::class,
+			'controller' => Form\Field::class,
 			'method' => 'get',
 			'dtoFqcn' => CrmFieldMetadataDto::class,
 			'scopes' => ['crm'],
@@ -2410,7 +2675,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			],
 		],
 		'crm.form.field.list' => [
-			'controller' => Controller\Form\Field::class,
+			'controller' => Form\Field::class,
 			'method' => 'list',
 			'dtoFqcn' => CrmFieldMetadataDto::class,
 			'scopes' => ['crm'],
@@ -2422,7 +2687,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		// The embedding options have no entity of their own, so the identifier of the method is the
 		// identifier of the form and the group stays a child of `crm.form`.
 		'crm.form.embedding.get' => [
-			'controller' => Controller\Form\Embedding::class,
+			'controller' => Form\Embedding::class,
 			'method' => 'get',
 			'dtoFqcn' => EmbeddingDto::class,
 			'scopes' => ['crm'],
@@ -2432,16 +2697,21 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			],
 		],
 		'crm.form.embedding.update' => [
-			'controller' => Controller\Form\Embedding::class,
+			'controller' => Form\Embedding::class,
 			'method' => 'update',
 			'dtoFqcn' => EmbeddingDto::class,
 			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
+				'descriptionOverride' => 'Update embedding settings of a CRM form by ID.',
+			],
 		],
 		// Both lists answer about one form, and the form reaches them as a required filter rather
 		// than as a segment of the name: the widget and the chat are entities of their own and keep
 		// identifiers of their own in the answer.
-		'crm.form.siteButton.list' => [
-			'controller' => Controller\Form\SiteButton::class,
+		'crm.form.sitebutton.list' => [
+			'controller' => Form\SiteButton::class,
 			'method' => 'list',
 			'dtoFqcn' => SiteButtonDto::class,
 			'scopes' => ['crm'],
@@ -2450,8 +2720,8 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
-		'crm.form.openLine.list' => [
-			'controller' => Controller\Form\OpenLine::class,
+		'crm.form.openline.list' => [
+			'controller' => Form\OpenLine::class,
 			'method' => 'list',
 			'dtoFqcn' => OpenLineDto::class,
 			'scopes' => ['crm'],
@@ -2464,7 +2734,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		// groups are answered whole, while fields are answered only for the required limited set of
 		// entities the caller names. None of them takes a page.
 		'crm.form.scenario.list' => [
-			'controller' => Controller\Form\Scenario::class,
+			'controller' => Form\Scenario::class,
 			'method' => 'list',
 			'dtoFqcn' => ScenarioDto::class,
 			'scopes' => ['crm'],
@@ -2473,8 +2743,8 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
-		'crm.form.scenarioCategory.list' => [
-			'controller' => Controller\Form\ScenarioCategory::class,
+		'crm.form.scenariocategory.list' => [
+			'controller' => Form\ScenarioCategory::class,
 			'method' => 'list',
 			'dtoFqcn' => ScenarioCategoryDto::class,
 			'scopes' => ['crm'],
@@ -2483,14 +2753,67 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
 			],
 		],
-		'crm.form.entityField.list' => [
-			'controller' => Controller\Form\EntityField::class,
+		'crm.form.entityfield.list' => [
+			'controller' => Form\EntityField::class,
 			'method' => 'list',
 			'dtoFqcn' => EntityFieldDto::class,
 			'scopes' => ['crm'],
 			'mcp' => [
 				'export' => true,
 				'toolSetCode' => self::MCP_FORM_TOOL_SET_CODE,
+			],
+		],
+		// The traces of the end-to-end analytics are read and written through the CRM items they are bound
+		// to, so the group takes the scope of CRM. MCP describes the nested utm, pages and channels of the
+		// input as bare objects: their format is written out in the descriptions of the fields of TraceDto.
+		'crm.tracking.trace.get' => [
+			'controller' => Tracking\Trace::class,
+			'method' => 'get',
+			'dtoFqcn' => TraceDto::class,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_TRACKING_TOOL_SET_CODE,
+				'descriptionOverride' => 'Get a tracking trace of the end-to-end analytics by ID: its source,'
+					. ' creation time, device, channels, visited pages and UTM tags.',
+			],
+		],
+		'crm.tracking.trace.list' => [
+			'controller' => Tracking\Trace::class,
+			'method' => 'list',
+			'dtoFqcn' => TraceDto::class,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_TRACKING_TOOL_SET_CODE,
+				'descriptionOverride' => 'List the tracking traces of one CRM item, the current attribution first.'
+					. ' The filter must be exactly [["entityTypeId", "=", <type>], ["entityId", "=", <id>]].',
+			],
+		],
+		'crm.tracking.trace.add' => [
+			'controller' => Tracking\Trace::class,
+			'method' => 'add',
+			'dtoFqcn' => TraceDto::class,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_TRACKING_TOOL_SET_CODE,
+				'descriptionOverride' => 'Create a tracking trace and bind it to CRM items. fields.sourceId is'
+					. ' required, and at least one of leadsId, dealsId, contactsId, companiesId, quotesId.'
+					. ' Optional: isMobile; utm as {"source", "medium", "campaign", "content", "term"};'
+					. ' pages as [{"url", "title", "time"}]; channels as [{"code", "value"}].',
+			],
+		],
+		'crm.tracking.trace.delete' => [
+			'controller' => Tracking\Trace::class,
+			'method' => 'delete',
+			'dtoFqcn' => TraceDto::class,
+			'scopes' => ['crm'],
+			'mcp' => [
+				'export' => true,
+				'toolSetCode' => self::MCP_TRACKING_TOOL_SET_CODE,
+				'descriptionOverride' => 'Delete a tracking trace by ID from the attribution of every CRM item'
+					. ' it is bound to.',
 			],
 		],
 	];
@@ -2501,7 +2824,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	/** @var array<string, array>|null */
 	private ?array $builtRoutesConfig = null;
 
-	/** @var array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>>|null */
+	/** @var array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>>|null */
 	private ?array $builtFeatureByRoute = null;
 
 	public function getControllersData(): array
@@ -2513,6 +2836,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				$availableRoutesConfig,
 				$this->builtRoutesConfig ?? [],
 			),
+			$this->buildActivityControllerData(),
 		];
 
 		if (!Feature::enabled(RestV3CrudDeal::class))
@@ -2646,7 +2970,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			return null;
 		}
 
-		return $generator->generate($entityType->getId());
+		return $generator->generate($entityType->getId(), $generator->isMyCompanyGeneratedDtoClass($dtoFqcn));
 	}
 
 	protected function getAvailableRoutesConfig(): array
@@ -2668,7 +2992,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	}
 
 	/**
-	 * @return array{array<string, array>, array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>>}
+	 * @return array{array<string, array>, array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>>}
 	 */
 	protected function buildRoutesConfig(): array
 	{
@@ -2704,12 +3028,37 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 			}
 		}
 
+		$activityRoutes = $this->createActivityRouteBuilder()->buildRoutes();
+		$routesConfig = array_merge($routesConfig, $activityRoutes);
+		foreach (array_keys($activityRoutes) as $actionUri)
+		{
+			$featureByRoute[$actionUri] = Activity\RouteBuilder::FEATURE;
+		}
+
 		foreach ($this->getDynamicTypes() as $dynamicType)
 		{
 			$entityTypeId = $dynamicType->getEntityTypeId();
 			if ($entityTypeId === null || !EntityType::isValid($entityTypeId))
 			{
 				continue;
+			}
+
+			if (EntityType::isPossibleSmartProcessTypeId($entityTypeId))
+			{
+				$actionUri = 'crm.smartProcess' . $entityTypeId . '.field.required.get';
+				$routesConfig[$actionUri] = [
+					'controller' => Requirement::class,
+					'method' => 'get',
+					'dtoFqcn' => FieldRequirementDto::class,
+					'entityTypeId' => $entityTypeId,
+					'scopes' => ['crm'],
+					'mcp' => [
+						'export' => true,
+						'toolSetCode' => self::MCP_FIELD_REQUIREMENT_TOOL_SET_CODE,
+						'descriptionOverride' => 'Get field requirement settings for smart process ' . $entityTypeId . '.',
+					],
+				];
+				$featureByRoute[$actionUri] = RestV3CrudDeal::class;
 			}
 
 			if (OwnerType::isPossibleSmartProcessTypeId($entityTypeId))
@@ -2802,12 +3151,34 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		$routesConfig = $this->addClientRequisiteRoutesOfLinkableTypes($routesConfig, $featureByRoute);
 		$routesConfig = $this->addDictionaryValueRoutes($routesConfig, $featureByRoute);
 
+		foreach ($routesConfig as $actionUri => $route)
+		{
+			if (($route['controller'] ?? null) !== Requirement::class || ($route['method'] ?? null) !== 'get')
+			{
+				continue;
+			}
+			foreach (['set', 'clear'] as $action)
+			{
+				$writeUri = substr($actionUri, 0, -3) . $action;
+				if (isset($routesConfig[$writeUri]))
+				{
+					throw new \RuntimeException(
+						'CRM REST V3 field requirement route is already registered: ' . $writeUri,
+					);
+				}
+				$routesConfig[$writeUri] = array_replace($route, ['method' => $action]);
+				$description = substr($route['mcp']['descriptionOverride'], strlen('Get '));
+				$routesConfig[$writeUri]['mcp']['descriptionOverride'] = ucfirst($action) . ' ' . $description;
+				$featureByRoute[$writeUri] = RestV3CrudDeal::class;
+			}
+		}
+
 		return $this->normalizeRouteMaps($routesConfig, $featureByRoute);
 	}
 
 	/**
 	 * @param array<string, array> $routesConfig
-	 * @param array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> $featureByRoute
+	 * @param array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> $featureByRoute
 	 */
 	private function addCustomFieldRoutes(
 		array &$routesConfig,
@@ -2826,6 +3197,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'dtoFqcn' => CustomFieldConfigDto::class,
 				'entityTypeId' => $entityTypeId,
 				'queryParams' => ['entityId' => $entityId],
+				'mcp' => $this->buildCustomFieldMcpMetadata($entityTypeId, $action, false),
 			];
 			$featureByRoute[$actionUri] = RestV3CrudDeal::class;
 		}
@@ -2835,7 +3207,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	 * Routes for enum values of CRM user fields. The entity type is a trusted route parameter.
 	 *
 	 * @param array<string, array> $routesConfig
-	 * @param array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> $featureByRoute
+	 * @param array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> $featureByRoute
 	 * @return array<string, array>
 	 */
 	private function addCustomEnumRoutes(array $routesConfig, array &$featureByRoute): array
@@ -2864,7 +3236,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 
 	/**
 	 * @param array<string, array> $routesConfig
-	 * @param array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> $featureByRoute
+	 * @param array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> $featureByRoute
 	 * @return array<string, array>
 	 */
 	private function addCustomEnumRoutesForEntity(
@@ -2882,11 +3254,35 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 				'method' => $action,
 				'dtoFqcn' => EnumDto::class,
 				'entityTypeId' => $entityTypeId,
+				'mcp' => $this->buildCustomFieldMcpMetadata($entityTypeId, $action, true),
 			];
 			$featureByRoute[$actionUri] = RestV3CrudDeal::class;
 		}
 
 		return $routesConfig;
+	}
+
+	/** @return array<string, mixed> */
+	private function buildCustomFieldMcpMetadata(int $entityTypeId, string $action, bool $isEnum): array
+	{
+		$owner = self::CUSTOM_FIELD_OWNER_NAMES[$entityTypeId] ?? 'CRM smart process type ' . $entityTypeId;
+		$resource = $isEnum ? 'enumeration value of a custom field' : 'custom field';
+		$resources = $isEnum ? 'enumeration values of custom fields' : 'custom fields';
+		$article = $isEnum ? 'an' : 'a';
+
+		return [
+			'export' => true,
+			'toolSetCode' => self::CUSTOM_FIELD_TOOL_SET_CODES[$entityTypeId]
+				?? self::MCP_SMART_PROCESS_TOOL_SET_CODE,
+			'descriptionOverride' => match ($action)
+			{
+				'list' => 'List ' . $resources . ' for ' . $owner . '.',
+				'get' => 'Get ' . $article . ' ' . $resource . ' for ' . $owner . ' by ID.',
+				'add' => 'Create ' . $article . ' ' . $resource . ' for ' . $owner . '.',
+				'update' => 'Update ' . $article . ' ' . $resource . ' for ' . $owner . '.',
+				'delete' => 'Delete ' . $article . ' ' . $resource . ' for ' . $owner . '.',
+			},
+		];
 	}
 
 	/** @return \Bitrix\Crm\Model\Dynamic\Type[] */
@@ -2901,6 +3297,11 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 	protected function isCategoryFamilyEnabled(): bool
 	{
 		return Feature::enabled(RouteBuilder::FEATURE);
+	}
+
+	protected function createActivityRouteBuilder(): Activity\RouteBuilder
+	{
+		return new Activity\RouteBuilder();
 	}
 
 	/**
@@ -3179,6 +3580,18 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 					'dtoFqcn' => ClientRequisiteDto::class,
 					'entityTypeId' => $entityTypeId,
 					'scopes' => static::CLIENT_REQUISITE_SCOPES,
+					'mcp' => [
+						'export' => true,
+						'toolSetCode' => self::MCP_REQUISITE_ADDRESS_TOOL_SET_CODE,
+						'descriptionOverride' => sprintf(
+							$action === 'set'
+								? 'Set the client requisites of a CRM %s.'
+								: 'Get the client requisites of a CRM %s by ID.',
+							$entitySegment === 'smartDocument'
+								? 'smart document'
+								: 'smart process item of type ' . $entityTypeId,
+						),
+					],
 				];
 				$featureByRoute[$actionUri] = RestV3CrudDeal::class;
 			}
@@ -3340,7 +3753,7 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		return $controllersData;
 	}
 
-	/** @return array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> */
+	/** @return array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> */
 	protected function getBuiltFeatureByRoute(): array
 	{
 		$this->getAvailableRoutesConfig();
@@ -3359,9 +3772,136 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		}
 	}
 
+	/**
+	 * Describes the global activity methods without routing them.
+	 *
+	 * {@see Controller\Activity} is an ordinary controller, found by the namespace of the module, and the
+	 * schema builds a description of every action of it by reflection. A description given here carries the
+	 * same action uri, so it replaces that one whole, and what it fixes is the two things reflection cannot
+	 * know: the exact scope the methods are granted by and whether the wave they go out with is published.
+	 * An unpublished method is refused before dispatch, with the answer REST gives a method it knows as
+	 * disabled - the route itself stays in the schema either way.
+	 *
+	 * The two field methods of the resource are described here for the same reason: REST would otherwise
+	 * build them on its own system controller and grant them by the scopes of the segments of their names,
+	 * whatever the wave is doing. They are served by that system controller all the same, so the check of
+	 * the wave this controller makes for itself never runs for them and they carry
+	 * {@see ActivityFieldAccessProvider} instead: the schema caches the name of the class rather than its
+	 * decision, so the wave is read on every call and not once per hour of the cache.
+	 *
+	 * Every published route of {@see Activity\EntityActivity} gets the same pair beside it, for the same reason:
+	 * REST would build one for each of them too. A route the wave has taken out has no pair either.
+	 */
+	protected function buildActivityControllerData(): ControllerData
+	{
+		$isEnabled = $this->isActivityEnabled();
+		$methodDescriptions = [];
+		foreach (self::ACTIVITY_ACTIONS as $actionUri => $method)
+		{
+			$methodDescriptions[] = new MethodDescription(
+				module: self::MODULE,
+				controllerFqcn: Controller\Activity::class,
+				method: $method,
+				dtoFqcn: ActivityDto::class,
+				scopes: self::ACTIVITY_SCOPES,
+				actionUri: $actionUri,
+				isEnabled: $isEnabled,
+				mcpTool: McpToolMetadata::fromArray([
+					'export' => true,
+					'toolSetCode' => self::ACTIVITY_MCP_TOOL_SET_CODE,
+				]),
+			);
+		}
+
+		foreach (self::ACTIVITY_FIELD_ACTIONS as $actionUri => $method)
+		{
+			$methodDescriptions[] = $this->buildActivityFieldMethodDescription(
+				$actionUri,
+				$method,
+				$isEnabled,
+				McpToolMetadata::fromArray([
+					'export' => true,
+					'toolSetCode' => self::ACTIVITY_MCP_TOOL_SET_CODE,
+				]),
+			);
+		}
+
+		foreach ($this->getContextActivityResourceToolSets() as $resourceUri => $toolSetCode)
+		{
+			foreach (self::ACTIVITY_FIELD_ACTIONS as $method)
+			{
+				$description = $method === 'get'
+					? "Get metadata for a specific {$resourceUri} field."
+					: "List available fields for {$resourceUri}.";
+				$methodDescriptions[] = $this->buildActivityFieldMethodDescription(
+					$resourceUri . '.field.' . $method,
+					$method,
+					$isEnabled,
+					McpToolMetadata::fromArray([
+						'export' => true,
+						'toolSetCode' => $toolSetCode,
+						'descriptionOverride' => $description,
+					]),
+				);
+			}
+		}
+
+		return new ControllerData(
+			module: self::MODULE,
+			controllerFqcn: Controller\Activity::class,
+			namespace: self::CONTROLLER_NAMESPACE,
+			methods: $methodDescriptions,
+		);
+	}
+
+	private function buildActivityFieldMethodDescription(
+		string $actionUri,
+		string $method,
+		bool $isEnabled,
+		?McpToolMetadata $mcpTool = null,
+	): MethodDescription
+	{
+		return new MethodDescription(
+			module: self::MODULE,
+			controllerFqcn: DtoFieldController::class,
+			method: $method,
+			dtoFqcn: DtoFieldDto::class,
+			scopes: self::ACTIVITY_SCOPES,
+			actionUri: $actionUri,
+			isEnabled: $isEnabled,
+			queryParams: ['dtoClass' => ActivityDto::class],
+			accessProvider: ActivityFieldAccessProvider::class,
+			resourceDtoFqcn: ActivityDto::class,
+			mcpTool: $mcpTool,
+		);
+	}
+
+	/**
+	 * @return array<string, string> Tool set code for each published `crm.<entity>.activity` resource.
+	 */
+	private function getContextActivityResourceToolSets(): array
+	{
+		$resourceToolSets = [];
+		foreach ($this->getAvailableRoutesConfig() as $actionUri => $routeConfig)
+		{
+			if (($routeConfig['controller'] ?? null) === Activity\EntityActivity::class)
+			{
+				$resourceToolSets[substr($actionUri, 0, (int)strrpos($actionUri, '.'))]
+					= $routeConfig['mcp']['toolSetCode'];
+			}
+		}
+
+		return $resourceToolSets;
+	}
+
+	protected function isActivityEnabled(): bool
+	{
+		return (new ActivityEnabledProvider())->isEnabled();
+	}
+
 	protected function buildHiddenControllerData(string $controllerFqcn, array $methods): ControllerData
 	{
-		$namespace = '\\Bitrix\\Crm\\V2\\Infrastructure\\Rest\\Controller';
+		$namespace = self::CONTROLLER_NAMESPACE;
 		$controllerData = new ControllerData(
 			module: self::MODULE,
 			controllerFqcn: $controllerFqcn,
@@ -3478,8 +4018,8 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 
 	/**
 	 * @param array<string, array> $routesConfig
-	 * @param array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>> $featureByRoute
-	 * @return array{array<string, array>, array<string, class-string<\Bitrix\Crm\Feature\BaseFeature>>}
+	 * @param array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>> $featureByRoute
+	 * @return array{array<string, array>, array<string, class-string<Feature\BaseFeature|Feature\AbstractCrmFlag>>}
 	 */
 	private function normalizeRouteMaps(array $routesConfig, array $featureByRoute): array
 	{
@@ -3523,6 +4063,10 @@ class SchemaProvider extends \Bitrix\Rest\V3\Schema\SchemaProvider
 		if (isset($routeConfig['entityTypeId']))
 		{
 			$queryParams['entityTypeId'] = $routeConfig['entityTypeId'];
+		}
+		if (isset($routeConfig['categoryId']))
+		{
+			$queryParams['categoryId'] = $routeConfig['categoryId'];
 		}
 
 		return $queryParams === [] ? null : $queryParams;

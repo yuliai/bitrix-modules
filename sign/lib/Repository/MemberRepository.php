@@ -15,6 +15,7 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Main\UserTable;
 use Bitrix\Sign\FeatureResolver;
 use Bitrix\Sign\Internal;
 use Bitrix\Sign\Item;
@@ -38,6 +39,7 @@ class MemberRepository
 	// Same batch as DocumentRepository::listForSafeExportByIds(): both run over the very
 	// same set of documents, and the safe export feeds up to SAFE_EXPORT_LIMIT of them.
 	private const SIGNERS_BY_DOCUMENTS_BATCH_SIZE = 300;
+	private const MAX_SOURCE_USER_COUNT = 1000;
 
 	// lower bound of an "empty" signing date: SQL NULL or dates below this
 	// threshold (e.g. the zero seed date) are treated as an unset signing date.
@@ -1248,6 +1250,93 @@ class MemberRepository
 	}
 
 	/**
+	 * Filter node of the company safe annulment status (NORMATIVE ALG-01). The mark of the row shown
+	 * is not always the mark of the signing that row speaks about: the company side row of an employee
+	 * initiated document is asked of the document instead - has it an annulled finished signing - since
+	 * the signer's own row is excluded from the safe listing. Every other row keeps answering with its
+	 * own column. The same substitution class drives the row mark, see Service\B2e\AnnulmentTargetService.
+	 *
+	 * Existence instead of a join on purpose: a join would multiply the rows of a document with several
+	 * finished signers and break every safe counter. The two modes stay exact complements - hence the
+	 * explicit null members for the nullable initiator type and role columns - so the row counts of
+	 * "annulled" and "signed" still add up to the count of "all".
+	 *
+	 * Existence condition and not an expression one: walking a filter, the query registers the field of
+	 * an expression condition as a runtime field of its own and rewrites the definition inside that very
+	 * filter with the field's name (Main\ORM\Query\Query::setFilterHandlerChains()), which leaves the
+	 * filter usable once, while the safe grid hands one built filter to a count query and to a listing
+	 * query in a row. An existence condition carries no column name and stays reusable, at the price of
+	 * the correlation - see getAnnulledSignerSubQuery().
+	 */
+	public function buildSafeAnnulmentCondition(bool $annulled): ConditionTree
+	{
+		$employeeInitiated = Type\Document\InitiatedByType::EMPLOYEE->toInt();
+		$assignee = $this->convertRoleToInt(Role::ASSIGNEE);
+		$subQuery = $this->getAnnulledSignerSubQuery();
+
+		$substituted = Query::filter()
+			->where('DOCUMENT.INITIATED_BY_TYPE', $employeeInitiated)
+			->where('ROLE', $assignee)
+		;
+		if ($annulled)
+		{
+			$substituted->whereExists($subQuery);
+		}
+		else
+		{
+			$substituted->whereNotExists($subQuery);
+		}
+
+		return Query::filter()
+			->logic('or')
+			->where($substituted)
+			->where(Query::filter()
+				->where(Query::filter()
+					->logic('or')
+					->where('DOCUMENT.INITIATED_BY_TYPE', '!=', $employeeInitiated)
+					->whereNull('DOCUMENT.INITIATED_BY_TYPE')
+					->where('ROLE', '!=', $assignee)
+					->whereNull('ROLE')
+				)
+				->where('ANNULLED', $annulled)
+			)
+		;
+	}
+
+	/**
+	 * Finished annulled signing of the same document. An existence condition gets no column
+	 * substitution from the query - see buildSafeAnnulmentCondition() - so the correlation is written
+	 * out here as a reference to the column of the outer table. The alias of that table is read off the
+	 * member entity instead of spelled out, so it follows the base query of the safe.
+	 */
+	private function getAnnulledSignerSubQuery(): Query
+	{
+		return Internal\MemberTable::query()
+			->setCustomBaseTableAlias('sign_internal_member_annulled_signer')
+			->where('DOCUMENT_ID', new Main\DB\SqlExpression($this->getSafeOuterDocumentIdSql()))
+			->where('ROLE', $this->convertRoleToInt(Role::SIGNER))
+			->where('SIGNED', MemberStatus::DONE)
+			->where('ANNULLED', true)
+			->setLimit(1)
+		;
+	}
+
+	/**
+	 * Quoted `<outer alias>.DOCUMENT_ID` of the safe base query. Identifiers go through the sqlHelper of
+	 * the member connection, part by part: quote() of the postgres helper takes the whole argument for a
+	 * single identifier and would not split a dotted one.
+	 */
+	private function getSafeOuterDocumentIdSql(): string
+	{
+		$sqlHelper = Internal\MemberTable::getEntity()->getConnection()->getSqlHelper();
+
+		return $sqlHelper->quote(Internal\MemberTable::query()->getInitAlias())
+			. '.'
+			. $sqlHelper->quote('DOCUMENT_ID')
+		;
+	}
+
+	/**
 	 * Base query for the company safe ("My Safe") member listing: only members with a signed result
 	 * file, whose document has reached an ending status, minus the signer's own result file when the
 	 * signer initiated the flow. Shared by the list/count/folder-id readers so the safe grid, the
@@ -1949,7 +2038,7 @@ class MemberRepository
 			&& !empty(
 				array_filter(
 					$conditions,
-					static fn(Condition $condition) => str_starts_with($condition->getColumn(), self::SIGN_DOCUMENT_LIST_QUERY_REF_FIELD_NAME_COMPANY),
+					static fn(Condition $condition) => self::isCompanyRefFieldColumn($condition->getColumn()),
 				)
 			)
 		)
@@ -1964,6 +2053,17 @@ class MemberRepository
 				),
 			);
 		}
+	}
+
+	/**
+	 * Expression and exists conditions carry a field object or null instead of a column name
+	 * (main/lib/ORM/Query/Filter/Condition.php), so the prefix check must not assume a string.
+	 */
+	private static function isCompanyRefFieldColumn(mixed $column): bool
+	{
+		return is_string($column)
+			&& str_starts_with($column, self::SIGN_DOCUMENT_LIST_QUERY_REF_FIELD_NAME_COMPANY)
+		;
 	}
 
 	public function listB2eMembersWithReadyStatus(int $entityId, int $limit, int $offset): Item\MemberCollection
@@ -3378,6 +3478,78 @@ class MemberRepository
 	public function listUserIdsByDocumentId(int $documentId): array
 	{
 		return $this->listUniqueUserIdsByDocumentIds([$documentId]);
+	}
+
+	/**
+	 * @param list<int> $excludedUserIds
+	 *
+	 * @return list<int>
+	 */
+	public function listSignerUserIdsByDocumentId(
+		int $documentId,
+		int $limit = self::MAX_SOURCE_USER_COUNT + 1,
+		array $excludedUserIds = [],
+	): array
+	{
+		return $this->listSignerUserIdsByDocumentIds([$documentId], $limit, $excludedUserIds);
+	}
+
+	/**
+	 * @param list<int> $documentIds
+	 * @param list<int> $excludedUserIds
+	 *
+	 * @return list<int>
+	 */
+	public function listSignerUserIdsByDocumentIds(
+		array $documentIds,
+		int $limit = self::MAX_SOURCE_USER_COUNT + 1,
+		array $excludedUserIds = [],
+	): array
+	{
+		$documentIds = array_values(array_unique(array_filter(
+			array_map('intval', $documentIds),
+			static fn(int $documentId): bool => $documentId > 0,
+		)));
+		$limit = min(max(0, $limit), self::MAX_SOURCE_USER_COUNT + 1);
+		if ($documentIds === [] || $limit === 0)
+		{
+			return [];
+		}
+
+		$excludedUserIds = array_values(array_unique(array_filter(
+			array_map('intval', $excludedUserIds),
+			static fn(int $userId): bool => $userId > 0,
+		)));
+		$intranetUserQuery = UserTable::query()
+			->setSelect(['ID'])
+			->where('ACTIVE', 'Y')
+			->where('IS_REAL_USER', 'Y')
+			->where('UF_DEPARTMENT', '!=', false)
+		;
+
+		$query = Internal\MemberTable::query()
+			->setSelect(['ENTITY_ID'])
+			->setDistinct()
+			->whereIn('DOCUMENT_ID', $documentIds)
+			->where('ENTITY_TYPE', EntityType::USER)
+			->where('ROLE', $this->convertRoleToInt(Role::SIGNER))
+			->whereIn('ENTITY_ID', $intranetUserQuery)
+			->setLimit($limit)
+		;
+
+		if ($excludedUserIds !== [])
+		{
+			$query->whereNotIn('ENTITY_ID', $excludedUserIds);
+		}
+
+		$result = $query->exec();
+		$userIds = [];
+		while ($row = $result->fetch())
+		{
+			$userIds[] = (int)$row['ENTITY_ID'];
+		}
+
+		return $userIds;
 	}
 
 	/**

@@ -11,6 +11,7 @@ return [
 			'defaultNamespace' => '\\Bitrix\\Rest\\V3\\Realisation\\Controller',
 			'namespaces' => [
 				'\\Bitrix\\Rest\\Infrastructure\\Rest\\Controller',
+				'\\Bitrix\\Rest\\Tests\\Lib\\Rest\\V3\\Controller',
 			],
 			'routes' => [
 				'documentation' => 'rest.documentation.openApi',
@@ -63,11 +64,8 @@ return [
 				},
 				'singleton' => true,
 			],
-			Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class => [
-				'className' => Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class,
-			],
 			'rest.service.vibe_plus.tariff_access' => [
-				'className' => Rest\Internal\Service\VibePlus\TariffAccessService::class,
+				'className' => Rest\Internal\Integration\Bitrix24\TariffAccessService::class,
 			],
 			'rest.service.apauth.password' => [
 				'className' => \Bitrix\Rest\Service\APAuth\PasswordService::class,

@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Internal\Service\Settings\Mutation;
 
 use Bitrix\Crm\V2\Internal\Entity\Settings\ObjectField;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\ObjectSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\SettingSchemaInterface;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\ObjectSchema;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\SettingSchemaInterface;
 use Bitrix\Crm\V2\Internal\Service\Settings\Setting\Format\CallToSetting;
-use Bitrix\Crm\V2\Internal\Service\Settings\Setting\Format\CallToValue;
-use Bitrix\Crm\V2\Internal\Service\Settings\SettingErrorCode;
-use Bitrix\Crm\V2\Internal\Service\Settings\SettingValidationError;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Value\CallToValue;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Validation\SettingErrorCode;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Validation\SettingValidationError;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 

@@ -107,8 +107,12 @@ class DocumentationManager
 		$customModuleSchemas = $this->getCustomModuleSchemas();
 		$customModuleMethods = $this->getCustomModuleMethods();
 		$customModuleRoutes = $this->schemaManager->getRouteAliases();
+		$methodDescriptions = array_filter(
+			$this->schemaManager->getMethodDescriptions(),
+			static fn(MethodDescription $methodDescription): bool => $methodDescription->isEnabled && !$methodDescription->isHidden,
+		);
+		$this->schemaManager->ensureGeneratedDtoClassesLoadedFromMethodDescriptions($methodDescriptions);
 		$moduleControllers = $this->schemaManager->getControllersByModules();
-		$methodDescriptions = $this->schemaManager->getMethodDescriptions();
 
 		foreach ($moduleControllers as $moduleId => $controllers)
 		{

@@ -355,6 +355,66 @@ final class B2eController extends Timeline\Controller
 		);
 	}
 
+	public function onAcceptedAutomatically(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_ACCEPTED_AUTOMATICALLY,
+			$identifier,
+			$documentData,
+		);
+	}
+
+	public function onApprovedByRepresentative(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_APPROVED_BY_REPRESENTATIVE,
+			$identifier,
+			$documentData,
+		);
+	}
+
+	public function onCanceledByRepresentative(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_CANCELED_BY_REPRESENTATIVE,
+			$identifier,
+			$documentData,
+		);
+	}
+
+	public function onProcessingTaskCreated(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_PROCESSING_TASK_CREATED,
+			$identifier,
+			$documentData,
+		);
+	}
+
+	public function onProcessingTaskFailed(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_PROCESSING_TASK_FAILED,
+			$identifier,
+			$documentData,
+		);
+	}
+
 	protected function handleSignEvent(
 		int $typeCategoryId,
 		ItemIdentifier $identifier,
@@ -446,6 +506,11 @@ final class B2eController extends Timeline\Controller
 			Entry::TYPE_CATEGORY_ANNULLED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_ACCEPTED_AUTOMATICALLY => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_APPROVED_BY_REPRESENTATIVE => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_CANCELED_BY_REPRESENTATIVE => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_PROCESSING_TASK_CREATED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_PROCESSING_TASK_FAILED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 		];
 	}
 

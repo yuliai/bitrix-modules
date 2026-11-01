@@ -4,8 +4,15 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\UrlParameter\UrlParameters;
 use Bitrix\BIConnector\Internal\Model\SupersetDashboardInfoTable;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\ListDashboardsOperation;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\ListDashboardsQuery;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\Loader;
 
@@ -16,6 +23,11 @@ final class ListDashboardsTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'list_dashboards';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Read;
 	}
 
 	public function getDescription(): string
@@ -57,6 +69,34 @@ final class ListDashboardsTool extends BaseBiTool
 
 	protected function executeStructured(int $userId, ...$args): array
 	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$offset = 0;
+		if (isset($args['offset']) && is_numeric($args['offset']))
+		{
+			$offset = (int)$args['offset'];
+		}
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$result = ServiceLocator::getInstance()->get(ListDashboardsOperation::class)->execute(
+			new ListDashboardsQuery(trim($args['query'] ?? ''), $offset),
+			new Actor($userId, Channel::Mcp),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException(OperationRefusal::forTool($result));
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
+	{
 		Loader::includeModule('biconnector');
 
 		$accessController = $this->getAccessController($userId);
@@ -92,7 +132,7 @@ final class ListDashboardsTool extends BaseBiTool
 		}
 
 		$query = SupersetDashboardTable::getList([
-			'select' => ['ID', 'TITLE', 'TYPE', 'FILTER_PERIOD', 'DESCRIPTION' => 'INFO.DESCRIPTION'],
+			'select' => ['ID', 'TITLE', 'TYPE', 'DESCRIPTION' => 'INFO.DESCRIPTION'],
 			'filter' => $filter,
 			'order' => ['TITLE' => 'ASC', 'ID' => 'ASC'],
 			'limit' => self::PAGE_SIZE + 1,
@@ -129,7 +169,6 @@ final class ListDashboardsTool extends BaseBiTool
 				'title' => $row['TITLE'],
 				'type' => $row['TYPE'] ?? null,
 				'description' => $description !== '' ? $description : null,
-				'defaultFilterPeriod' => $row['FILTER_PERIOD'] ?? null,
 				'requiresScope' => $requiresScope[$id] ?? false,
 			];
 		}

@@ -9,6 +9,7 @@ use Bitrix\AI\Result;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\AutoTaskQueueManager;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\SingleMessageCreator;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\Status;
+use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Pull\Event\AutoTaskStatus;
 
@@ -29,6 +30,15 @@ class SingleMessageTaskCreationJob extends QueueJob
 		if (!($result instanceof Result))
 		{
 			$queueManager->delete([$messageId]);
+
+			// no usable answer came back: the launch still owes the initiator a terminal verdict.
+			// Loading the anchor is best effort - a hard-deleted row leaves the event without a chat,
+			// but its id is what addresses every event of the operation
+			if ($userId > 0)
+			{
+				$anchor = (new Message($messageId))->setMessageId($messageId);
+				(new AutoTaskStatus($anchor, $userId, Status::NotFound))->send();
+			}
 
 			return;
 		}
@@ -54,7 +64,7 @@ class SingleMessageTaskCreationJob extends QueueJob
 			$sourceText = $creator->extractSourceText();
 			$data = $result->getJsonData() ?? [];
 
-			$creator->createTask($data, $sourceText, $userId);
+			$creator->createTask($data, $sourceText, $userId, LaunchType::Manual);
 		}
 		finally
 		{

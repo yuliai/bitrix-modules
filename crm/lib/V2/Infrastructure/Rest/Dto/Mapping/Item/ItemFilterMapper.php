@@ -14,17 +14,22 @@ use Bitrix\Crm\Integrity\DuplicateCommunicationMatchCodeTable;
 use Bitrix\Crm\Model\LastCommunicationTable;
 use Bitrix\Crm\Observer\Entity\ObserverTable;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Tracking\Internals\TraceEntityTable;
 use Bitrix\Crm\UtmTable;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\AddressDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\ItemDtoGenerator;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Structure\ItemListFilterStructure;
 use Bitrix\Crm\V2\Infrastructure\Rest\Provider\Item\RestItemProvider;
+use Bitrix\Crm\V2\Public\Entity\Item\Item;
 use Bitrix\Crm\V2\Public\EntityTypeSettings;
 use Bitrix\Crm\V2\Public\EntityType;
 use Bitrix\Crm\V2\Public\OwnerType;
 use Bitrix\Crm\V2\Public\Provider\Item\Param\ItemFilter;
 use Bitrix\Crm\Service\ParentFieldManager;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\SqlExpression;
+use Bitrix\Main\Error;
+use Bitrix\Main\Localization\LocalizableMessage;
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Query\Filter\Condition as OrmCondition;
@@ -33,6 +38,7 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoField;
 use Bitrix\Rest\V3\Exception\InvalidFilterException;
+use Bitrix\Rest\V3\Exception\Validation\RequestValidationException;
 use Bitrix\Rest\V3\Structure\Structure;
 use Bitrix\Rest\V3\Structure\Filtering\Condition as RestCondition;
 use Bitrix\Rest\V3\Structure\Filtering\Operator;
@@ -67,6 +73,8 @@ final class ItemFilterMapper
 		'webformTime' => LastCommunicationTable::ENUM_WEB_FORM_TIME,
 	];
 
+	private const LATER_BINDING_ALIAS = 'later_trace_binding';
+
 	public function __construct(
 		private readonly EntityTypeSettings $entityTypeSettings,
 		private readonly ItemDtoMapper $itemDtoMapper,
@@ -82,12 +90,13 @@ final class ItemFilterMapper
 		return $this->mapGroup($filter, $dto);
 	}
 
-	private function mapGroup(ItemListFilterStructure $filter, Dto $dto): ConditionTree
+	private function mapGroup(ItemListFilterStructure $filter, Dto $dto, bool $isInsideOr = false): ConditionTree
 	{
 		$tree = (new ConditionTree())
 			->logic($filter->getLogic()->value)
 			->negative($filter->isNegative())
 		;
+		$isInsideOr = $isInsideOr || $filter->getLogic()->value === ConditionTree::LOGIC_OR;
 		$multifieldConditions = [];
 		$crmRelationConditions = [];
 
@@ -101,9 +110,14 @@ final class ItemFilterMapper
 		{
 			if ($condition instanceof ItemListFilterStructure)
 			{
-				$tree->addCondition($this->mapGroup($condition, $dto));
+				$tree->addCondition($this->mapGroup($condition, $dto, $isInsideOr));
 
 				continue;
+			}
+
+			if ($isInsideOr && $this->isTrackingSourceCondition($condition))
+			{
+				$this->throwUnsupportedTrackingSourceFilter();
 			}
 
 			if (
@@ -207,6 +221,7 @@ final class ItemFilterMapper
 		}
 		return match (true)
 		{
+			$fieldName === Item::trackingSourceId => $this->mapTrackingSourceCondition($operator, $value),
 			$this->isCrmRelationIdCondition($fieldName, $dto) => $this->mapCrmRelationIdCondition(
 				$fieldName,
 				$operator,
@@ -895,6 +910,64 @@ final class ItemFilterMapper
 		$query->where('VALUE', $operator === Operator::NotEqual ? '=' : $operator->value, $value);
 
 		return $this->createIdSubqueryCondition($query, $operator === Operator::NotEqual);
+	}
+
+	private function isTrackingSourceCondition(RestCondition $condition): bool
+	{
+		$fieldName = (string)$condition->getLeftOperand();
+
+		return $fieldName === Item::trackingSourceId || str_ends_with($fieldName, '.' . Item::trackingSourceId);
+	}
+
+	/**
+	 * The source of an item is the source of the trace of its last binding (the greatest binding ID), so
+	 * the filter takes the bindings of the wanted sources that no later binding of the same item follows.
+	 */
+	private function mapTrackingSourceCondition(Operator $operator, mixed $value): OrmCondition|ConditionTree
+	{
+		if (!$this->entityTypeSettings->hasCrmTracking())
+		{
+			$this->throwUnsupportedFilter(Item::trackingSourceId, $operator, $value);
+		}
+		if (!in_array($operator, [Operator::Equal, Operator::In], true) || $value === null)
+		{
+			$this->throwUnsupportedTrackingSourceFilter();
+		}
+
+		$query = $this->createLastTraceBindingQuery();
+		$sourceIds = array_map('intval', is_array($value) ? $value : [$value]);
+		$query->whereIn('TRACE.SOURCE_ID', $sourceIds);
+
+		return $this->createIdSubqueryCondition($query, false);
+	}
+
+	private function createLastTraceBindingQuery(): Query
+	{
+		$entityTypeId = $this->entityTypeSettings->getEntityType()->getId();
+		$query = TraceEntityTable::query()
+			->setSelect(['ENTITY_ID'])
+			->where('ENTITY_TYPE_ID', $entityTypeId)
+		;
+		$bindingAlias = $query->getInitAlias();
+		$laterBindingQuery = TraceEntityTable::query()
+			->setCustomBaseTableAlias(self::LATER_BINDING_ALIAS)
+			->setSelect(['ID'])
+			->where('ENTITY_TYPE_ID', $entityTypeId)
+			->where('ENTITY_ID', new SqlExpression('?#.?#', $bindingAlias, 'ENTITY_ID'))
+			->where('ID', '>', new SqlExpression('?#.?#', $bindingAlias, 'ID'))
+		;
+
+		return $query->whereNotExists($laterBindingQuery);
+	}
+
+	private function throwUnsupportedTrackingSourceFilter(): never
+	{
+		throw new RequestValidationException([
+			new Error(
+				new LocalizableMessage('CRM_V2_REST_ITEM_FILTER_TRACKING_SOURCE_UNSUPPORTED'),
+				Item::trackingSourceId,
+			),
+		]);
 	}
 
 	private function mapLastCommunicationCondition(

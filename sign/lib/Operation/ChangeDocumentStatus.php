@@ -5,6 +5,7 @@ namespace Bitrix\Sign\Operation;
 use Bitrix\Main;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Sign\Contract;
+use Bitrix\Sign\Debug\Logger;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Operation;
 use Bitrix\Sign\Repository\DocumentRepository;
@@ -44,6 +45,7 @@ final class ChangeDocumentStatus implements Contract\Operation
 	private readonly AnalyticService $analyticService;
 	private readonly HcmLinkService $hcmLinkService;
 	private readonly InviteCardService $inviteCardService;
+	private readonly Logger $logger;
 
 	/**
 	 * @param bool $initiatorIsUnknown the status change repeats what already happened elsewhere - in the
@@ -56,9 +58,11 @@ final class ChangeDocumentStatus implements Contract\Operation
 		private readonly ?DateTime $signDate = null,
 		private readonly ?Item\Member $initiatorMember = null,
 		private readonly bool $initiatorIsUnknown = false,
+		?Logger $logger = null,
 	)
 	{
 		$container = Container::instance();
+		$this->logger = $logger ?? $container->getLogger();
 		$this->inviteCardService = $container->getInviteCardService();
 		$this->documentRepository = $container->getDocumentRepository();
 		$this->eventHandlerService = $container->getEventHandlerService();
@@ -89,6 +93,23 @@ final class ChangeDocumentStatus implements Contract\Operation
 
 		if ($this->document->isTemplated() && $this->status === Type\DocumentStatus::STOPPED)
 		{
+			// Expected for every template registered before the signing service learned the template
+			// flag: such a template keeps its signing deadline, and the service stops it once the
+			// deadline passes. The guard leaves the template intact, so this is a normal event and not
+			// a failure. Templates registered after the flag never reach it at all, so the creation
+			// date is what separates the two, and the level follows the expected case.
+			$this->logger->notice(
+				'Refused to stop templated document {documentId} (uid {uid}, template {templateId}, '
+				. 'created {dateCreate}); expected when created before the template flag was released, '
+				. 'a recurrence to look into only when created after it',
+				[
+					'documentId' => $this->document->id,
+					'uid' => $this->document->uid,
+					'templateId' => $this->document->templateId,
+					'dateCreate' => $this->document->dateCreate?->format('Y-m-d H:i:s'),
+				],
+			);
+
 			return $result->addError(new Main\Error('Can not stop templated document.'));
 		}
 

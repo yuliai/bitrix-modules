@@ -97,7 +97,7 @@ class DynamicTypes
 				continue;
 			}
 
-			foreach (['CREATED_BY', 'CREATED_TIME', 'UPDATED_TIME', 'UPDATED_BY'] as $fieldName)
+			foreach (['CREATED_BY', 'CREATED_TIME', 'UPDATED_TIME', 'UPDATED_BY', 'DESCRIPTION'] as $fieldName)
 			{
 				unset($typeFields[$fieldName]);
 			}

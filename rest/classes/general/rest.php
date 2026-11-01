@@ -30,7 +30,7 @@ use Bitrix\Rest\RestException;
 use Bitrix\Rest\AccessException;
 use Bitrix\Rest\Public\Event\RestInitEvent;
 use Bitrix\Main\Loader;
-use Bitrix\Main\Web\Json;
+use Bitrix\Rest\Internal\Response\StreamedJsonResponse;
 use Bitrix\Rest\RestExceptionInterface;
 use Bitrix\Rest\Tools\Diagnostics\RestServerProcessLogger;
 use Bitrix\Rest\UsageStatTable;
@@ -701,18 +701,7 @@ class CRestServer
 
 	public function sendHeaders():void
 	{
-		if ($this->error)
-		{
-			CHTTP::setStatus($this->error->getStatus());
-		}
-		elseif ($this->resultStatus)
-		{
-			CHTTP::setStatus($this->resultStatus);
-		}
-		else
-		{
-			CHTTP::setStatus(self::STATUS_OK);
-		}
+		CHTTP::setStatus($this->getResponseStatus());
 
 		switch ($this->transport)
 		{
@@ -727,6 +716,21 @@ class CRestServer
 		}
 
 		$this->sendHeadersAdditional();
+	}
+
+	protected function getResponseStatus(): string
+	{
+		if ($this->error)
+		{
+			return $this->error->getStatus();
+		}
+
+		if ($this->resultStatus)
+		{
+			return $this->resultStatus;
+		}
+
+		return self::STATUS_OK;
 	}
 
 	public function sendHeadersAdditional(): void
@@ -750,7 +754,7 @@ class CRestServer
 		}
 	}
 
-	public function output($data): BFile|string|null
+	public function output($data): Main\HttpResponse|string|null
 	{
 		UsageStatTable::finalize();
 
@@ -805,18 +809,13 @@ class CRestServer
 		return $data;
 	}
 
-	protected function outputJson($data): string
+	protected function outputJson($data): StreamedJsonResponse
 	{
-		try
-		{
-			$res = Json::encode($data);
-		}
-		catch (ArgumentException)
-		{
-			$res = '{"error":"WRONG_ENCODING","error_description":"Wrong request encoding"}';
-		}
+		$response = new StreamedJsonResponse(Main\Application::getInstance(), $data, (string)$this->getMethod());
+		$response->setStatus($this->getResponseStatus());
+		$response->addHeader('Content-Type', 'application/json; charset=utf-8');
 
-		return $res;
+		return $response;
 	}
 
 	protected function outputXml($data): string

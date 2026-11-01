@@ -242,6 +242,18 @@ final class ActivityAccess
 	}
 
 	/**
+	 * Bindings of the activity as the checks see them: the ones a decision over it was taken on, or a read of its
+	 * own where no check has read them yet. A reader that needs the bindings after the check takes them here and
+	 * reads them no second time.
+	 *
+	 * @return ActivityBinding[]
+	 */
+	public function getBindings(int $activityId): array
+	{
+		return $this->loadBindings($activityId);
+	}
+
+	/**
 	 * Forgets what is known about this activity - every decision about it, its bindings and its row.
 	 *
 	 * The bindings of an activity are what the rights over it are derived from, so a change to them within a

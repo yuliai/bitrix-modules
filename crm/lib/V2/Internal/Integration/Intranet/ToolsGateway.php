@@ -22,6 +22,21 @@ class ToolsGateway
 		return $this->checkBizprocAvailability();
 	}
 
+	public function isRobotsToolAvailable(): bool
+	{
+		return Container::getInstance()->getIntranetToolsManager()->checkRobotsAvailability();
+	}
+
+	public function isIntranetAvailable(): bool
+	{
+		return \Bitrix\Main\Loader::includeModule('intranet');
+	}
+
+	public function isExternalMailAvailable(): bool
+	{
+		return \CIntranetUtils::IsExternalMailAvailable();
+	}
+
 	protected function checkBizprocAvailability(): bool
 	{
 		return Container::getInstance()->getIntranetToolsManager()->checkBizprocAvailability();

@@ -374,6 +374,11 @@ class TaskModel implements AccessibleTask
 
 	public function setGroupId(int $groupId): self
 	{
+		if ($this->groupId !== $groupId)
+		{
+			$this->group = null;
+		}
+
 		$this->groupId = $groupId;
 		return $this;
 	}

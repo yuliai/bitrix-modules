@@ -10,6 +10,7 @@ use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormChangeSet;
 use Bitrix\Crm\WebForm\Internals\AgreementTable;
 use Bitrix\Main\Result;
+use Bitrix\Main\UserConsent;
 
 /**
  * Writes the agreements of a CRM form, mirroring AgreementSectionLoader.
@@ -32,6 +33,17 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 {
 	private const ITEMS_PATH = WebForm::SECTION_AGREEMENTS . '.' . Agreements::FIELD_ITEMS;
 
+	/**
+	 * @param class-string<AgreementTable> $agreementTable
+	 * @param class-string<UserConsent\Internals\AgreementTable> $documentTable
+	 */
+	public function __construct(
+		private readonly string $agreementTable = AgreementTable::class,
+		private readonly string $documentTable = UserConsent\Internals\AgreementTable::class,
+	)
+	{
+	}
+
 	public function getSectionName(): string
 	{
 		return WebForm::SECTION_AGREEMENTS;
@@ -46,9 +58,9 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 
 		/** @var AgreementItem[] $items */
 		$items = $changeSet->get(self::ITEMS_PATH);
-		$storedFlags = self::loadStoredFlags($formId, $items);
+		$storedFlags = $this->loadStoredFlags($formId, $items);
 
-		self::deleteFormRows(AgreementTable::class, $formId);
+		self::deleteFormRows($this->agreementTable, $formId);
 
 		$result = new Result();
 		$writtenAgreementIds = [];
@@ -61,7 +73,7 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 			}
 
 			$writtenAgreementIds[$agreementId] = true;
-			$addResult = AgreementTable::add(
+			$addResult = ($this->agreementTable)::add(
 				self::createRow($item, $formId, $storedFlags[$agreementId] ?? null),
 			);
 			if (!self::copyErrors($addResult, $result))
@@ -82,23 +94,20 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 	 * checked, optional agreement sent back as its identifier alone would come out unchecked and
 	 * required. So the flags are read before the removal and stand in for what the input does not say.
 	 *
-	 * Nothing is read when every item of the input carries both of its flags.
+	 * Acceptance by submit is not exposed by this API, so its stored value is always read.
 	 *
 	 * @param AgreementItem[] $items
-	 * @return array<int, array{CHECKED: string, REQUIRED: string}>
+	 * @return array<int, array{CHECKED: string, REQUIRED: string, ACCEPT_BY_SUBMIT: string}>
 	 */
-	private static function loadStoredFlags(int $formId, array $items): array
+	private function loadStoredFlags(int $formId, array $items): array
 	{
 		$askedIds = [];
 		foreach ($items as $item)
 		{
-			if ($item->checked === null || $item->required === null)
+			$agreementId = (int)$item->agreementId;
+			if ($agreementId > 0)
 			{
-				$agreementId = (int)$item->agreementId;
-				if ($agreementId > 0)
-				{
-					$askedIds[$agreementId] = true;
-				}
+				$askedIds[$agreementId] = true;
 			}
 		}
 
@@ -107,12 +116,33 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 			return [];
 		}
 
-		$rows = AgreementTable::query()
-			->setSelect(['AGREEMENT_ID', 'CHECKED', 'REQUIRED'])
+		$rows = ($this->agreementTable)::query()
+			->setSelect(['AGREEMENT_ID', 'CHECKED', 'REQUIRED', 'ACCEPT_BY_SUBMIT'])
 			->where('FORM_ID', $formId)
 			->whereIn('AGREEMENT_ID', array_keys($askedIds))
 			->fetchAll()
 		;
+
+		$submitAgreementIds = [];
+		foreach ($rows as $row)
+		{
+			if ($row['ACCEPT_BY_SUBMIT'] === 'Y')
+			{
+				$submitAgreementIds[] = (int)$row['AGREEMENT_ID'];
+			}
+		}
+
+		$allowedIds = [];
+		if ($submitAgreementIds !== [])
+		{
+			$documents = ($this->documentTable)::query()
+				->setSelect(['ID'])
+				->whereIn('ID', $submitAgreementIds)
+				->where('ACTIVE', 'Y')
+				->fetchAll()
+			;
+			$allowedIds = array_fill_keys(array_column($documents, 'ID'), true);
+		}
 
 		$flags = [];
 		foreach ($rows as $row)
@@ -120,6 +150,9 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 			$flags[(int)$row['AGREEMENT_ID']] ??= [
 				'CHECKED' => (string)$row['CHECKED'],
 				'REQUIRED' => (string)$row['REQUIRED'],
+				'ACCEPT_BY_SUBMIT' => self::toFlag(
+					$row['ACCEPT_BY_SUBMIT'] === 'Y' && isset($allowedIds[(int)$row['AGREEMENT_ID']]),
+				),
 			];
 		}
 
@@ -131,12 +164,15 @@ final class AgreementSectionWriter extends WebFormSectionWriter
 	 * already holds for this agreement and takes the creation default of the column only when the
 	 * form does not hold it at all.
 	 *
-	 * @param null|array{CHECKED: string, REQUIRED: string} $storedFlags
+	 * @param null|array{CHECKED: string, REQUIRED: string, ACCEPT_BY_SUBMIT: string} $storedFlags
 	 * @return array<string, mixed>
 	 */
 	private static function createRow(AgreementItem $item, int $formId, ?array $storedFlags): array
 	{
-		$row = ['FORM_ID' => $formId];
+		$row = [
+			'FORM_ID' => $formId,
+			'ACCEPT_BY_SUBMIT' => $storedFlags['ACCEPT_BY_SUBMIT'] ?? 'N',
+		];
 
 		if ($item->agreementId !== null)
 		{

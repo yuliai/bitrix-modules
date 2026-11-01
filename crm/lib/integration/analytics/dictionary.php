@@ -246,6 +246,7 @@ final class Dictionary
 	public const SOURCE_LOCAL = 'local';
 
 	public const CONTEXT_APPLICATION_SOURCE = 'APPLICATION_SOURCE';
+	public const CONTEXT_APPLICATION_CODE = 'APPLICATION_CODE';
 
 	public const UNKNOWN = 'unknown';
 

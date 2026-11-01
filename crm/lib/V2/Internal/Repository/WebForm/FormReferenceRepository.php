@@ -45,7 +45,7 @@ final class FormReferenceRepository
 			->setSelect(['ID'])
 			->whereIn('ID', $userIds)
 			->where('ACTIVE', true)
-			->where('IS_REAL_USER', true)
+			->where('REAL_USER', 'expr', true)
 			->fetchAll()
 		;
 

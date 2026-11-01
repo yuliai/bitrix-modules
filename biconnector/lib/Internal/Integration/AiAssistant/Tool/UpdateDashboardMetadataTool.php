@@ -5,7 +5,14 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\DraftPolicy;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dashboard\RenameDashboardOperation;
 use Bitrix\BIConnector\Superset\Logger\AiToolsLogger;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class UpdateDashboardMetadataTool extends BaseBiTool
@@ -13,6 +20,11 @@ final class UpdateDashboardMetadataTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'update_dashboard_metadata';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -57,6 +69,71 @@ final class UpdateDashboardMetadataTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		Loader::includeModule('biconnector');
+
+		$dashboardId = (int)($args['dashboardId'] ?? 0);
+		if ($dashboardId <= 0)
+		{
+			throw new McpException('dashboardId is required and must be a positive integer.');
+		}
+
+		$title = (string)($args['name'] ?? '');
+		$actor = new Actor($userId, Channel::Mcp);
+		$policy = $this->getDraftPolicy($userId);
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(RenameDashboardOperation::class);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->preview($dashboardId, $title, $actor, $policy);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+
+			return [
+				'requiresConfirmation' => true,
+				'action' => 'update_dashboard_metadata',
+				'id' => $dashboardId,
+				'name' => [
+					'old' => $preview->getData()['oldTitle'],
+					'new' => $preview->getData()['newTitle'],
+				],
+				'impact' => 'The dashboard will be renamed. Charts, filters, layout and '
+					. 'published state are not affected.',
+				'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call '
+					. 'update_dashboard_metadata again with the same arguments and confirm=true.',
+			];
+		}
+
+		$result = $operation->execute($dashboardId, $title, $actor, $policy);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	/**
+	 * The draft-only rule holds for MCP once the alignment of its behaviour with REST is switched on.
+	 */
+	private function getDraftPolicy(int $userId): DraftPolicy
+	{
+		return (new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_ALIGNMENT, $userId)
+			? DraftPolicy::Enforce
+			: DraftPolicy::Skip
+		;
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

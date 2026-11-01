@@ -22,7 +22,6 @@ final class ForceCreateIncomingWebhookCommandHandler extends AbstractCreateIncom
 			scopes: $scopes,
 			attributes: $command->attributes,
 			comment: $command->comment,
-			skipTariffCheck: true,
 			dateExpire: $command->dateExpire,
 		);
 	}

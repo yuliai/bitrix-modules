@@ -10,6 +10,7 @@ use Bitrix\Tasks\V2\Internal\Entity\Result;
 use Bitrix\Tasks\V2\Internal\Entity\ResultCollection;
 use Bitrix\Tasks\V2\Internal\Integration\Disk\Entity\DiskFile;
 use Bitrix\Tasks\V2\Internal\Integration\Disk\Repository\DiskFileRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Integration\Disk\Service\DiskArchiveLinkService;
 use Bitrix\Tasks\V2\Internal\Repository\TaskResultRepositoryInterface;
 use Bitrix\Tasks\V2\Public\Provider\Params\Result\TaskResultParams;
 
@@ -22,6 +23,7 @@ class TaskResultProvider
 		private readonly ResultRightService $resultRightService,
 		private readonly TaskResultRepositoryInterface $repository,
 		private readonly DiskFileRepositoryInterface $diskFileRepository,
+		private readonly DiskArchiveLinkService $diskArchiveLinkService,
 	)
 	{
 	}
@@ -40,7 +42,13 @@ class TaskResultProvider
 		$files = $this->diskFileRepository->getByIds((array)$result->fileIds);
 		$resultFiles = $files->filter(static fn (DiskFile $file): bool => in_array($file->id, (array)$result->fileIds, true));
 
-		return $result->cloneWith(['rights' => $resultRights, 'files' => $resultFiles]);
+		$archiveLink = $this->getArchiveLink($result);
+
+		return $result->cloneWith([
+			'rights' => $resultRights,
+			'files' => $resultFiles,
+			'archiveLink' => $archiveLink,
+		]);
 	}
 
 	public function getResults(array $resultIds, int $userId): ResultCollection
@@ -129,16 +137,50 @@ class TaskResultProvider
 
 		$files = $this->diskFileRepository->getByIds(array_unique($fileIds));
 
+		// Resolve archive links in a single batch to avoid N+1 calls.
+		$resultIdsWithFiles = [];
+		foreach ($collection as $item)
+		{
+			if (!empty($item->fileIds) && $item->getId() !== null)
+			{
+				$resultIdsWithFiles[] = $item->getId();
+			}
+		}
+
+		$archiveLinkMap = $this->diskArchiveLinkService->getByResultIds($resultIdsWithFiles);
+
 		$results = new ResultCollection();
 		foreach ($collection as $item)
 		{
 			$resultRights = $rights['rights'][$item->getId()] ?? null;
 			$resultFiles = $files->filter(static fn (DiskFile $file): bool => in_array($file->id, (array)$item->fileIds, true));
 
-			$results->add($item->cloneWith(['rights' => $resultRights, 'files' => $resultFiles]));
+			$archiveLink = $archiveLinkMap[$item->getId()] ?? null;
+
+			$results->add($item->cloneWith([
+				'rights' => $resultRights,
+				'files' => $resultFiles,
+				'archiveLink' => $archiveLink,
+			]));
 		}
 
 		return $results;
+	}
+
+	private function getArchiveLink(Result $result): ?string
+	{
+		if (empty($result->fileIds))
+		{
+			return null;
+		}
+
+		$resultId = $result->getId();
+		if ($resultId === null)
+		{
+			return null;
+		}
+
+		return $this->diskArchiveLinkService->getByResultId($resultId);
 	}
 
 	private function addRights(ResultCollection $collection, int $userId): ResultCollection

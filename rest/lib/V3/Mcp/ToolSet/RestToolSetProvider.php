@@ -19,6 +19,7 @@ use Bitrix\Rest\V3\Mcp\Description\ToolDescriptionBuilder;
 use Bitrix\Rest\V3\Mcp\Execution\RestMethodInvoker;
 use Bitrix\Rest\V3\Mcp\McpToolMetadata;
 use Bitrix\Rest\V3\Mcp\Tool\RestMethodTool;
+use Bitrix\Rest\V3\Realisation\Controller\Field;
 use Bitrix\Rest\V3\Schema\MethodDescription;
 use Bitrix\Rest\V3\Schema\SchemaManager;
 
@@ -28,6 +29,8 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 	private const CACHE_TOOL_DESCRIPTIONS = 'toolDescriptions';
 	private const CACHE_METHOD_DESCRIPTIONS = 'methodDescriptions';
 	private const CACHE_BUILT_AT = 'builtAt';
+	private const CACHE_VERSION = 'version';
+	private const TOOL_MAPS_CACHE_VERSION = 5;
 
 	/** @var array<string, ToolDescriptionDto>|null */
 	private ?array $toolDescriptionsMap = null;
@@ -169,7 +172,9 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 
 		$toolDescriptions = [];
 		$methodDescriptionsByToolName = [];
-		foreach ($this->getExportedMethodDescriptions() as $methodDescription)
+		$exportedMethodDescriptions = $this->getExportedMethodDescriptions();
+		$this->ensureGeneratedDtoClassesLoaded($exportedMethodDescriptions);
+		foreach ($exportedMethodDescriptions as $methodDescription)
 		{
 			$toolDescription = $this->getToolDescriptionBuilder()->build($methodDescription);
 			if ($toolDescription === null)
@@ -198,6 +203,7 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 				self::CACHE_TOOL_DESCRIPTIONS => $toolDescriptions,
 				self::CACHE_METHOD_DESCRIPTIONS => $methodDescriptionsByToolName,
 				self::CACHE_BUILT_AT => time(),
+				self::CACHE_VERSION => self::TOOL_MAPS_CACHE_VERSION,
 			],
 			CacheManager::ONE_HOUR_TTL,
 		);
@@ -222,6 +228,7 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 			!is_array($cached)
 			|| !is_array($cached[self::CACHE_TOOL_DESCRIPTIONS] ?? null)
 			|| !is_array($cached[self::CACHE_METHOD_DESCRIPTIONS] ?? null)
+			|| ($cached[self::CACHE_VERSION] ?? null) !== self::TOOL_MAPS_CACHE_VERSION
 		)
 		{
 			return false;
@@ -249,7 +256,8 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 	 */
 	private function getExportedMethodDescriptions(): array
 	{
-		$methodDescriptions = $this->getSchemaManager()->getMethodDescriptions();
+		$methodDescriptions = $this->getAllMethodDescriptions();
+		$this->getSchemaManager()->ensureGeneratedDtoClassesLoadedFromMethodDescriptions($methodDescriptions);
 		$exportedMethods = [];
 		$entityPrefixes = [];
 		$entityMetadata = [];
@@ -272,7 +280,7 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 
 			$exportedMethods[$actionUri] = $methodDescription;
 			$entityPrefix = $this->getEntityPrefix($actionUri);
-			if ($entityPrefix !== null && !str_contains($actionUri, '.field.'))
+			if ($entityPrefix !== null && !$this->isSystemFieldController($methodDescription->controllerFqcn))
 			{
 				$entityPrefixes[$entityPrefix] = $entityPrefix;
 				$entityMetadata[$entityPrefix] = $methodDescription->mcpTool;
@@ -299,8 +307,7 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 				// a route dropped from the export must not get the metadata back from its entity
 				$inheritedMetadata = $fieldMethod->isMcpExportSuppressed()
 					? null
-					: $this->inheritEntityToolMetadata($entityMetadata[$entityPrefix] ?? null)
-				;
+					: $this->inheritEntityToolMetadata($entityMetadata[$entityPrefix] ?? null);
 
 				$exportedMethods[$actionUri] = new MethodDescription(
 					module: $fieldMethod->module,
@@ -319,6 +326,10 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 					isHidden: $fieldMethod->isHidden,
 					mcpTool: $fieldMethod->mcpTool ?? $inheritedMetadata,
 					isDeprecated: $fieldMethod->isDeprecated,
+					// the same description is executed, so the access provider of the route and the
+					// resource it decides about must survive the rebuild
+					accessProvider: $fieldMethod->accessProvider,
+					resourceDtoFqcn: $fieldMethod->resourceDtoFqcn,
 				);
 			}
 		}
@@ -351,7 +362,6 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 		return new McpToolMetadata(
 			export: $entityMetadata->export,
 			toolSetCode: $entityMetadata->toolSetCode,
-			descriptionOverride: $entityMetadata->descriptionOverride,
 			descriptionAdditions: $entityMetadata->descriptionAdditions,
 		);
 	}
@@ -390,16 +400,6 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 
 	private function getEntityPrefix(string $actionUri): ?string
 	{
-		if (str_contains($actionUri, '.field.custom.'))
-		{
-			return null;
-		}
-
-		if (str_contains($actionUri, '.field.'))
-		{
-			return explode('.field.', $actionUri, 2)[0];
-		}
-
 		$parts = explode('.', $actionUri);
 		if (count($parts) < 2)
 		{
@@ -409,6 +409,37 @@ abstract class RestToolSetProvider extends BaseToolSet implements ToolProviderDe
 		array_pop($parts);
 
 		return implode('.', $parts);
+	}
+
+	private function isSystemFieldController(?string $controllerFqcn): bool
+	{
+		return in_array(
+			$controllerFqcn,
+			[
+				Field::class,
+				Field\Custom::class,
+				Field\Custom\Enum::class,
+			],
+			true,
+		);
+	}
+
+	/**
+	 * A separate method so that a test can drive the export without the portal schema.
+	 *
+	 * @return array<string, MethodDescription>
+	 */
+	protected function getAllMethodDescriptions(): array
+	{
+		return $this->getSchemaManager()->getMethodDescriptions();
+	}
+
+	/**
+	 * @param MethodDescription[] $methodDescriptions
+	 */
+	protected function ensureGeneratedDtoClassesLoaded(array $methodDescriptions): void
+	{
+		$this->getSchemaManager()->ensureGeneratedDtoClassesLoadedFromMethodDescriptions($methodDescriptions);
 	}
 
 	private function getSchemaManager(): SchemaManager

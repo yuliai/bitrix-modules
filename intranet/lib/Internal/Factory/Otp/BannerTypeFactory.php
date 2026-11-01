@@ -178,6 +178,15 @@ class BannerTypeFactory
 		{
 			$gracePeriodStartDate = $this->pushOtp->getGracePeriodStart();
 			$daysSinceGraceStart = $today->getDiff($gracePeriodStartDate)->days;
+			$personalDeadline = $this->getPersonalOtp()?->getDeactivateUntil();
+			$gracePeriodEnd = $this->pushOtp->getGracePeriod();
+
+			if ($personalDeadline !== null && $personalDeadline->getTimestamp() < $gracePeriodEnd)
+			{
+				$personalDeadlineDate = Date::createFromTimestamp($personalDeadline->getTimestamp());
+				$gracePeriodEndDate = Date::createFromTimestamp($gracePeriodEnd);
+				$daysSinceGraceStart += $personalDeadlineDate->getDiff($gracePeriodEndDate)->days;
+			}
 
 			return $this->pushOtp->canShowByGracePeriodSchedule($daysSinceGraceStart, $daysSinceLastShow);
 		}

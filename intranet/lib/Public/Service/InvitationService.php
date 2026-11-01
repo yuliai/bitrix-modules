@@ -7,6 +7,7 @@ use Bitrix\Intranet\Contract\Repository\UserRepository;
 use Bitrix\Intranet\CurrentUser;
 use Bitrix\Intranet\Entity\Collection\UserCollection;
 use Bitrix\Intranet\Internal\Entity\Invitation;
+use Bitrix\Intranet\Internal\Error\InvitationResendTimeoutError;
 use Bitrix\Intranet\Exception\ErrorCollectionException;
 use Bitrix\Intranet\Public\Type\BaseInvitation;
 use Bitrix\Intranet\Public\Type\Collection\InvitationCollection;
@@ -120,7 +121,7 @@ class InvitationService
 
 	/**
 	 * @param array<int, array{clientId: string, invitation: BaseInvitation|null}> $items
-	 * @return array{items: array<int, array{clientId: string, status: string, reason: string|null}>, users: UserCollection, quota: array{period: string, limit: int|null, used: int|null, remaining: int|null}}
+	 * @return array{items: array<int, array{clientId: string, status: string, reason: string|null, isResendTimeout: bool, reasonMessage: string|null, retryAfter: int|null}>, users: UserCollection, quota: array{period: string, limit: int|null, used: int|null, remaining: int|null}}
 	 */
 	public function inviteByCollectionWithDeliveryResult(array $items, ?int $currentUserId = null): array
 	{
@@ -160,7 +161,7 @@ class InvitationService
 
 	/**
 	 * @param array<int, array{clientId: string, invitation: BaseInvitation|null}> $items
-	 * @return array{items: array<int, array{clientId: string, status: string, reason: string|null}>, users: UserCollection}
+	 * @return array{items: array<int, array{clientId: string, status: string, reason: string|null, isResendTimeout: bool, reasonMessage: string|null, retryAfter: int|null}>, users: UserCollection}
 	 */
 	private function processDeliveryItems(array $items, ?int $currentUserId): array
 	{
@@ -189,7 +190,7 @@ class InvitationService
 
 	/**
 	 * @param array{clientId: string, invitation: BaseInvitation|null} $item
-	 * @return array{item: array{clientId: string, status: string, reason: string|null}, user: User|null}
+	 * @return array{item: array{clientId: string, status: string, reason: string|null, isResendTimeout: bool, reasonMessage: string|null, retryAfter: int|null}, user: User|null}
 	 */
 	private function processDeliveryItemWithBatchLimit(
 		array $item,
@@ -201,11 +202,7 @@ class InvitationService
 		if ($this->isEmailBatchLimitReached($item['invitation'], $emailInvitationCount, $maxEmailInvitationCount))
 		{
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'rejected',
-					'reason' => 'limit',
-				],
+				'item' => $this->buildDeliveryItem($item['clientId'], 'rejected', 'limit'),
 				'user' => null,
 			];
 		}
@@ -239,7 +236,7 @@ class InvitationService
 
 	/**
 	 * @param array{clientId: string, invitation: BaseInvitation|null} $item
-	 * @return array{item: array{clientId: string, status: string, reason: string|null}, user: User|null}
+	 * @return array{item: array{clientId: string, status: string, reason: string|null, isResendTimeout: bool, reasonMessage: string|null, retryAfter: int|null}, user: User|null}
 	 */
 	private function processDeliveryItem(array $item, ?int $currentUserId): array
 	{
@@ -247,11 +244,7 @@ class InvitationService
 		if ($invitation === null || !$invitation->isValid())
 		{
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'rejected',
-					'reason' => 'validation',
-				],
+				'item' => $this->buildDeliveryItem($item['clientId'], 'rejected', 'validation'),
 				'user' => null,
 			];
 		}
@@ -259,11 +252,7 @@ class InvitationService
 		if ($this->hasActiveUser($invitation))
 		{
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'skipped',
-					'reason' => 'already_active',
-				],
+				'item' => $this->buildDeliveryItem($item['clientId'], 'skipped', 'already_active'),
 				'user' => null,
 			];
 		}
@@ -274,46 +263,62 @@ class InvitationService
 			if ($user === null)
 			{
 				return [
-					'item' => [
-						'clientId' => $item['clientId'],
-						'status' => 'rejected',
-						'reason' => 'limit',
-					],
+					'item' => $this->buildDeliveryItem($item['clientId'], 'rejected', 'limit'),
 					'user' => null,
 				];
 			}
 
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'sent',
-					'reason' => null,
-				],
+				'item' => $this->buildDeliveryItem($item['clientId'], 'sent', null),
 				'user' => $user,
 			];
 		}
-		catch (ErrorCollectionException)
+		catch (ErrorCollectionException $exception)
 		{
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'rejected',
-					'reason' => 'delivery_unavailable',
-				],
+				'item' => $this->buildDeliveryItem(
+					$item['clientId'],
+					'rejected',
+					'delivery_unavailable',
+					$this->findResendTimeoutError($exception),
+				),
 				'user' => null,
 			];
 		}
 		catch (\Exception)
 		{
 			return [
-				'item' => [
-					'clientId' => $item['clientId'],
-					'status' => 'rejected',
-					'reason' => 'unknown',
-				],
+				'item' => $this->buildDeliveryItem($item['clientId'], 'rejected', 'unknown'),
 				'user' => null,
 			];
 		}
+	}
+
+	/**
+	 * @return array{clientId: string, status: string, reason: string|null, isResendTimeout: bool, reasonMessage: string|null, retryAfter: int|null}
+	 */
+	private function buildDeliveryItem(
+		string $clientId,
+		string $status,
+		?string $reason,
+		?InvitationResendTimeoutError $resendTimeoutError = null,
+	): array
+	{
+		return [
+			'clientId' => $clientId,
+			'status' => $status,
+			'reason' => $reason,
+			'isResendTimeout' => $resendTimeoutError !== null,
+			'reasonMessage' => $resendTimeoutError?->getMessage(),
+			'retryAfter' => $resendTimeoutError?->getRetryAfter(),
+		];
+	}
+
+	private function findResendTimeoutError(ErrorCollectionException $exception): ?InvitationResendTimeoutError
+	{
+		$error = $exception->getErrors()->getErrorByCode(InvitationResendTimeoutError::CODE);
+
+		return $error instanceof InvitationResendTimeoutError ? $error : null;
 	}
 
 	private function hasActiveUser(BaseInvitation $invitation): bool

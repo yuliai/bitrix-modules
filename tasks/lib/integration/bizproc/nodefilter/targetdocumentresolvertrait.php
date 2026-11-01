@@ -44,18 +44,27 @@ trait TargetDocumentResolverTrait
 		return parent::getDocumentId();
 	}
 
+	public function setDocumentId($documentId)
+	{
+		$this->runtimeDocumentId = null;
+
+		parent::setDocumentId($documentId);
+	}
+
 	protected function resolveTargetDocumentId(): array
 	{
-		if (is_array($this->runtimeDocumentId))
-		{
-			return $this->runtimeDocumentId;
-		}
+		$this->runtimeDocumentId = null;
 
 		$resolver = $this->getTargetDocumentResolver();
 		$documentId = $resolver
 			? $resolver->resolveDocumentId($this)
 			: $this->resolveFallbackDocumentId()
 		;
+
+		if (is_array($documentId[0] ?? null))
+		{
+			$documentId = $documentId[0];
+		}
 
 		return $this->runtimeDocumentId = $documentId;
 	}

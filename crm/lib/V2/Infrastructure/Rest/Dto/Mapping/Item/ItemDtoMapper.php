@@ -38,6 +38,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\MultifieldsDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\UtmDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\ItemDtoGenerator;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\ContactCompanyBindingsDto;
+use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\SchemaProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\GetItemRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Structure\SelectStructure;
 use Bitrix\Crm\Multifield\TypeRepository;
@@ -238,6 +239,11 @@ class ItemDtoMapper
 			$itemSelect->withUtm();
 		}
 
+		if ($this->entityTypeSettings->hasCrmTracking() && in_array(Item::trackingSourceId, $fieldNames, true))
+		{
+			$itemSelect->withTrackingSource();
+		}
+
 		$relatedCrmObjectsSelect = $this->getRelatedCrmObjectsSelect($structuredList, $request->getDtoClass());
 		if ($relatedCrmObjectsSelect !== [])
 		{
@@ -356,6 +362,12 @@ class ItemDtoMapper
 
 	public function mapDtoFieldNameToItem(string $fieldName): ?string
 	{
+		// Not a column of the item: it is loaded by its own loader and filtered by its own subquery.
+		if ($fieldName === Item::trackingSourceId)
+		{
+			return null;
+		}
+
 		return $this->itemFieldMapper->mapDtoFieldNameToItem($fieldName);
 	}
 
@@ -400,9 +412,9 @@ class ItemDtoMapper
 
 	private function mapDtoWriteFieldNameToItem(string $fieldName): ?string
 	{
-		if ($fieldName === Item::utm)
+		if ($fieldName === Item::utm || $fieldName === Item::trackingSourceId)
 		{
-			return Item::utm;
+			return $fieldName;
 		}
 
 		if (!$this->isRelatedCrmObjectIdField($fieldName))
@@ -422,7 +434,7 @@ class ItemDtoMapper
 
 	/**
 	 * @param array<string|int, mixed> $structuredList
-	 * @return array<string, array{entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[]}>
+	 * @return array<string, array{entityTypeId: int|null, allowedCategoryIds?: int[], multiple: bool, dtoClass: string|null, select: string[]}>
 	 */
 	private function getRelatedCrmObjectsSelect(array $structuredList, string $dtoClass): array
 	{
@@ -451,6 +463,13 @@ class ItemDtoMapper
 				'dtoClass' => $targetDtoClass,
 				'select' => $this->normalizeRelatedCrmObjectSelect((array)$structuredItem),
 			];
+			$categoryId = $fieldName === 'myCompany' || $targetEntityType === null
+				? null
+				: SchemaProvider::getItemRouteCategoryId($targetEntityType);
+			if ($categoryId !== null)
+			{
+				$result[$fieldName]['allowedCategoryIds'] = [$categoryId];
+			}
 		}
 
 		return $result;
@@ -828,6 +847,12 @@ class ItemDtoMapper
 			return $value;
 		}
 
+		$value = $this->getItemTrackingSourceFieldValue($item, $dtoFieldName);
+		if ($value !== null)
+		{
+			return $value;
+		}
+
 		$value = $this->getItemObserversFieldValue($item, $dtoFieldName);
 		if ($value !== null)
 		{
@@ -1114,6 +1139,10 @@ class ItemDtoMapper
 			return true;
 		}
 		if ($this->mapUtmFieldToItem($item, $fieldName, $value))
+		{
+			return true;
+		}
+		if ($this->mapTrackingSourceFieldToItem($item, $fieldName, $value))
 		{
 			return true;
 		}
@@ -2813,23 +2842,6 @@ class ItemDtoMapper
 				{
 					continue;
 				}
-				if (
-					$fieldName === 'companies'
-					&& $relatedItem instanceof Company
-					&& $relatedItem->getCategoryId() !== 0
-				)
-				{
-					continue;
-				}
-				if (
-					$fieldName === 'contacts'
-					&& $relatedItem instanceof Contact
-					&& $relatedItem->getCategoryId() !== 0
-				)
-				{
-					continue;
-				}
-
 				$relatedDto = $this->createRelatedItemDto($relatedItem, $select, $relationField, true);
 				$collection ??= new DtoCollection($relatedDto::class);
 				$collection->add($relatedDto);
@@ -2842,17 +2854,6 @@ class ItemDtoMapper
 		{
 			return null;
 		}
-		if (
-			$fieldName !== 'myCompany'
-			&& (
-				($loadedRelation instanceof Company && $loadedRelation->getCategoryId() !== 0)
-				|| ($loadedRelation instanceof Contact && $loadedRelation->getCategoryId() !== 0)
-			)
-		)
-		{
-			return null;
-		}
-
 		return $this->createRelatedItemDto($loadedRelation, $select, $relationField);
 	}
 
@@ -3259,6 +3260,28 @@ class ItemDtoMapper
 				'utm' => $item->setUtm($this->mapUtmDataToEntity($value)),
 				default => null,
 			};
+	}
+
+	protected function mapTrackingSourceFieldToItem(Item $item, string $fieldName, mixed $value): bool
+	{
+		if (!$this->entityTypeSettings->hasCrmTracking() || $fieldName !== Item::trackingSourceId)
+		{
+			return false;
+		}
+
+		$item->setTrackingSourceId($value === null ? null : (int)$value);
+
+		return true;
+	}
+
+	protected function getItemTrackingSourceFieldValue(Item $item, string $fieldName): ?int
+	{
+		if (!$this->entityTypeSettings->hasCrmTracking() || $fieldName !== Item::trackingSourceId)
+		{
+			return null;
+		}
+
+		return $item->getTrackingSourceId();
 	}
 
 	protected function mapUtmDataToEntity(mixed $utmData): ?Utm

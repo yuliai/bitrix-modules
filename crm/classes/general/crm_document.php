@@ -1090,7 +1090,9 @@ class CCrmDocument
 						$r = intval($r);
 						$dbImg = CFile::GetByID($r);
 						if ($arImg = $dbImg->Fetch())
-							$result[] = "[url=/bitrix/tools/bizproc_show_file.php?f=".urlencode($arImg["FILE_NAME"])."&i=".$r."&h=".md5($arImg["SUBDIR"])."]".htmlspecialcharsbx($arImg["ORIGINAL_NAME"])."[/url]";
+							$result[] = class_exists(\Bitrix\Bizproc\Public\Service\File\ShowFileLinkService::class)
+								? (new \Bitrix\Bizproc\Public\Service\File\ShowFileLinkService())->getPrintableLink($arImg)
+								: "[url=/bitrix/tools/bizproc_show_file.php?f=".urlencode($arImg["FILE_NAME"])."&i=".$r."&h=".md5($arImg["SUBDIR"])."]".htmlspecialcharsbx($arImg["ORIGINAL_NAME"])."[/url]";
 					}
 				}
 				else
@@ -1098,7 +1100,9 @@ class CCrmDocument
 					$fieldValue = intval($fieldValue);
 					$dbImg = CFile::GetByID($fieldValue);
 					if ($arImg = $dbImg->Fetch())
-						$result = "[url=/bitrix/tools/bizproc_show_file.php?f=".urlencode($arImg["FILE_NAME"])."&i=".$fieldValue."&h=".md5($arImg["SUBDIR"])."]".htmlspecialcharsbx($arImg["ORIGINAL_NAME"])."[/url]";
+						$result = class_exists(\Bitrix\Bizproc\Public\Service\File\ShowFileLinkService::class)
+							? (new \Bitrix\Bizproc\Public\Service\File\ShowFileLinkService())->getPrintableLink($arImg)
+							: "[url=/bitrix/tools/bizproc_show_file.php?f=".urlencode($arImg["FILE_NAME"])."&i=".$fieldValue."&h=".md5($arImg["SUBDIR"])."]".htmlspecialcharsbx($arImg["ORIGINAL_NAME"])."[/url]";
 				}
 				break;
 
@@ -2022,8 +2026,12 @@ class CCrmDocument
 			throw new CBPArgumentNullException('documentId');
 	}
 
+	protected static $lastAddDocumentFieldError = null;
+
 	public static function AddDocumentField($documentType, $arFields)
 	{
+		static::$lastAddDocumentFieldError = null;
+
 		if (mb_strpos($documentType, '_') === false)
 			$documentType .= '_0';
 
@@ -2164,10 +2172,44 @@ class CCrmDocument
 			}
 		}
 		$crmFields = new CCrmFields($GLOBALS['USER_FIELD_MANAGER'], 'CRM_'.$arDocumentID['TYPE']);
-		$crmFields->AddField($arFieldsTmp);
+		if (!$crmFields->AddField($arFieldsTmp))
+		{
+			$message = static::getAddDocumentFieldErrorMessage();
+			if ($message !== null)
+			{
+				static::$lastAddDocumentFieldError = $message;
+			}
+
+			return false;
+		}
 		$GLOBALS['CACHE_MANAGER']->ClearByTag('crm_fields_list_'.$arFieldsTmp['FIELD_NAME']);
 
 		return $arFieldsTmp['FIELD_NAME'];
+	}
+
+	public static function GetLastAddDocumentFieldError(): ?string
+	{
+		return static::$lastAddDocumentFieldError;
+	}
+
+	private static function getAddDocumentFieldErrorMessage(): ?string
+	{
+		$applicationException = $GLOBALS['APPLICATION']->GetException();
+		if (\Bitrix\Crm\UserField\UserFieldLimitError::isCreateLimitError($applicationException))
+		{
+			return \Bitrix\Crm\UserField\UserFieldLimitError::getMessage();
+		}
+
+		if (is_object($applicationException) && method_exists($applicationException, 'GetString'))
+		{
+			$message = (string)$applicationException->GetString();
+			if ($message !== '')
+			{
+				return $message;
+			}
+		}
+
+		return null;
 	}
 
 	private static  function ExtractEntityMultiFieldData(&$arSrcData, &$arDstData, $defaultValueType)

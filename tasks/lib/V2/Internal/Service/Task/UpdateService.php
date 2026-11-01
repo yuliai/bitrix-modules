@@ -61,6 +61,8 @@ class UpdateService
 	}
 
 	/**
+	 * @return array{Entity\Task, array, Entity\Task, TaskObject, array, array, array}
+	 *
 	 * @throws TaskNotExistsException
 	 * @throws CommandValidationException
 	 * @throws TaskUpdateException
@@ -68,6 +70,7 @@ class UpdateService
 	public function update(
 		Entity\Task $task,
 		UpdateConfig $config,
+		bool $deferSearchIndex = false,
 	): array
 	{
 		$this->loadMessages();
@@ -136,8 +139,12 @@ class UpdateService
 		(new AutoClose($config))($fields, $fullTaskData);
 
 		(new SendNotification($config))($fields, $sourceTaskData, $taskObject);
+		$searchIndexFields = $fields;
 
-		(new UpdateSearchIndex())($fullTaskData, $fields);
+		if (!$deferSearchIndex)
+		{
+			(new UpdateSearchIndex())($fullTaskData, $fields);
+		}
 
 		(new UpdateSync())($fields, $sourceTaskData);
 
@@ -236,7 +243,15 @@ class UpdateService
 
 		(new SendAnalytics($config))($entityBefore, $taskAfterUpdate);
 
-		return [$taskAfterUpdate, $fields, $entityBefore, $taskObjectBeforeUpdate, $sourceTaskData];
+		return [
+			$taskAfterUpdate,
+			$fields,
+			$entityBefore,
+			$taskObjectBeforeUpdate,
+			$sourceTaskData,
+			$fullTaskData,
+			$searchIndexFields,
+		];
 	}
 
 	private function getChanges(array $fields, array $fullTaskData): array

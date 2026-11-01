@@ -285,6 +285,7 @@ final class GenerateCallCriteriaHandler
 			'title' => $title,
 			'description' => $description,
 			'prompt' => '',
+			'isHintEnabled' => false,
 			'gist' => null,
 			'clientTypeIds' => [ClientType::ANY->value],
 			'callTypeId' => CallType::ALL->value,

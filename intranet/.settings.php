@@ -90,6 +90,14 @@ return [
 			'intranet.service.invitation.token' => [
 				'className' => \Bitrix\Intranet\Service\InviteTokenService::class,
 			],
+			'intranet.service.invitation.email-rate-limiter' => [
+				'constructor' => static fn() => new \Bitrix\Intranet\Internal\Service\Invitation\InvitationEmailRateLimiter(
+					\Bitrix\Main\DI\ServiceLocator::getInstance()->get(
+						\Bitrix\Main\Data\Storage\PersistentStorageInterface::class,
+					),
+					\Bitrix\Main\Application::getConnection(),
+				),
+			],
 			'intranet.repository.user' => [
 				'className' => \Bitrix\Intranet\Repository\UserRepository::class,
 			],

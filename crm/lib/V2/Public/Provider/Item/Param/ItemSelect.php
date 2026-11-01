@@ -32,7 +32,8 @@ final class ItemSelect implements SelectInterface
 	private bool $loadAllCustomFields = false;
 	private bool $loadParents = false;
 	private bool $loadUtm = false;
-	/** @var array<string, array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}> */
+	private bool $loadTrackingSource = false;
+	/** @var array<string, array{fieldName: string, entityTypeId: int|null, allowedCategoryIds: int[]|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}> */
 	private array $loadRelatedCrmObjects = [];
 	/** @var array<string, string[]> */
 	private array $loadDictionariesSelect = [];
@@ -192,7 +193,19 @@ final class ItemSelect implements SelectInterface
 	}
 
 	/**
-	 * @param array<string, string[]|array{entityTypeId?: int|null, multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]}> $selectMapByField
+	 * Loads {@see \Bitrix\Crm\V2\Public\Entity\Item\Item::getTrackingSourceId()}.
+	 */
+	public function withTrackingSource(bool $enabled = true): static
+	{
+		$this->loadTrackingSource = $enabled;
+
+		return $this;
+	}
+
+	/**
+	 * Omit allowedCategoryIds to load every category; an empty list excludes every category.
+	 *
+	 * @param array<string, string[]|array{entityTypeId?: int|null, allowedCategoryIds?: int[], multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]}> $selectMapByField
 	 */
 	public function withRelatedCrmObjects(array $selectMapByField): static
 	{
@@ -349,6 +362,11 @@ final class ItemSelect implements SelectInterface
 		return $this->loadUtm;
 	}
 
+	public function shouldLoadTrackingSource(): bool
+	{
+		return $this->loadTrackingSource;
+	}
+
 	public function shouldLoadRelatedCrmObjects(): bool
 	{
 		return $this->loadRelatedCrmObjects !== [];
@@ -367,7 +385,7 @@ final class ItemSelect implements SelectInterface
 	}
 
 	/**
-	 * @return array<string, array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}>
+	 * @return array<string, array{fieldName: string, entityTypeId: int|null, allowedCategoryIds: int[]|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}>
 	 */
 	public function getRelatedCrmObjects(): array
 	{
@@ -413,13 +431,13 @@ final class ItemSelect implements SelectInterface
 	}
 
 	/**
-	 * @param string[]|array{entityTypeId?: int|null, multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]} $select
-	 * @return array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}
+	 * @param string[]|array{entityTypeId?: int|null, allowedCategoryIds?: int[], multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]} $select
+	 * @return array{fieldName: string, entityTypeId: int|null, allowedCategoryIds: int[]|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}
 	 */
 	private function normalizeRelatedCrmObject(string $fieldName, array $select): array
 	{
 		$isDescriptor = array_intersect(
-			['entityTypeId', 'multiple', 'dtoClass', 'select', 'fields'],
+			['entityTypeId', 'allowedCategoryIds', 'multiple', 'dtoClass', 'select', 'fields'],
 			array_keys($select),
 		) !== [];
 		$selectedFields = $isDescriptor ? ($select['select'] ?? $select['fields'] ?? []) : $select;
@@ -441,6 +459,9 @@ final class ItemSelect implements SelectInterface
 		return [
 			'fieldName' => $fieldName,
 			'entityTypeId' => isset($select['entityTypeId']) ? (int)$select['entityTypeId'] : null,
+			'allowedCategoryIds' => array_key_exists('allowedCategoryIds', $select)
+				? array_values(array_unique(array_map('intval', $select['allowedCategoryIds'])))
+				: null,
 			'multiple' => (bool)($select['multiple'] ?? in_array($fieldName, ['contacts', 'companies'], true)),
 			'dtoClass' => isset($select['dtoClass']) && is_string($select['dtoClass']) ? $select['dtoClass'] : null,
 			'select' => $selectedFields,

@@ -246,6 +246,12 @@ class DealConversionMapper extends EntityConversionMapper
 			{
 				$dstFields[$dstFieldID]  = DealContactTable::getDealBindings($this->srcEntityID);
 			}
+			// A map stored by Conversion\Mapper carries the contacts as CONTACT_IDS. They are mapped as bindings,
+			// the key the add of the destination and the requisite lookup read the contacts from.
+			elseif($srcFieldID === \Bitrix\Crm\Item::FIELD_NAME_CONTACT_IDS)
+			{
+				$dstFields['CONTACT_BINDINGS'] = DealContactTable::getDealBindings($this->srcEntityID);
+			}
 			elseif(isset($srcFields[$srcFieldID]))
 			{
 				$dstFields[$dstFieldID] = $srcFields[$srcFieldID];

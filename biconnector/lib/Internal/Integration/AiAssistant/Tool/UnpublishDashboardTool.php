@@ -2,10 +2,11 @@
 
 namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 
-use Bitrix\AiAssistant\Exceptions\McpException;
-use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Integration\Superset\Model\Dashboard;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
-use Bitrix\BIConnector\Public\Command\Share\DeleteSharesCommand;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\FailureCode;
+use Bitrix\BIConnector\Internal\Operation\Builder\Refusal;
 use Bitrix\BIConnector\Superset\Logger\AiToolsLogger;
 use Bitrix\Main\Loader;
 
@@ -14,6 +15,11 @@ final class UnpublishDashboardTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'unpublish_dashboard';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Destructive;
 	}
 
 	public function getDescription(): string
@@ -25,10 +31,11 @@ final class UnpublishDashboardTool extends BaseBiTool
 			. 'URLs stop working immediately and CANNOT be restored — recipients '
 			. 'will need a freshly issued share link if the dashboard is '
 			. 'published again. '
-			. 'Idempotent: unpublishing an already-draft dashboard is a safe '
-			. 'no-op (share-link revocation is skipped because there are no '
-			. 'live shares on a draft). Does NOT touch charts, filters, or the '
-			. 'title. '
+			. 'Idempotent: unpublishing an already-draft dashboard is a safe no-op, '
+			. 'and repeating the call after a failure is safe too — it resumes from '
+			. 'the step that failed and carries the operation through. A failed call '
+			. 'reports which steps did complete. Does NOT touch charts, filters, or '
+			. 'the title. '
 			. 'TWO-STEP CONFIRMATION (MANDATORY): the first call (omit `confirm`, or pass '
 			. '`confirm=false`) returns a preview (dashboard title and the share-link '
 			. 'revocation impact) and changes nothing. Relay it to the user, get EXPLICIT '
@@ -67,7 +74,9 @@ final class UnpublishDashboardTool extends BaseBiTool
 		$dashboardId = (int)($args['dashboardId'] ?? 0);
 		if ($dashboardId <= 0)
 		{
-			throw new McpException('dashboardId is required and must be a positive integer.');
+			throw self::toMcpException(
+				Refusal::error(FailureCode::InvalidArgument, 'dashboardId is required and must be a positive integer.'),
+			);
 		}
 
 		$loadResult = $this->loadDashboardForWrite($dashboardId, $userId);
@@ -75,9 +84,9 @@ final class UnpublishDashboardTool extends BaseBiTool
 		{
 			throw self::toMcpException($loadResult);
 		}
-		$dashboard = $loadResult->getData()['dashboard'];
-		$externalId = (int)$dashboard->getExternalId();
-		$wasPublished = $dashboard->getStatus() === SupersetDashboardTable::DASHBOARD_STATUS_READY;
+		$ormObject = $loadResult->getData()['dashboard'];
+		$externalId = (int)$ormObject->getExternalId();
+		$wasPublished = $ormObject->getStatus() === SupersetDashboardTable::DASHBOARD_STATUS_READY;
 
 		$confirm = ($args['confirm'] ?? false) === true;
 		if (!$confirm)
@@ -86,7 +95,7 @@ final class UnpublishDashboardTool extends BaseBiTool
 				'requiresConfirmation' => true,
 				'action' => 'unpublish_dashboard',
 				'id' => $dashboardId,
-				'name' => (string)$dashboard->getTitle(),
+				'name' => (string)$ormObject->getTitle(),
 				'impact' => $wasPublished
 					? 'The dashboard will be moved to DRAFT and hidden from other portal users. '
 						. 'ALL its public share links will be permanently revoked and cannot be restored.'
@@ -95,13 +104,19 @@ final class UnpublishDashboardTool extends BaseBiTool
 			];
 		}
 
-		$response = IntegratorFactory::getInstance()->updateDashboard($externalId, [
-			'published' => false,
-		]);
-		if ($response->hasErrors())
+		// Charged here and not earlier: a preview or a denied call returns above
+		// and must not cost the user a destructive slot. Everything below —
+		// including the irreversible share-link revocation — is the actual change.
+		$this->spendDestructiveBudget($userId, 'dashboard', $dashboardId);
+
+		// The order of share revocation, remote unpublish and local status change is
+		// the domain's, not the tool's: the agent and the portal user go through the
+		// very same transition.
+		$unpublishResult = (new Dashboard($ormObject))->toggleDraft(false);
+		if (!$unpublishResult->isSuccess())
 		{
-			throw self::unavailableBiException(
-				$response->getErrors(),
+			AiToolsLogger::logErrors(
+				$unpublishResult->getErrors(),
 				[
 					'stage' => 'unpublish_dashboard',
 					'user_id' => $userId,
@@ -109,36 +124,13 @@ final class UnpublishDashboardTool extends BaseBiTool
 					'external_id' => $externalId,
 				],
 			);
-		}
 
-		$dashboard->setStatus(SupersetDashboardTable::DASHBOARD_STATUS_DRAFT);
-		$saveResult = $dashboard->save();
-		if (!$saveResult->isSuccess())
-		{
-			AiToolsLogger::logErrors(
-				$saveResult->getErrors(),
-				[
-					'stage' => 'unpublish_dashboard.local_save',
-					'user_id' => $userId,
-					'dashboard_id' => $dashboardId,
-					'external_id' => $externalId,
-				],
-			);
-		}
-
-		// Mirror dashboard.toggleDraftAction: a READY → DRAFT transition must
-		// revoke every public share link, otherwise guests keep reading a
-		// dashboard the owner no longer considers published. Skipped when the
-		// dashboard was already DRAFT (idempotent re-call — DeleteSharesCommand
-		// would be a no-op anyway, but skipping saves a repo round-trip).
-		if ($wasPublished)
-		{
-			(new DeleteSharesCommand(dashboardId: $dashboardId))->run();
+			throw self::toMcpException($unpublishResult);
 		}
 
 		return [
 			'id' => $dashboardId,
-			'name' => (string)$dashboard->getTitle(),
+			'name' => (string)$ormObject->getTitle(),
 			'published' => false,
 		];
 	}

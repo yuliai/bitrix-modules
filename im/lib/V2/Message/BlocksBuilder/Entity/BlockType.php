@@ -20,4 +20,6 @@ enum BlockType: string
 	case Card = 'card';
 	case Gallery = 'gallery';
 	case Form = 'form';
+	case File = 'file';
+	case Audio = 'audio';
 }

@@ -170,6 +170,19 @@ abstract class BaseController extends Controller
 		return (new \Bitrix\Im\V2\Message\Vote\CopilotVoteEnricher())->enrich($rest, $userId);
 	}
 
+	/**
+	 * Injects the per-user copilot MCP selection into an assembled REST response. Must be called
+	 * only from the synchronous per-user chat load: the selection is stored per user and per chat,
+	 * and the lookup is a per-chat one, so it belongs neither in the shared popup DTO nor on a path
+	 * that assembles a list of chats.
+	 */
+	protected function enrichCopilotMcpSelection(array $rest): array
+	{
+		$userId = (int)($this->getCurrentUser()?->getId() ?? 0);
+
+		return (new \Bitrix\Im\V2\Chat\Copilot\McpSelectionEnricher())->enrich($rest, $userId);
+	}
+
 	protected function load(\Bitrix\Im\V2\Chat $chat, int $messageLimit, int $pinLimit, bool $ignoreMark = false, ?Message $targetMessage = null): array
 	{
 		$messageLimit = $this->getLimit($messageLimit);
@@ -188,7 +201,9 @@ abstract class BaseController extends Controller
 
 		$rest = $messageService->fillContextPaginationData($rest, $messages, $messageLimit);
 
-		return $this->enrichCopilotVotes($rest);
+		$rest = $this->enrichCopilotVotes($rest);
+
+		return $this->enrichCopilotMcpSelection($rest);
 	}
 
 	protected function toRestFormatWithPaginationData(array $entities, int $needCount, int $realCount): array

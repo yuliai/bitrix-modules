@@ -277,6 +277,7 @@ final class Configuration
 			ConfigurationCallSite::KanbanComponent,
 			ConfigurationCallSite::FactoryBasedFieldCreation,
 			ConfigurationCallSite::RequirementProvider,
+			ConfigurationCallSite::RequirementCommand,
 			ConfigurationCallSite::MobileCategoryController =>
 				$this->isContourAdmin($scope, $scope->getCategoryId()),
 

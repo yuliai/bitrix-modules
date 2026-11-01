@@ -46,13 +46,24 @@ class DateField extends BaseSimpleField
 	protected function getTimeZoneParams(): array
 	{
 		$displayParams = $this->getDisplayParams();
-		$format = ($displayParams['DATETIME_FORMAT'] ?? $this->getDefaultDatetimeFormat());
+		$format = $this->shouldUseDefaultDateFormat()
+			? $this->getDefaultDatetimeFormat()
+			: ($displayParams['DATETIME_FORMAT'] ?? $this->getDefaultDatetimeFormat())
+		;
 		$offset = \CTimeZone::GetOffset();
 
 		return [
 			'format' => $format,
 			'offset' => $offset,
 		];
+	}
+
+	private function shouldUseDefaultDateFormat(): bool
+	{
+		return $this->isUserField()
+			&& $this->isMultiple()
+			&& $this->getContext() === \Bitrix\Crm\Service\Display\Field::KANBAN_CONTEXT
+		;
 	}
 
 	protected function getFormattedValueForMobile($fieldValue, int $itemId, Options $displayOptions): array

@@ -14,6 +14,8 @@ use Bitrix\Main\Data\Cache;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
+use Bitrix\Intranet\UI\LeftMenu\Preset;
+use Bitrix\Intranet\Internal\Integration\Call;
 
 class CollaborationSection
 {
@@ -416,8 +418,8 @@ class CollaborationSection
 	{
 		return [
 			'id' => 'sync',
-			'title' => (new \Bitrix\Intranet\UI\LeftMenu\Preset\Sync(SITE_ID))->getName(),
-			'available' => \Bitrix\Intranet\Internal\Integration\Call\Sync::isAvailable(),
+			'title' => (new Preset\Sync(SITE_ID))->getName(),
+			'available' => Call\Sync::isAvailable(),
 			'url' => SITE_DIR . 'sync/',
 			'menuData' => [
 				'menu_item_id' => 'menu_sync',
@@ -463,10 +465,11 @@ class CollaborationSection
 		];
 	}
 
-	public static function getDisk(): array
+	public static function getDisk(bool $includeSubMenu = true): array
 	{
+		$isBitrix24Cloud = static::isBitrix24Cloud();
 		$available = static::isToolAvailable('disk');
-		if (!static::isBitrix24Cloud())
+		if (!$isBitrix24Cloud)
 		{
 			$available = (
 				ModuleManager::isModuleInstalled('disk')
@@ -478,17 +481,23 @@ class CollaborationSection
 		$menuData = [
 			'menu_item_id' => 'menu_files',
 		];
+		$url = SITE_DIR . 'docs/';
 
-		if (static::isBitrix24Cloud())
+		if ($isBitrix24Cloud && $includeSubMenu)
 		{
 			$menuData['sub_menu'] = DiskSection::getSubmenuItems();
+		}
+		elseif (!$isBitrix24Cloud && $includeSubMenu)
+		{
+			$menuData['sub_menu'] = DiskSection::getOnPremiseSubmenuItems();
+			$url = $menuData['sub_menu'][0]['URL'] ?? $url;
 		}
 
 		return [
 			'id' => 'disk',
 			'title' => static::getTitle('disk'),
 			'available' => $available,
-			'url' => SITE_DIR . 'docs/',
+			'url' => $url,
 			'menuData' => $menuData,
 		];
 	}

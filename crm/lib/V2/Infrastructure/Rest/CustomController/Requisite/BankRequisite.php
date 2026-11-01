@@ -22,6 +22,7 @@ use Bitrix\Crm\V2\Public\Entity\Requisite\BankRequisite as BankRequisiteEntity;
 use Bitrix\Crm\V2\Public\Entity\Requisite\BankRequisiteCollection;
 use Bitrix\Crm\V2\Public\Entity\Requisite\BankRequisiteError;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\ItemId;
 use Bitrix\Crm\V2\Public\Provider\Requisite\BankRequisiteProvider;
 use Bitrix\Crm\V2\Public\Provider\Requisite\Param\BankRequisiteListContext;
 use Bitrix\Main\Error;
@@ -47,6 +48,7 @@ final class BankRequisite extends AbstractController
 	{
 		/** @var BankRequisiteDto $dto */
 		$dto = $request->fields->convertToDto('add');
+		$this->assertRequisiteCategoryAllowed((int)$dto->requisiteId);
 		$result
 			= (new AddBankRequisiteCommand(
 				$entityType,
@@ -68,6 +70,7 @@ final class BankRequisite extends AbstractController
 		{
 			throw new RequestValidationException([new Error('The fields property must not be empty.', 'fields')]);
 		}
+		$this->assertBankRequisiteCategoryAllowed($id);
 
 		/** @var BankRequisiteDto $dto */
 		$dto = $request->fields->convertToDto('update');
@@ -88,6 +91,7 @@ final class BankRequisite extends AbstractController
 	public function getAction(GetBankRequisiteRequest $request, EntityType $entityType): GetResponse
 	{
 		$id = $request->id;
+		$this->assertBankRequisiteCategoryAllowed($id);
 		$result = (new BankRequisiteProvider($this->userId))->getById($entityType, $id);
 
 		return new GetResponse(
@@ -102,6 +106,7 @@ final class BankRequisite extends AbstractController
 	public function deleteAction(DeleteBankRequisiteRequest $request, EntityType $entityType): DeleteResponse
 	{
 		$id = $request->id;
+		$this->assertBankRequisiteCategoryAllowed($id);
 
 		$result
 			= (new DeleteBankRequisiteCommand($entityType, $id, $this->userId))
@@ -173,6 +178,15 @@ final class BankRequisite extends AbstractController
 		string $contextField,
 	): ListResponse
 	{
+		if ($context->isForItem())
+		{
+			$this->assertCategoryOwnerAllowed(new ItemId($context->getItemType(), $context->getTargetId()));
+		}
+		else
+		{
+			$this->assertRequisiteCategoryAllowed($context->getTargetId());
+		}
+
 		$requestMapper = $this->getListRequestMapper();
 		$requestMapper->validateSelect($request);
 		$result = (new BankRequisiteProvider($this->userId))->getList(
@@ -198,6 +212,33 @@ final class BankRequisite extends AbstractController
 				$request->select?->getStructuredList() ?? [],
 			),
 		);
+	}
+
+	private function assertRequisiteCategoryAllowed(int $requisiteId): void
+	{
+		$result = (new \Bitrix\Crm\V2\Public\Provider\Requisite\RequisiteProvider($this->userId))
+			->resolveRequisiteOwner($requisiteId, $this->userId)
+		;
+		$this->assertResolvedCategoryOwner($result, $requisiteId);
+	}
+
+	private function assertBankRequisiteCategoryAllowed(int $bankRequisiteId): void
+	{
+		$result = (new BankRequisiteProvider($this->userId))
+			->resolveBankRequisiteOwner($bankRequisiteId, $this->userId)
+		;
+		$this->assertResolvedCategoryOwner($result, $bankRequisiteId);
+	}
+
+	private function assertResolvedCategoryOwner(Result $result, int $addressedId): void
+	{
+		$owner = $result->getData()['owner'] ?? null;
+		if (!$result->isSuccess() || !$owner instanceof ItemId)
+		{
+			throw new EntityNotFoundException($addressedId);
+		}
+
+		$this->assertCategoryOwnerAllowed($owner);
 	}
 
 	private function mapResultToDto(Result $result, ?int $id = null, array $fields = []): BankRequisiteDto

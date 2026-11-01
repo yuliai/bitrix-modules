@@ -247,7 +247,7 @@ class Sender
 				&& $handlerUserId <= 0
 				&& !$isLegacyCustomBotHandler;
 			if (
-				!$tariffAccessService->isOutgoingEventHandlerAvailable(
+				!static::isOutgoingEventHandlerAvailable(
 					$isPublishedApplication,
 					$isSystemHandler,
 					$isUserWebhookDenied,
@@ -414,6 +414,17 @@ class Sender
 		static::$appData[$appId] = $dbRes->fetch();
 
 		return static::$appData[$appId];
+	}
+
+	private static function isOutgoingEventHandlerAvailable(
+		bool $isPublishedApplication,
+		bool $isSystemHandler,
+		bool $isUserWebhookDenied,
+	): bool
+	{
+		return $isPublishedApplication
+			|| $isSystemHandler
+			|| !$isUserWebhookDenied;
 	}
 
 	/**

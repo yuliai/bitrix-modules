@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Internal\Service\Admission\Strategy\APAuth;
 
 use Bitrix\Rest\Contract\Service\APAuth\PasswordService;
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\Internal\Service\Admission\DenialStrategyInterface;
 use Bitrix\Rest\Internal\Service\Admission\Verdict;
-use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
 
 final class TariffStrategy implements DenialStrategyInterface
 {
@@ -34,15 +34,12 @@ final class TariffStrategy implements DenialStrategyInterface
 			return Verdict::grant();
 		}
 
-		$isAPAuthAvailable = $this->tariffAccessService->getAPAuthAvailability(
-			$this->passwordService->isSystemPasswordById($this->passwordId),
-			$this->restServer?->getMethod(),
-			SystemPasswordAllowedMethods::METHODS,
-			$availability,
-		);
+		$method = $this->restServer?->getMethod();
+		$isAPAuthAvailable = $this->passwordService->isSystemPasswordById($this->passwordId)
+			&& ($method === null || in_array($method, SystemPasswordAllowedMethods::METHODS, true));
 
-		return $isAPAuthAvailable === false
-			? Verdict::deny(new FeatureNotAvailableOnCurrentPlanException())
-			: Verdict::grant();
+		return $isAPAuthAvailable
+			? Verdict::grant()
+			: Verdict::deny(new FeatureNotAvailableOnCurrentPlanException());
 	}
 }

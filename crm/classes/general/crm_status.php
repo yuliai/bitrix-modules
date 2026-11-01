@@ -20,6 +20,8 @@ class CCrmStatus
 
 	public const PREFIX_USER_CREATED = 'UC';
 	public const DEFAULT_SORT = 10;
+	public const DESCRIPTION_MAX_LENGTH = 65535;
+	public const DESCRIPTION_INVALID_TYPE_ERROR = 'The field DESCRIPTION must be a string.';
 
 	protected $entityId = '';
 	private static $FIELD_INFOS;
@@ -80,6 +82,9 @@ class CCrmStatus
 				'NAME' => [
 					'TYPE' => 'string',
 					'ATTRIBUTES' => [CCrmFieldInfoAttr::Required]
+				],
+				'DESCRIPTION' => [
+					'TYPE' => 'string',
 				],
 				'NAME_INIT' => [
 					'TYPE' => 'string',
@@ -459,12 +464,14 @@ class CCrmStatus
 		}
 
 		$name = trim($arFields['NAME'] ?? '');
+		$description = (string)($arFields['DESCRIPTION'] ?? '');
 		$semantics = empty($arFields['SEMANTICS']) ? \Bitrix\Crm\PhaseSemantics::PROCESS : $arFields['SEMANTICS'];
 
 		$result = StatusTable::add([
 			'ENTITY_ID' => $this->entityId,
 			'STATUS_ID' => $this->addPrefixToStatusId($statusId),
 			'NAME' => $name,
+			'DESCRIPTION' => $description,
 			'NAME_INIT' => $arFields['SYSTEM'] === 'Y' ? $name : '',
 			'SORT' => $arFields['SORT'],
 			'SYSTEM' => $arFields['SYSTEM'] === 'Y'? 'Y': 'N',
@@ -502,13 +509,17 @@ class CCrmStatus
 			return false;
 		}
 
-		$arFields['SORT'] = (int)($arFields['SORT'] ?? 0);
-		if ($arFields['SORT'] <= 0)
+		$arFields_u = [];
+		if (array_key_exists('SORT', $arFields))
 		{
-			$arFields['SORT'] = self::DEFAULT_SORT;
-		}
+			$arFields['SORT'] = (int)$arFields['SORT'];
+			if ($arFields['SORT'] <= 0)
+			{
+				$arFields['SORT'] = self::DEFAULT_SORT;
+			}
 
-		$arFields_u['SORT'] = $arFields['SORT'];
+			$arFields_u['SORT'] = $arFields['SORT'];
+		}
 
 		if (array_key_exists('NAME', $arFields))
 		{
@@ -549,6 +560,11 @@ class CCrmStatus
 		if (isset($arFields['SEMANTICS']))
 		{
 			$arFields_u['SEMANTICS'] = $arFields['SEMANTICS'];
+		}
+
+		if (array_key_exists('DESCRIPTION', $arFields))
+		{
+			$arFields_u['DESCRIPTION'] = (string)($arFields['DESCRIPTION'] ?? '');
 		}
 
 		$result = StatusTable::update($ID, $arFields_u);
@@ -997,6 +1013,31 @@ class CCrmStatus
 	private function CheckFields(array $arFields, bool $bCheckStatusId = true): bool
 	{
 		$aMsg = [];
+		if (
+			array_key_exists('DESCRIPTION', $arFields)
+			&& $arFields['DESCRIPTION'] !== null
+			&& !is_string($arFields['DESCRIPTION'])
+		)
+		{
+			$aMsg[] = [
+				'id' => 'DESCRIPTION',
+				'text' => self::DESCRIPTION_INVALID_TYPE_ERROR,
+			];
+		}
+		elseif (
+			array_key_exists('DESCRIPTION', $arFields)
+			&& $arFields['DESCRIPTION'] !== null
+			&& strlen($arFields['DESCRIPTION']) > self::DESCRIPTION_MAX_LENGTH
+		)
+		{
+			$aMsg[] = [
+				'id' => 'DESCRIPTION',
+				'text' => GetMessage(
+					'CRM_STATUS_ERR_DESCRIPTION_MAX_LENGTH_EXCEEDED',
+					['#MAX_LENGTH#' => (string)self::DESCRIPTION_MAX_LENGTH],
+				),
+			];
+		}
 
 		if (
 			$bCheckStatusId

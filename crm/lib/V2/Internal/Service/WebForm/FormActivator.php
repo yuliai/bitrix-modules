@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Internal\Service\WebForm;
 
-use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebForm;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\WebFormSelect;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormAccessDeniedException;
@@ -13,6 +12,7 @@ use Bitrix\Crm\V2\Internal\Exception\WebForm\FormNotFoundException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormSideEffectException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormSystemImmutableException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormValidationException;
+use Bitrix\Crm\V2\Internal\Exception\WebForm\FormVersionMismatchException;
 use Bitrix\Crm\V2\Internal\Exception\WebForm\FormWriteRestrictedException;
 use Bitrix\Crm\V2\Internal\Integration\Bitrix24\WebFormWriteRestriction;
 use Bitrix\Crm\V2\Internal\Repository\WebForm\FormRepository;
@@ -35,7 +35,9 @@ use UnexpectedValueException;
  * the state and the version it carries: no row is written, no version moves, the limit is not asked
  * about and the package is not rebuilt. This is what keeps a repeated call harmless on a portal that
  * has run out of its limit - the form being turned on is never counted against itself, because a
- * form that is already working is never counted at all.
+ * form that is already working is never counted at all. A caller guarding such a call with a version
+ * is still answered about it: the version read here is compared with the expected one, so a switch
+ * that changes nothing never reports success over a form that has moved on since it was read.
  *
  * Fitness is asked of {@see FormChecker} in the mode of a stored form, which is the very call
  * crm.form.validate answers with: the two verdicts are one verdict by construction rather than two
@@ -56,73 +58,71 @@ use UnexpectedValueException;
  */
 final class FormActivator
 {
-	private const LOGGER_ID = 'Default';
-
 	private readonly \Closure $permissionChecker;
 	private readonly \Closure $formLoader;
 	private readonly \Closure $formChecker;
-	private readonly \Closure $activeFormCount;
-	private readonly \Closure $activeFormMaximum;
+	private readonly ActiveFormLimit $activeFormLimit;
 	private readonly \Closure $activeStateWriter;
 	private readonly \Closure $scriptBuilder;
 	private readonly WebFormWriteRestriction $writeRestriction;
+	private readonly FormStorageRefusal $storageRefusal;
 
 	/**
-	 * @param null|\Closure(int): bool $permissionChecker
+	 * @param \Closure(int): bool $permissionChecker the right to change CRM forms, given rather than
+	 *        taken: this scenario is assembled by the caller that knows on whose behalf it runs
+	 * @param \Closure(int, int): Result $formChecker the verdict crm.form.validate answers with,
+	 *        given by the same caller so that both calls run one check over one stored form
+	 * @param FormStorageRefusal $storageRefusal the translation a refused write is answered through,
+	 *        shared with {@see FormWriter}
 	 * @param null|\Closure(int, WebFormSelect): ?WebForm $formLoader
-	 * @param null|\Closure(int, int): Result $formChecker
-	 * @param null|\Closure(): int $activeFormCount
-	 * @param null|\Closure(): int $activeFormMaximum
-	 * @param null|\Closure(int, bool, int): Result $activeStateWriter
+	 * @param null|ActiveFormLimit $activeFormLimit defaults to the limit of this portal, asked
+	 *        through the restriction this scenario was given
+	 * @param null|\Closure(int, bool, int, ?DateTime): Result $activeStateWriter the form, the state
+	 *        asked for, the author of the change and the version the form has to still carry, which
+	 *        the storage compares in the statement that writes
 	 * @param null|\Closure(int): bool $scriptBuilder
 	 */
 	public function __construct(
-		?\Closure $permissionChecker = null,
+		\Closure $permissionChecker,
+		\Closure $formChecker,
+		FormStorageRefusal $storageRefusal,
 		?\Closure $formLoader = null,
-		?\Closure $formChecker = null,
-		?\Closure $activeFormCount = null,
-		?\Closure $activeFormMaximum = null,
+		?ActiveFormLimit $activeFormLimit = null,
 		?\Closure $activeStateWriter = null,
 		?\Closure $scriptBuilder = null,
 		?WebFormWriteRestriction $writeRestriction = null,
 	)
 	{
-		$this->permissionChecker = $permissionChecker ?? static fn (int $userId): bool =>
-			Container::getInstance()
-				->getUserPermissions($userId)
-				->webForm()
-				->canEdit()
-		;
+		$this->permissionChecker = $permissionChecker;
+		$this->formChecker = $formChecker;
+		$this->storageRefusal = $storageRefusal;
 		$this->formLoader = $formLoader ?? static fn (int $formId, WebFormSelect $select): ?WebForm =>
 			(new FormRepository())->getById($formId, $select)
-		;
-		$this->formChecker = $formChecker ?? static fn (int $userId, int $formId): Result =>
-			(new FormChecker())->check($userId, $formId)
-		;
-		$this->activeFormCount = $activeFormCount ?? static fn (): int =>
-			(new FormRepository())->getActiveFormCount()
-		;
-		$this->activeFormMaximum = $activeFormMaximum ?? static fn (): int =>
-			(new FormRepository())->getActiveFormMaximum()
 		;
 		$this->activeStateWriter = $activeStateWriter ?? static fn (
 			int $formId,
 			bool $isActive,
 			int $userId,
-		): Result => (new FormWriteRepository())->setActive($formId, $isActive, $userId);
+			?DateTime $expectedModifiedTime,
+		): Result => (new FormWriteRepository())
+			->setActive($formId, $isActive, $userId, $expectedModifiedTime)
+		;
 		$this->scriptBuilder = $scriptBuilder ?? static fn (int $formId): bool =>
 			(new FormScriptBuilder())->build($formId)
 		;
 		$this->writeRestriction = $writeRestriction ?? new WebFormWriteRestriction();
+		$this->activeFormLimit = $activeFormLimit ?? new ActiveFormLimit(restriction: $this->writeRestriction);
 	}
 
 	/**
 	 * Brings an existing CRM form into the asked-for state and answers with the state it is in and
 	 * the version acting after the call.
 	 *
-	 * The expected version is not taken: this is a switch of state rather than a change of the
-	 * contents of the form, it is idempotent, and demanding a version would make every switch from a
-	 * list read the form first.
+	 * The expected version is optional: a switch is idempotent, so a caller naming the form alone
+	 * switches it without reading the form first, and a caller that has read the form guards the
+	 * switch with what it read. A call that does write hands the version over to the storage, which
+	 * compares it in the statement that writes; a call that writes nothing compares it here, against
+	 * the version the form was just read with.
 	 *
 	 * @return WebForm the form projected onto what this scenario answers for - its identifier, its
 	 *         state and its version; nothing else of the form is read back
@@ -130,14 +130,21 @@ final class FormActivator
 	 * @throws FormWriteRestrictedException the plan of the portal does not allow writing forms
 	 * @throws FormNotFoundException there is no ordinary CRM form under this id
 	 * @throws FormSystemImmutableException the form is a system one and can not be changed
-	 * @throws FormValidationException the form is not fit to be turned on; every violation is
-	 *         carried at once and the code of each error is the path of the configuration
+	 * @throws FormVersionMismatchException the form was changed after the expected version was read
+	 * @throws FormValidationException the form is not fit to be turned on, or the storage refused
+	 *         the write; every violation is carried at once and the code of each error is the path
+	 *         of the configuration
 	 * @throws FormActivationLimitReachedException the portal keeps as many forms working as its plan
 	 *         allows
 	 * @throws FormSideEffectException the state is written and the package of the form is not
 	 *         rebuilt: what the visitors receive stays as it was
 	 */
-	public function setActive(int $userId, int $formId, bool $isActive): WebForm
+	public function setActive(
+		int $userId,
+		int $formId,
+		bool $isActive,
+		?DateTime $expectedModifiedTime = null,
+	): WebForm
 	{
 		$this->assertCanWrite($userId);
 
@@ -149,7 +156,7 @@ final class FormActivator
 
 		if ($form->active === $isActive)
 		{
-			return self::state($formId, $isActive, self::versionOf($form));
+			return self::state($formId, $isActive, self::currentVersion($form, $expectedModifiedTime));
 		}
 
 		if ($isActive)
@@ -158,7 +165,7 @@ final class FormActivator
 			$this->assertLimitNotReached();
 		}
 
-		$version = $this->write($formId, $isActive, $userId);
+		$version = $this->write($formId, $isActive, $userId, $expectedModifiedTime);
 		$this->buildScripts($formId);
 
 		return self::state($formId, $isActive, $version);
@@ -233,9 +240,9 @@ final class FormActivator
 	}
 
 	/**
-	 * The limit is asked about only where the number of working forms actually grows, and only on a
-	 * portal that has a plan to be limited by: outside the cloud forms are turned on without a count,
-	 * the way the product turns them on ({@see \Bitrix\Crm\WebForm\Form::canActivateForm()}).
+	 * The limit is asked about only where the number of working forms actually grows, and it is
+	 * asked of the same object a creation asks ({@see FormWriter::add()}) and the dictionary
+	 * publishes: one comparison rather than several that can drift apart.
 	 *
 	 * The window between the count and the write is accepted: there is no transaction under this
 	 * path, so calls overlapping in it all read the count before any of them writes and all pass:
@@ -245,39 +252,41 @@ final class FormActivator
 	 */
 	private function assertLimitNotReached(): void
 	{
-		if (!$this->writeRestriction->isActivationLimited())
-		{
-			return;
-		}
-
-		if (($this->activeFormCount)() >= ($this->activeFormMaximum)())
+		if ($this->activeFormLimit->isReached())
 		{
 			throw new FormActivationLimitReachedException();
 		}
 	}
 
 	/**
-	 * The write carries no value of the caller beyond the state itself, so a refusal of the storage
-	 * is not a refusal of a field: it is a failure of the operation, reported as one and written to
-	 * the log instead of to the caller.
+	 * A refusal of the storage is answered the way a refused write of the configuration is answered
+	 * ({@see FormWriter::update()}): the one translation reads the codes of the storage as the paths
+	 * of the input, keeps its text inside and writes it to the log. A switch of the state carries no
+	 * value of the caller beyond the state itself, so the path it is answered with is the column the
+	 * storage refused - and it is one answer for both scenarios rather than two.
+	 *
+	 * The expected version travels with it and is compared by the storage rather than here: the
+	 * comparison and the write are one statement there, so a form changed in between is not switched
+	 * instead of being switched over the change.
+	 *
+	 * A refused write leaves the version where it was: the storage takes its reservation back
+	 * together with the row, so the caller still holds the acting version.
+	 *
+	 * @throws FormValidationException the storage refused the write
+	 * @throws FormVersionMismatchException
+	 * @throws FormNotFoundException the form was removed after it was read above
 	 */
-	private function write(int $formId, bool $isActive, int $userId): DateTime
+	private function write(
+		int $formId,
+		bool $isActive,
+		int $userId,
+		?DateTime $expectedModifiedTime,
+	): DateTime
 	{
-		$result = ($this->activeStateWriter)($formId, $isActive, $userId);
+		$result = ($this->activeStateWriter)($formId, $isActive, $userId, $expectedModifiedTime);
 		if (!$result->isSuccess())
 		{
-			Container::getInstance()->getLogger(self::LOGGER_ID)->error(
-				'CRM form `{formId}` was not turned {state} by the storage: {message}',
-				[
-					'formId' => $formId,
-					'state' => $isActive ? 'on' : 'off',
-					'message' => implode('; ', $result->getErrorMessages()),
-				],
-			);
-
-			throw new UnexpectedValueException(
-				sprintf('State of CRM form `%d` was not stored.', $formId),
-			);
+			throw $this->storageRefusal->toException($result);
 		}
 
 		$version = $result->getData()[FormWriteRepository::DATA_MODIFIED_TIME] ?? null;
@@ -303,6 +312,27 @@ final class FormActivator
 		{
 			throw new FormSideEffectException(FormScriptBuilder::OPERATION);
 		}
+	}
+
+	/**
+	 * The version a call writing nothing answers with, compared with the expected one first: the
+	 * comparison belongs here because there is no statement to carry it, and answering success over
+	 * a form that has moved on would tell the caller its version is still the acting one.
+	 *
+	 * @throws FormVersionMismatchException
+	 */
+	private static function currentVersion(WebForm $form, ?DateTime $expectedModifiedTime): DateTime
+	{
+		$version = self::versionOf($form);
+		if (
+			$expectedModifiedTime !== null
+			&& $version->getTimestamp() !== $expectedModifiedTime->getTimestamp()
+		)
+		{
+			throw new FormVersionMismatchException($version);
+		}
+
+		return $version;
 	}
 
 	/**

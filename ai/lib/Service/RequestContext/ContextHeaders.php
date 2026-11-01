@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Bitrix\AI\Service\RequestContext;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\DB\Connection;
 use Bitrix\Main\Diag;
 use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Main\Loader;
@@ -33,10 +35,22 @@ final class ContextHeaders
 	private const TOKEN_TTL = 3600;
 	private const LOGGER_ID = 'ai.RequestContext';
 
+	private const SECRET_INIT_LOCK = 'ai_cuet_context_secret_init';
+
+	/** Short on purpose: an outbound request waits for it, and losing the lock only skips the context. */
+	private const SECRET_INIT_LOCK_TIMEOUT = 5;
+
 	/** Receiver's own cap on the header value; a longer token is dropped, not truncated. */
 	private const MAX_TOKEN_BYTES = 1024;
 
 	public const FEATURE_MAX_LENGTH = 64;
+
+	/**
+	 * Outcome of the initialization attempt of this process: null until it was made, then the secret
+	 * or '' when it gave nothing. An attempt costs a wait on the lock and two queries, and every
+	 * outbound request of the hit would otherwise pay them again to reach the same answer.
+	 */
+	private static ?string $initOutcome = null;
 
 	/**
 	 * Attaches the context headers to a client and reports the service class of the call.
@@ -45,6 +59,8 @@ final class ContextHeaders
 	 * @param CallType $callType Kind of the call — the only input the service class is derived from.
 	 * @param string $feature Product label, travels as an ordinary header and never inside the token.
 	 * @param int|null $userId Portal user behind the request; null for calls without one.
+	 * @return ServiceClass Service class of the call, the built-in one when it could not be computed.
+	 *         Send points whose body carries no `priority` field may ignore it.
 	 */
 	public static function applyTo(
 		HttpClient $httpClient,
@@ -147,11 +163,122 @@ final class ContextHeaders
 		}
 	}
 
+	/**
+	 * The signing secret, generated on first use when the update has not seeded it yet.
+	 *
+	 * Empty is a legitimate answer here, not a failure: the caller drops the token and sends the
+	 * request without context. That is why nothing on this path is allowed to escape - a portal
+	 * whose secret cannot be created must still reach the service.
+	 */
 	private static function getSecret(): string
 	{
 		$secret = Option::get('ai', self::OPTION_SECRET, '');
+		$secret = is_string($secret) ? $secret : '';
+		if ($secret !== '')
+		{
+			return $secret;
+		}
 
-		return is_string($secret) ? $secret : '';
+		if (self::$initOutcome !== null)
+		{
+			return self::$initOutcome;
+		}
+
+		try
+		{
+			self::$initOutcome = self::initSecret();
+		}
+		catch (\Throwable $exception)
+		{
+			self::$initOutcome = '';
+
+			// The secret must not reach the log, so only the class of failure is reported.
+			self::log('error', 'secret init failed', ['type' => $exception::class]);
+		}
+
+		return self::$initOutcome;
+	}
+
+	/**
+	 * Runtime fallback for a portal the updater has not reached. Authoritatively the option is
+	 * seeded by the update, in a single-threaded context; here the generation is serialized with a
+	 * named lock so two concurrent first requests do not write two different secrets, which the
+	 * receiver would later see as a portal that signs with a key it did not register.
+	 */
+	private static function initSecret(): string
+	{
+		$connection = Application::getInstance()->getConnection();
+
+		// Cache-BYPASSING read: Option::get() caches the module's options in a per-request static after
+		// the first load, so a process that read an empty value BEFORE the winner's Option::set would
+		// still see empty. Standing in front of the lock, it also keeps a request that has simply lost
+		// the race off the lock queue: the answer is already in the table.
+		$secret = self::readSecretUncached($connection);
+		if ($secret !== '')
+		{
+			return $secret;
+		}
+
+		if (!$connection->lock(self::SECRET_INIT_LOCK, self::SECRET_INIT_LOCK_TIMEOUT))
+		{
+			// Without the lock held there is no way to be the only generator, and a losing write would
+			// replace a secret other requests are already signing with. Skipping the context of this
+			// one request costs nothing: the next one, past the lock, gets the secret the winner wrote.
+			self::log('notice', 'secret init skipped: lock not acquired');
+
+			return '';
+		}
+
+		try
+		{
+			// The read is repeated under the lock, and only this one closes the race: the winner may
+			// have written between the read above and the moment the lock was granted.
+			$secret = self::readSecretUncached($connection);
+			if ($secret !== '')
+			{
+				return $secret;
+			}
+
+			$secret = bin2hex(random_bytes(32));
+			Option::set('ai', self::OPTION_SECRET, $secret);
+
+			return $secret;
+		}
+		finally
+		{
+			$connection->unlock(self::SECRET_INIT_LOCK);
+		}
+	}
+
+	/**
+	 * Reads the secret straight from b_option, past the per-request static of Option, so that a late
+	 * generator observes a secret a concurrent process has just persisted. The option is written
+	 * globally (Option::set with no site), and b_option holds exactly the global rows.
+	 *
+	 * Master-only, like Option::load: with the cluster module a plain SELECT is served by a replica,
+	 * and a lagging one would answer "empty" to a portal whose secret is already being signed with.
+	 */
+	private static function readSecretUncached(Connection $connection): string
+	{
+		$sqlHelper = $connection->getSqlHelper();
+
+		$sql = 'SELECT ' . $sqlHelper->quote('VALUE') . ' FROM ' . $sqlHelper->quote('b_option')
+			. ' WHERE ' . $sqlHelper->quote('MODULE_ID') . " = 'ai'"
+			. ' AND ' . $sqlHelper->quote('NAME') . " = '" . $sqlHelper->forSql(self::OPTION_SECRET) . "'"
+		;
+
+		$pool = Application::getInstance()->getConnectionPool();
+		$pool->useMasterOnly(true);
+		try
+		{
+			$row = $connection->query($sql, 1)->fetch();
+		}
+		finally
+		{
+			$pool->useMasterOnly(false);
+		}
+
+		return is_array($row) && isset($row['VALUE']) ? (string)$row['VALUE'] : '';
 	}
 
 	/**

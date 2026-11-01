@@ -18,6 +18,10 @@ use Bitrix\Rest\V3\Interaction\Request\Request;
  *
  * Turning a form off stops it for every page it is placed on at once, so a set is refused here for
  * the same reason it is refused everywhere else in the family.
+ *
+ * The expected version is optional and is read the way {@see ActivateFormRequest} reads it: one
+ * property of the contract, one refusal of a malformed value, and the same meaning in both
+ * directions of the switch.
  */
 final class DeactivateFormRequest extends Request
 {
@@ -29,4 +33,6 @@ final class DeactivateFormRequest extends Request
 	#[NotEmpty]
 	#[PositiveNumber]
 	public int $id;
+
+	public ?string $updatedTime = null;
 }

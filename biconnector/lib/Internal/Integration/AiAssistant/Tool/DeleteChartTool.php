@@ -7,6 +7,12 @@ use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Chart\DeleteChartOperation;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class DeleteChartTool extends BaseBiTool
@@ -14,6 +20,11 @@ final class DeleteChartTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'delete_chart';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Destructive;
 	}
 
 	public function getDescription(): string
@@ -55,6 +66,63 @@ final class DeleteChartTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$chartId = (int)($args['chartId'] ?? 0);
+		$actor = new Actor($userId, Channel::Mcp);
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(DeleteChartOperation::class);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->preview($chartId, $actor);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+
+			$data = $preview->getData();
+			if ($data['alreadyDeleted'])
+			{
+				return [
+					'deleted' => true,
+					'id' => $data['id'],
+					'name' => $data['name'],
+					'already_deleted' => true,
+				];
+			}
+
+			return [
+				'requiresConfirmation' => true,
+				'action' => 'delete_chart',
+				'id' => $data['id'],
+				'name' => $data['name'],
+				'dashboards' => $data['dashboards'],
+				'impact' => 'The chart will be permanently deleted and removed from any '
+					. 'dashboards it is placed on. This cannot be undone.',
+				'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call '
+					. 'delete_chart again with the same chartId and confirm=true.',
+			];
+		}
+
+		$result = $operation->execute($chartId, $actor);
+		if (!$result->isSuccess())
+		{
+			// Not OperationRefusal::forTool(): retryAfter of a spent budget stays out of the text, as before.
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 
@@ -126,6 +194,10 @@ final class DeleteChartTool extends BaseBiTool
 				'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call delete_chart again with the same chartId and confirm=true.',
 			];
 		}
+
+		// Charged here and not earlier: a preview, a denied or an already-deleted
+		// call returns above and must not cost the user a destructive slot.
+		$this->spendDestructiveBudget($userId, 'chart', $chartId);
 
 		$response = $integrator->deleteChart($chartId);
 		if ($response->hasErrors())

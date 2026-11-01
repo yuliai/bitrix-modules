@@ -134,6 +134,11 @@ class Settings
 		) === 'Y';
 	}
 
+	public static function isMarkdownNativeRendererAvailable(): bool
+	{
+		return \Bitrix\Main\Config\Option::get('immobile', 'is_markdown_native_renderer_available', 'N') === 'Y';
+	}
+
 	public static function isCopilotSelectModelEnabled(): bool
 	{
 		return true;

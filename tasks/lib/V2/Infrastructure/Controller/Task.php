@@ -116,7 +116,7 @@ class Task extends BaseController
 			return $taskId > 0 ? $taskId : null;
 		}
 
-		if (!is_string($taskId) || $taskId === '' || preg_match('/^\d+$/D', $taskId) !== 1)
+		if (!is_string($taskId) || $taskId === '' || preg_match('/^[0-9]+$/D', $taskId) !== 1)
 		{
 			return null;
 		}
@@ -147,11 +147,15 @@ class Task extends BaseController
 		Entity\Task $task,
 		TaskProvider $taskProvider,
 		bool $view = false,
+		// Nullable so an absent marker (mobile app, legacy, REST) stays
+		// distinct from an explicit false. Bound like $view above from the request.
+		?bool $deadlineManuallySet = null,
 	): ?Arrayable
 	{
 		$config = new AddConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			manualDeadline: $deadlineManuallySet,
 		);
 
 		$result = (new AddTaskCommand(

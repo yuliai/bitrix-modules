@@ -84,7 +84,6 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 		array $scopes,
 		array $attributes,
 		?string $comment = null,
-		bool $skipTariffCheck = false,
 		?Date $dateExpire = null,
 	): IncomingWebhook {
 		$connection = Application::getConnection();
@@ -100,7 +99,6 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 				ElementCodeType::IN_WEBHOOK->value,
 				null,
 				$initiatorUserId,
-				$skipTariffCheck,
 			);
 
 			if (($integrationResult['status'] ?? false) !== true || empty($integrationResult['ID']))

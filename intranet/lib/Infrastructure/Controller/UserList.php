@@ -16,12 +16,10 @@ use Bitrix\Intranet\Infrastructure\Controller\AutoWire\UserCollectionParameterTr
 use Bitrix\Intranet\Integration\HumanResources\DepartmentAssigner;
 use Bitrix\Intranet\Internal\Entity\FireWizardConfig;
 use Bitrix\Intranet\Internal\Integration\Im\ChatService;
-use Bitrix\Intranet\Invitation;
 use Bitrix\Intranet\Public\Facade\Invitation\ReInvitationFacade;
 use Bitrix\Intranet\Public\Type\Collection\InvitationCollection;
 use Bitrix\Intranet\Public\Type\EmailInvitation;
 use Bitrix\Intranet\Public\Type\PhoneInvitation;
-use Bitrix\Intranet\User;
 use Bitrix\Intranet\User\Access\UserAccessController;
 use Bitrix\Intranet\User\Access\UserActionDictionary;
 use Bitrix\Intranet\User\Command\DeleteOrFireUserCommand;
@@ -109,7 +107,6 @@ class UserList extends Controller
 			return AjaxJson::createError(($this->errorCollection));
 		}
 
-		$originatorUsers = [];
 		$integrationService = $this->getSystemUserIntegrationService();
 
 		foreach ($userCollection as $user)
@@ -135,21 +132,6 @@ class UserList extends Controller
 			{
 				$skippedFiredUsers[$user->getId()] = $user->getFormattedName();
 			}
-			else
-			{
-				$deactivateUser = new User($user->getId());
-				$originatorUser = $deactivateUser->fetchOriginatorUser();
-
-				if (!in_array($originatorUser, $originatorUsers))
-				{
-					$originatorUsers[] = $originatorUser;
-				}
-			}
-		}
-
-		foreach ($originatorUsers as $originatorUser)
-		{
-			Invitation::fullSyncCounterByUser($originatorUser);
 		}
 
 		return AjaxJson::createSuccess([

@@ -177,6 +177,101 @@ class ThemePicker
 		return !Loader::includeModule("bitrix24") || \Bitrix\Bitrix24\Release::isAvailable("17.5.0");
 	}
 
+	public static function resolveAccessibleEntityId(
+		string $entityType,
+		int $requestedEntityId,
+		int $currentUserId,
+	): ?int
+	{
+		if ($currentUserId <= 0)
+		{
+			return null;
+		}
+
+		if ($entityType === self::ENTITY_TYPE_USER)
+		{
+			return $currentUserId;
+		}
+
+		if (
+			$entityType === self::ENTITY_TYPE_SONET_GROUP
+			&& $requestedEntityId > 0
+			&& static::canCurrentUserModifyGroup($currentUserId, $requestedEntityId)
+		)
+		{
+			return $requestedEntityId;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Resolves the entity context available for the requested action.
+	 *
+	 * @return array{entityType: string, entityId: int}|null
+	 */
+	public static function resolveAccessibleEntityContext(
+		string $action,
+		string $entityType,
+		int $requestedEntityId,
+		int $currentUserId,
+	): ?array
+	{
+		if (
+			!in_array(
+				$action,
+				['save', 'save-blurred-image', 'getlist', 'create', 'remove', 'hide-hint'],
+				true,
+			)
+		)
+		{
+			return null;
+		}
+
+		if ($action === 'hide-hint')
+		{
+			$entityType = self::ENTITY_TYPE_USER;
+		}
+		elseif ($action === 'create' && $entityType === '')
+		{
+			$entityType = self::ENTITY_TYPE_USER;
+		}
+		elseif (
+			$action === 'getlist'
+			&& $entityType === self::ENTITY_TYPE_SONET_GROUP
+			&& $requestedEntityId <= 0
+		)
+		{
+			$entityType = self::ENTITY_TYPE_USER;
+		}
+
+		$entityId = static::resolveAccessibleEntityId($entityType, $requestedEntityId, $currentUserId);
+		if ($entityId === null)
+		{
+			return null;
+		}
+
+		return [
+			'entityType' => $entityType,
+			'entityId' => $entityId,
+		];
+	}
+
+	protected static function canCurrentUserModifyGroup(int $currentUserId, int $groupId): bool
+	{
+		if (!Loader::includeModule('socialnetwork'))
+		{
+			return false;
+		}
+
+		$permissions = \Bitrix\Socialnetwork\Helper\Workgroup::getPermissions([
+			'userId' => $currentUserId,
+			'groupId' => $groupId,
+		]);
+
+		return ($permissions['UserCanModifyGroup'] ?? false) === true;
+	}
+
 	public static function canSetDefaultTheme(): bool
 	{
 		if (!static::isAdmin())

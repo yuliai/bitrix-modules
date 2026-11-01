@@ -3,11 +3,13 @@
 namespace Bitrix\Call\Controller;
 
 use Bitrix\Main\Loader;
+use Bitrix\Main\Application;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Service\MicroService\BaseReceiver;
 use Bitrix\Call\Call;
 use Bitrix\Call\CallUser;
 use Bitrix\Call\CallFactory;
+use Bitrix\Call\Recent;
 use Bitrix\Call\Error;
 use Bitrix\Call\NotifyService;
 use Bitrix\Call\Logger\Logger;
@@ -36,6 +38,8 @@ use Bitrix\Call\Controller\Filter\UniqueRequestFilter;
 class CallController extends BaseReceiver implements IdempotentReplayable
 {
 	use IdempotentReplayableTrait;
+
+	protected const LOCK_TTL = 10; // in seconds
 
 	public function getAutoWiredParameters(): array
 	{
@@ -119,15 +123,83 @@ class CallController extends BaseReceiver implements IdempotentReplayable
 	 */
 	public function finishCallAction(ControllerRequest $callRequest): ?array
 	{
-		$call = CallFactory::searchActiveByUuid(Call::PROVIDER_BITRIX, $callRequest->callUuid);
-		if (!isset($call))
+		$callUuid = $callRequest->callUuid;
+
+		// Serialize the FINISH paths - this media-backend receiver, JWT finish
+		// (Controller\Call) and legacy finish (CallManager) - on the shared per-call
+		// call_state lock. The receiver used to finish without it, so a media-backend
+		// finish could race a concurrent finish and lose the FINISHED transition,
+		// leaving the call stuck in INVITING. This lock does NOT cover every state
+		// mutator: legacy CallManager invite holds a different lock (invite_call_* /
+		// _call_{id} for PLAIN) and is not serialized against this receiver.
+		// call_state is the single outer lock here (no user lock), so there is no
+		// lock-order deadlock with the JWT user->call_state path.
+		$lockName = "call_state_call_{$callUuid}";
+		if (!Application::getConnection()->lock($lockName, self::LOCK_TTL))
 		{
-			$this->addError(new Error(Error::CALL_NOT_FOUND));
+			$this->addError(new Error('could_not_lock', 'Could not get exclusive lock'));
 
 			return null;
 		}
 
-		$call->finish();
+		$committedHere = false;
+		$sendRecoveryFinish = false;
+		$call = null;
+		try
+		{
+			// Fresh read under the lock (provider-agnostic) so a transition committed by
+			// a concurrent finish while we waited for the lock is observed.
+			$call = CallFactory::searchActiveByUuid($callUuid);
+			if (!isset($call))
+			{
+				$this->addError(new Error(Error::CALL_NOT_FOUND));
+
+				return null;
+			}
+
+			$userId = $callRequest->userId ?: $call->getInitiatorId();
+			$call->setActionUserId($userId);
+
+			if ($call->getState() === Call::STATE_FINISHED)
+			{
+				// Idempotent replay of an already-finished call: only flag the recovery
+				// re-broadcast. Roster load + Pull fan-out are deferred to after unlock
+				// so they do not hold the shared lock.
+				$sendRecoveryFinish = true;
+			}
+			else
+			{
+				// Only the atomic FINISHED transition (updateState CAS) runs under the
+				// lock; finishSideEffects() (controller teardown, chat message, Pull)
+				// runs off-lock. Never save() here - it would lost-update the STATE.
+				$committedHere = $call->commitFinish();
+			}
+		}
+		finally
+		{
+			Application::getConnection()->unlock($lockName);
+		}
+
+		if ($committedHere)
+		{
+			// Exactly-once side effects; Recent cache rebuild and sibling teardown run
+			// off-lock via the call:onCallFinished handler.
+			$call->finishSideEffects();
+		}
+		elseif ($sendRecoveryFinish)
+		{
+			// Off-lock recovery re-broadcast for stuck clients; self-rate-limited by the
+			// recovery idempotence key. Refresh Recent only when it actually broadcast.
+			if ($call->getSignaling()->sendFinish(forRecovery: true))
+			{
+				Recent::scheduleUpdateCallCache($call->getId());
+			}
+		}
+		elseif ($call instanceof Call)
+		{
+			// Lost the race without a recovery broadcast: just refresh the cache.
+			Recent::scheduleUpdateCallCache($call->getId());
+		}
 
 		return ['result' => true];
 	}
@@ -137,7 +209,7 @@ class CallController extends BaseReceiver implements IdempotentReplayable
 	 */
 	public function disconnectUserAction(ControllerRequest $callRequest): ?array
 	{
-		$call = CallFactory::searchActiveByUuid(Call::PROVIDER_BITRIX, $callRequest->callUuid);
+		$call = CallFactory::searchActiveByUuid($callRequest->callUuid);
 		if (!isset($call))
 		{
 			$this->addError(new Error(Error::CALL_NOT_FOUND));
@@ -166,7 +238,7 @@ class CallController extends BaseReceiver implements IdempotentReplayable
 			$logger = Logger::getInstance();
 		}
 
-		$call = CallFactory::searchActiveByUuid(Call::PROVIDER_BITRIX, $trackFile->callUuid);
+		$call = CallFactory::searchActiveByUuid($trackFile->callUuid);
 		if (!isset($call))
 		{
 			$log && $logger->error("Call uuid:{$trackFile->callUuid} not found");
@@ -341,7 +413,7 @@ class CallController extends BaseReceiver implements IdempotentReplayable
 			$logger = Logger::getInstance();
 		}
 
-		$call = CallFactory::searchActiveByUuid(Call::PROVIDER_BITRIX, $trackError->callUuid);
+		$call = CallFactory::searchActiveByUuid($trackError->callUuid);
 		if (!isset($call))
 		{
 			$log && $logger->error("Call uuid:{$trackError->callUuid} not found");

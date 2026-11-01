@@ -9,11 +9,13 @@ use Bitrix\Mobile\Config\FeatureFlag;
 
 final class PurchasesFeature extends FeatureFlag
 {
+	use MyCompanySectionElement;
+
 	public const OPTION_NAME = 'purchases_card_enabled';
 
-	public function isEnabled(): bool
+	protected function isOptionEnabled(): bool
 	{
-		return Option::get('mobile', self::OPTION_NAME, 'N') === 'Y';
+		return $this->isOptionOn('mobile', self::OPTION_NAME, false);
 	}
 
 	public function enable(): void

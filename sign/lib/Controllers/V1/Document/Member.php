@@ -419,13 +419,17 @@ class Member extends \Bitrix\Sign\Engine\Controller
 		if (!$result->isSuccess())
 		{
 			$logger->error($result->getError()?->getMessage() ?? 'unknown error', ['errors' => $result->getErrors()]);
-			$this->addErrorByMessage('Error while getting unique signers count');
+			$this->addErrors($result->getErrors());
 
 			return [];
 		}
 
+		$data = $result->getData();
+
 		return [
-			'count' => $result->getData()['count'],
+			'count' => $data['count'],
+			'totalCount' => $data['totalCount'],
+			'excludedCount' => $data['excludedCount'],
 		];
 	}
 
@@ -464,8 +468,12 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			return [];
 		}
 
+		$data = $result->getData();
+
 		return [
-			'count' => $result->getData()['count'],
+			'count' => $data['count'],
+			'totalCount' => $data['totalCount'],
+			'excludedCount' => $data['excludedCount'],
 		];
 	}
 

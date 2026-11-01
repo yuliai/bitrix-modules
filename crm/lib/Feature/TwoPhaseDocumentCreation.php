@@ -16,4 +16,9 @@ final class TwoPhaseDocumentCreation extends AbstractCrmFlag
 	{
 		return Experimental::getInstance();
 	}
+
+	public function enabledByDefault(): bool
+	{
+		return true;
+	}
 }

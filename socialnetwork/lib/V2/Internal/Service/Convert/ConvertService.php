@@ -27,6 +27,7 @@ use Bitrix\Socialnetwork\V2\Internal\Service\Convert\Handler\UpdateFeaturePermis
 use Bitrix\Socialnetwork\V2\Internal\Service\Convert\Handler\SyncProjectChatMembers;
 use Bitrix\Socialnetwork\V2\Internal\Service\Convert\Handler\UpdateGroupTasksChat;
 use Bitrix\Socialnetwork\V2\Internal\Service\Convert\StatusResolve\StatusResolveService;
+use Bitrix\Socialnetwork\V2\Internal\Service\ProjectAnalytics;
 use Throwable;
 
 class ConvertService
@@ -35,6 +36,7 @@ class ConvertService
 		private readonly HandlerFactoryInterface $handlerFactory,
 		private readonly ConvertProgressRepositoryInterface $progressRepository,
 		private readonly StatusResolveService $statusResolveService,
+		private readonly ProjectAnalytics $projectAnalytics,
 	)
 	{
 
@@ -70,8 +72,18 @@ class ConvertService
 			return $result->setGroupAfter($groupBefore);
 		}
 
+		// This durable exclusion precedes every progress save, including the completed status.
+		$this->progressRepository->markNewConversion($groupId);
 		$this->statusResolveService->start($progress, $typeBefore);
 		$this->progressRepository->save($progress);
+
+		$sourceType = $groupBefore->getType();
+		$this->projectAnalytics->trackConvertStart(
+			groupId: $groupId,
+			sourceType: $sourceType,
+			userId: $userId,
+			isOpened: $groupBefore->isOpened(),
+		);
 
 		try
 		{
@@ -92,6 +104,12 @@ class ConvertService
 		catch (Throwable $t)
 		{
 			$this->statusResolveService->fail($progress);
+			$this->projectAnalytics->trackConvertFinish(
+				groupId: $groupId,
+				sourceType: $sourceType,
+				userId: $userId,
+				errorCode: (string)$t->getCode(),
+			);
 
 			throw $t;
 		}
@@ -106,6 +124,12 @@ class ConvertService
 		{
 			$this->statusResolveService->fail($progress);
 			$this->progressRepository->save($progress);
+			$this->projectAnalytics->trackConvertFinish(
+				groupId: $groupId,
+				sourceType: $sourceType,
+				userId: $userId,
+				errorCode: 'group_not_found',
+			);
 
 			return $result->addError(new Error('Group not found after conversion'));
 		}
@@ -157,6 +181,13 @@ class ConvertService
 		catch (Throwable $t)
 		{
 			$this->statusResolveService->fail($progress);
+			$this->projectAnalytics->trackConvertFinish(
+				groupId: $groupId,
+				sourceType: $sourceType,
+				userId: $userId,
+				isOpened: $groupAfter->isOpened(),
+				errorCode: (string)$t->getCode(),
+			);
 
 			throw $t;
 		}
@@ -164,6 +195,13 @@ class ConvertService
 		{
 			$this->progressRepository->save($progress);
 		}
+
+		$this->projectAnalytics->trackConvertFinish(
+			groupId: $groupId,
+			sourceType: $sourceType,
+			userId: $userId,
+			isOpened: $groupAfter->isOpened(),
+		);
 
 		return $result->setGroupAfter($groupAfter);
 	}

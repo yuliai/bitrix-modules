@@ -7,7 +7,7 @@ use Bitrix\Crm\Feature\Category\RestV3;
 use Bitrix\Crm\V2\Internal\Integration\Rest\V3\CacheManager;
 use Bitrix\Main\Localization\Loc;
 
-class RestV3WebForm extends BaseFeature
+class RestV3WebForm extends AbstractCrmFlag
 {
 	public function getName(): string
 	{
@@ -19,22 +19,27 @@ class RestV3WebForm extends BaseFeature
 		return RestV3::getInstance();
 	}
 
-	public function enable(): void
+	public function enabledByDefault(): bool
 	{
-		parent::enable();
-
-		CacheManager::cleanAll();
-	}
-
-	public function disable(): void
-	{
-		parent::disable();
-
-		CacheManager::cleanAll();
+		return false;
 	}
 
 	public function allowSwitchBySecretLink(): bool
 	{
 		return false;
+	}
+
+	protected function onEnable(): void
+	{
+		parent::onEnable();
+
+		CacheManager::cleanAll();
+	}
+
+	protected function onDisable(): void
+	{
+		parent::onDisable();
+
+		CacheManager::cleanAll();
 	}
 }

@@ -39,6 +39,7 @@ use Bitrix\Tasks\Internals\Task\Result\ResultManager;
 use Bitrix\Tasks\Internals\Task\Result\ResultTable;
 use Bitrix\Tasks\Internals\Task\Status;
 use Bitrix\Tasks\Internals\TaskTable;
+use Bitrix\Tasks\Rest\TaskDurationPresenter;
 use Bitrix\Tasks\Scrum\Service\TaskService;
 use Bitrix\Tasks\Internals\UserOption;
 use Bitrix\Tasks\Manager;
@@ -76,6 +77,8 @@ use TasksTaskListComponent;
  */
 final class Task extends Base
 {
+	private ?TaskDurationPresenter $taskDurationPresenter = null;
+
 	public function configureActions(): array
 	{
 		return [
@@ -153,15 +156,21 @@ final class Task extends Base
 	 */
 	public function getAction(CTaskItem $task, array $select = [], array $params = []): array
 	{
+		$requestedSelect = $select;
 		if (!empty($select))
 		{
 			$select[] = 'FAVORITE';
 		}
 
 		$params['select'] = $this->prepareSelect($select);
+		[$params['select'], $temporaryDurationFields] = $this->prepareDurationSelect(
+			$requestedSelect,
+			$params['select'],
+		);
 		try
 		{
 			$row = $task->getData(false, $params);
+			$row = $this->presentTaskDuration($row, $requestedSelect, $temporaryDurationFields);
 			if (array_key_exists('STATUS', $row))
 			{
 				$row['STATUS'] = $row['REAL_STATUS'];
@@ -443,6 +452,7 @@ final class Task extends Base
 		}
 
 		$preparedSelect = $this->prepareSelect($select);
+		[$preparedSelect, $temporaryDurationFields] = $this->prepareDurationSelect($select, $preparedSelect);
 		$preparedFilter = $this->prepareFilter($filter, $select, $params);
 
 		$navParams = $this->prepareNavParams($pageNavigation, $params);
@@ -491,6 +501,7 @@ final class Task extends Base
 
 			foreach ($tasks as &$task)
 			{
+				$task = $this->presentTaskDuration($task, $select, $temporaryDurationFields);
 				if (array_key_exists('STATUS', $task))
 				{
 					$task['SUB_STATUS'] = $task['STATUS'];
@@ -2012,6 +2023,66 @@ final class Task extends Base
 		}
 
 		return $select;
+	}
+
+	private function prepareDurationSelect(array $requestedSelect, array $preparedSelect): array
+	{
+		$includeDurationPlan = $this->isFieldSelected($requestedSelect, 'DURATION_PLAN');
+		$includeDurationType = $this->isFieldSelected($requestedSelect, 'DURATION_TYPE');
+		if (!$includeDurationPlan && !$includeDurationType)
+		{
+			return [$preparedSelect, []];
+		}
+
+		$requiredFields = [TaskDurationPresenter::DURATION_TYPE_ALL];
+		if ($includeDurationPlan)
+		{
+			$requiredFields = array_merge(
+				$requiredFields,
+				[
+					TaskDurationPresenter::DURATION_PLAN_SECONDS,
+					'MATCH_WORK_TIME',
+					'START_DATE_PLAN',
+					'END_DATE_PLAN',
+				],
+			);
+		}
+
+		$temporaryFields = [];
+		foreach ($requiredFields as $field)
+		{
+			if (!in_array($field, $preparedSelect, true))
+			{
+				$preparedSelect[] = $field;
+				$temporaryFields[] = $field;
+			}
+		}
+
+		return [$preparedSelect, $temporaryFields];
+	}
+
+	private function presentTaskDuration(array $task, array $requestedSelect, array $temporaryFields): array
+	{
+		$includeDurationPlan = $this->isFieldSelected($requestedSelect, 'DURATION_PLAN');
+		$includeDurationType = $this->isFieldSelected($requestedSelect, 'DURATION_TYPE');
+		if (!$includeDurationPlan && !$includeDurationType)
+		{
+			return $task;
+		}
+
+		$this->taskDurationPresenter ??= new TaskDurationPresenter(new \Bitrix\Tasks\Util\Calendar());
+
+		return $this->taskDurationPresenter->present(
+			$task,
+			$includeDurationPlan,
+			$includeDurationType,
+			$temporaryFields,
+		);
+	}
+
+	private function isFieldSelected(array $select, string $field): bool
+	{
+		return empty($select) || in_array('*', $select, true) || in_array($field, $select, true);
 	}
 
 	/**

@@ -22,10 +22,16 @@ use Bitrix\Im\V2\Entity\User\User;
 use Bitrix\Im\V2\Entity\User\UserBot;
 use Bitrix\Im\V2\Entity\User\UserCollection;
 use Bitrix\Im\V2\Entity\User\UserGuest;
+use Bitrix\Im\V2\Folder\Definition\Selection;
+use Bitrix\Im\V2\Folder\FolderProvider;
+use Bitrix\Im\V2\Folder\Query\FolderSearchScope;
+use Bitrix\Im\V2\Folder\Query\SelectionSearchFields;
+use Bitrix\Im\V2\Folder\Query\SelectionSearchFilter;
 use Bitrix\Im\V2\Integration\AI\RoleManager;
 use Bitrix\Im\V2\Integration\HumanResources\Department\Department;
 use Bitrix\Im\V2\Integration\Socialnetwork\Group;
 use Bitrix\Im\V2\Permission;
+use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Entity;
 use Bitrix\Main\ORM\Fields\BooleanField;
@@ -54,6 +60,7 @@ class RecentProvider extends BaseProvider
 	public const MENTION_SEARCH_MIN_TOKEN_SIZE = 2;
 	private const ENTITY_TYPE_USER = 'im-user';
 	private const ENTITY_TYPE_CHAT = 'im-chat';
+	private const PARENT_CHAIN_ALIAS = 'SEARCH_CHAIN';
 	protected const ALLOWED_SEARCH_CHAT_TYPES = [
 		Chat::IM_TYPE_CHAT,
 		Chat::IM_TYPE_OPEN,
@@ -65,6 +72,7 @@ class RecentProvider extends BaseProvider
 	];
 
 	private readonly SearchOptions $searchOptions;
+	private ?FolderSearchScope $folderSearchScope = null;
 	private string $preparedSearchString;
 	private string $originalSearchString;
 	private array $userIds;
@@ -91,6 +99,18 @@ class RecentProvider extends BaseProvider
 
 	protected function prepareOptions(array $options): array
 	{
+		if (SearchOptions::isFolderScopeSearch($options) || SearchOptions::isFolderEligibleSearch($options))
+		{
+			// Both folder modes own the type condition themselves and the literal whitelist cannot
+			// express it: a task chat ('X') is not in ALLOWED_SEARCH_CHAT_TYPES at all. This takes nothing away
+			// from a descendant with a narrower whitelist: the option is read by the default mode
+			// only, while a descendant narrows itself through the options it sets on construction,
+			// and those are left untouched here.
+			unset($options[SearchOptions::SEARCH_CHAT_TYPES_OPTION]);
+
+			return $options;
+		}
+
 		if (isset($options[SearchOptions::SEARCH_CHAT_TYPES_OPTION]))
 		{
 			$options[SearchOptions::SEARCH_CHAT_TYPES_OPTION] = $this->filterAllowedChatTypes($options[SearchOptions::SEARCH_CHAT_TYPES_OPTION]);
@@ -122,7 +142,20 @@ class RecentProvider extends BaseProvider
 	{
 		global $USER;
 
-		return $USER->IsAuthorized();
+		if (!$USER->IsAuthorized())
+		{
+			return false;
+		}
+
+		// The only gate of the folder mode: this path skips the prefilters of the module, and
+		// Entity::create() asks the provider before anything else - so one check closes both the
+		// search and the filling of the list before the first keystroke.
+		if ($this->searchOptions->isFolderScopeMode())
+		{
+			return $this->resolveFolderScopeSelection() !== null;
+		}
+
+		return true;
 	}
 
 	public function doSearch(SearchQuery $searchQuery, Dialog $dialog): void
@@ -670,8 +703,16 @@ class RecentProvider extends BaseProvider
 				->apply($query);
 		}
 
-		$chatTypeCondition = $this->searchOptions->getChatTypeCondition() ?? new TypeCondition(include: []);
-		$query->where((new TypeFilter($chatTypeCondition, 'TYPE', 'ENTITY_TYPE'))->toConditionTree());
+		if ($this->searchOptions->isFolderScopeMode())
+		{
+			$query->where($this->getFolderScopeFilter()->toConditionTree());
+			$this->applyFolderScopeParentChainFilter($query);
+		}
+		else
+		{
+			$chatTypeCondition = $this->searchOptions->getChatTypeCondition() ?? new TypeCondition(include: []);
+			$query->where((new TypeFilter($chatTypeCondition, 'TYPE', 'ENTITY_TYPE'))->toConditionTree());
+		}
 
 		if ($this->searchOptions->shouldFilterByNullEntityType())
 		{
@@ -705,11 +746,91 @@ class RecentProvider extends BaseProvider
 
 	private function shouldApplyParentChainFilter(): bool
 	{
+		// folder mode checks the chain on its own, see applyFolderScopeParentChainFilter()
+		if ($this->searchOptions->isFolderScopeMode())
+		{
+			return false;
+		}
+
 		return $this->searchOptions->getParentId() !== 0;
+	}
+
+	/**
+	 * In folder mode a branch reaching nested chats shares the query with branches framed to the
+	 * root, so the chain is not joined to every row: a root chat passes on its PARENT_ID alone,
+	 * and only a nested one is checked, by a subquery correlated on the chat id.
+	 *
+	 * The subquery runs for every matching nested chat of such a branch, before the membership
+	 * filter: it pays off while those are few among the matches, and the joins would cost less
+	 * only if nested chats dominated them.
+	 */
+	private function applyFolderScopeParentChainFilter(Query $query): void
+	{
+		// while every branch is framed to the root, there is no nested chat to check
+		if (!$this->getFolderScopeFilter()->containsNestedChats())
+		{
+			return;
+		}
+
+		$chainQuery = ChatTable::query()
+			->setCustomBaseTableAlias(self::PARENT_CHAIN_ALIAS)
+			->setSelect([new ExpressionField('CHAIN_ACCESSIBLE', '1')])
+			->where('ID', new SqlExpression('%s'))
+		;
+		ServiceLocator::getInstance()->get(ParentChainFilterFactory::class)
+			->forUser($this->getContext()->getUserId(), TreeOrigin::forChat())
+			->apply($chainQuery);
+
+		$query->where(
+			Query::filter()
+				->logic('or')
+				->whereNull('PARENT_ID')
+				->where('PARENT_ID', 0)
+				->whereExpr("EXISTS ({$chainQuery->getQuery()})", ['ID'])
+		);
+	}
+
+	/**
+	 * An unavailable scope expands into nothing, and the translator writes that as a false
+	 * condition. In production this is unreachable - {@see self::isAvailable()} closes the path
+	 * before the query is built - but it keeps a direct call to the provider from widening the
+	 * result set instead of emptying it.
+	 */
+	private function getFolderScopeFilter(): SelectionSearchFilter
+	{
+		return new SelectionSearchFilter(
+			$this->resolveFolderScopeSelection() ?? new Selection(),
+			new SelectionSearchFields(
+				typeField: 'TYPE',
+				entityTypeField: 'ENTITY_TYPE',
+				chatIdField: 'ID',
+				parentField: 'PARENT_ID',
+			),
+		);
+	}
+
+	private function resolveFolderScopeSelection(): ?Selection
+	{
+		$this->folderSearchScope ??= new FolderSearchScope(
+			ServiceLocator::getInstance()->get(FolderProvider::class)
+		);
+
+		return $this->folderSearchScope->resolve(
+			$this->searchOptions->getFolderScopeId(),
+			$this->getContext()->getUserId(),
+		);
 	}
 
 	private function getRelationFilter(): ConditionTree
 	{
+		// A personal folder holds only chats the user is in, so an open chat is not offered for
+		// discovery here. A hidden relation is membership too - unlike IS_MEMBER, which counts it as
+		// a non-member to hide the dates of such a chat.
+		if ($this->searchOptions->isFolderEligibleMode())
+		{
+			return Query::filter()->whereNotNull('RELATION.USER_ID');
+		}
+
 		$relationFilter = Query::filter()
 			->whereNotNull('RELATION.USER_ID')
 			->where('RELATION.IS_HIDDEN', 'N')
@@ -783,6 +904,11 @@ class RecentProvider extends BaseProvider
 
 		$query->where($this->getIntranetFilter());
 
+		if ($this->searchOptions->shouldExcludeCurrentUser())
+		{
+			$query->whereNot('ID', $this->getContext()->getUserId());
+		}
+
 		if ($this->searchOptions->shouldExcludeGuests())
 		{
 			$query->where(
@@ -855,7 +981,8 @@ class RecentProvider extends BaseProvider
 	private function needAddFavoriteChat(array $foundUserItems): bool
 	{
 		return
-			!isset($foundUserItems[$this->getContext()->getUserId()])
+			!$this->searchOptions->shouldExcludeCurrentUser()
+			&& !isset($foundUserItems[$this->getContext()->getUserId()])
 			&& isset($this->originalSearchString)
 			&& static::isPhraseFoundBySearchQuery(Chat\FavoriteChat::getTitlePhrase(), $this->originalSearchString)
 		;

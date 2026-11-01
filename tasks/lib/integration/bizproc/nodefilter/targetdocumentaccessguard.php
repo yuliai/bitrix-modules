@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Tasks\Integration\BizProc\NodeFilter;
 
+use Bitrix\Tasks\Access\Model\TaskModel;
 use Bitrix\Tasks\Access\TaskAccessController;
 
 final class TargetDocumentAccessGuard
@@ -13,6 +14,7 @@ final class TargetDocumentAccessGuard
 		array $resolvedDocumentId,
 		string $action,
 		int $actorId,
+		?TaskModel $updatedTask = null,
 	): ?bool
 	{
 		if (!self::isEnabled())
@@ -31,7 +33,7 @@ final class TargetDocumentAccessGuard
 			return false;
 		}
 
-		return TaskAccessController::can($actorId, $action, $taskId);
+		return TaskAccessController::can($actorId, $action, $taskId, $updatedTask);
 	}
 
 	/**

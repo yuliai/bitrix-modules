@@ -2,6 +2,9 @@
 
 namespace Bitrix\Crm\Service\Timeline\Item\LogMessage;
 
+use Bitrix\Crm\Integration\Tasks\TaskAccessController;
+use Bitrix\Crm\Integration\Tasks\TaskObject;
+use Bitrix\Crm\Integration\Tasks\TaskPathMaker;
 use Bitrix\Crm\Service\Timeline\Context;
 use Bitrix\Crm\Service\Timeline\Item\Model;
 use Bitrix\Crm\Service\Timeline\Layout\Action\Redirect;
@@ -118,6 +121,11 @@ class SignB2eDocument extends LogMessage
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CONFIGURATION_ERROR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_CONFIGURE_ERROR_TITLE'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULLED_TITLE'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULMENT_CANCELED_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ACCEPTED_AUTOMATICALLY => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ACCEPTED_AUTOMATICALLY_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_APPROVED_BY_REPRESENTATIVE => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_APPROVED_BY_REPRESENTATIVE_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CANCELED_BY_REPRESENTATIVE => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_CANCELED_BY_REPRESENTATIVE_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_PROCESSING_TASK_CREATED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_PROCESSING_TASK_CREATED_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_PROCESSING_TASK_FAILED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_PROCESSING_TASK_FAILED_TITLE'),
 			default => null,
 		};
 	}
@@ -208,7 +216,110 @@ class SignB2eDocument extends LogMessage
 			$blocks['initiator'] = $this->getAnnulmentInitiatorBlock();
 		}
 
+		// Like the invitation message, the tails are shown in the timeline of the document itself
+		// only: the record is bound to other cards too, and their readers may not read the document.
+		if (
+			$this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CANCELED_BY_REPRESENTATIVE
+			&& $this->isItemAboutCurrentEntity()
+		)
+		{
+			$blocks['cancelReason'] = $this->getCancelReasonBlock();
+		}
+
+		if (
+			$this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_PROCESSING_TASK_CREATED
+			&& $this->isItemAboutCurrentEntity()
+		)
+		{
+			$blocks['processingTask'] = $this->getProcessingTaskBlock();
+		}
+
 		return array_filter($blocks);
+	}
+
+	/**
+	 * Reason a representative gave while cancelling the document. A person types it, so it is
+	 * rendered the way the message attached to an invitation is: as plain text.
+	 *
+	 * An entry with no reason stored keeps the record without the block - the verdict itself is
+	 * in the title and stands on its own.
+	 */
+	private function getCancelReasonBlock(): ?Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		$reason = trim((string)$this->loadDocumentData()->getCancelReason());
+		if ($reason === '')
+		{
+			return null;
+		}
+
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setWordWrap()
+			->setFixedWidth(false)
+			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_CANCEL_REASON_TITLE'))
+			->setContentBlock(
+				(new Layout\Body\ContentBlock\Text())
+					->setValue($this->preserveTypedText($reason))
+					->setIsMultiline()
+			)
+		;
+	}
+
+	/**
+	 * Task the record points at. The title is the one stored with the entry, the address is
+	 * resolved against the task itself - so a task without an address leaves the title as text
+	 * instead of a link that leads nowhere. A reader who may not read the task, a task that is gone
+	 * and a portal without the tasks module get the fact alone, without the title.
+	 *
+	 * A document has one such record, and the block is built in its own timeline only, so the task
+	 * is read once per card.
+	 */
+	private function getProcessingTaskBlock(): ?Layout\Body\ContentBlock
+	{
+		$documentData = $this->loadDocumentData();
+		$title = trim((string)$documentData->getProcessingTaskTitle());
+		$taskId = (int)$documentData->getProcessingTaskId();
+		if ($title === '' || $taskId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->canReadProcessingTask($taskId))
+		{
+			return (new Layout\Body\ContentBlock\Text())
+				->setValue(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_PROCESSING_TASK_NO_ACCESS'))
+			;
+		}
+
+		$path = $this->getProcessingTaskPath($taskId);
+		if ($path === null)
+		{
+			return (new Layout\Body\ContentBlock\Text())->setValue($title);
+		}
+
+		return (new Layout\Body\ContentBlock\Link())
+			->setValue($title)
+			->setAction(new Redirect(new Uri($path)))
+		;
+	}
+
+	protected function canReadProcessingTask(int $taskId): bool
+	{
+		return TaskAccessController::canRead($taskId, $this->getContext()->getUserId());
+	}
+
+	/**
+	 * TaskPathMaker reads the task to choose between the group and the personal context, and a
+	 * task that is no longer there takes it down with itself, so it is asked for first.
+	 */
+	protected function getProcessingTaskPath(int $taskId): ?string
+	{
+		if (TaskObject::getObject($taskId) === null)
+		{
+			return null;
+		}
+
+		return TaskPathMaker::getPathMaker($taskId, $this->getContext()->getUserId())?->makeEntityPath();
 	}
 
 	private function getGoskeyOrderIdBlock(string $goskeyOrderId): Layout\Body\ContentBlock\ContentBlockWithTitle

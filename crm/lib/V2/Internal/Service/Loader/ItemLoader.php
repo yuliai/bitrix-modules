@@ -8,13 +8,13 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\V2\Public\Entity\Item\ContactBinding;
 use Bitrix\Crm\V2\Public\Entity\Item\CompanyBinding;
 use Bitrix\Crm\V2\Public\Entity\Item\Company;
-use Bitrix\Crm\V2\Public\Entity\Item\Contact;
 use Bitrix\Crm\V2\Public\Entity\Item\Item;
 use Bitrix\Crm\V2\Public\EntityType;
 use Bitrix\Crm\V2\Public\EntityTypeSettings;
 use Bitrix\Crm\V2\Public\Provider\Item\AccessMode;
 use Bitrix\Crm\V2\Public\Provider\Item\CompanyProvider;
 use Bitrix\Crm\V2\Public\Provider\Item\ItemProvider;
+use Bitrix\Crm\V2\Public\Provider\Item\Param\ItemFilter;
 use Bitrix\Crm\V2\Public\Provider\Item\Param\ItemSelect;
 use Bitrix\Crm\V2\Internal\Service\Item\ItemFieldMapper;
 
@@ -52,29 +52,25 @@ class ItemLoader
 			return;
 		}
 
-		$loadedItemsByEntityType = [];
-		foreach ($this->collectIdsByEntityType($relatedFieldMap) as $entityTypeId => $ids)
+		[$groups, $groupKeysByField] = $this->collectRelationGroups($relatedFieldMap, $select);
+		$loadedItemsByGroup = [];
+		foreach ($groups as $groupKey => $group)
 		{
+			$entityTypeId = $group['entityTypeId'];
 			$entityType = EntityType::fromId($entityTypeId);
-			$loadedItemsByEntityType[$entityTypeId] = [];
-			$relatedItemSelect = $this->getRelatedItemSelect($select, $entityTypeId);
-			foreach (array_chunk(array_keys($ids), self::BATCH_SIZE) as $idsChunk)
+			$loadedItemsByGroup[$groupKey] = [];
+			$relatedItemSelect = $this->getRelatedItemSelect($select, $entityTypeId, $group['relationNames']);
+			foreach (array_chunk(array_keys($group['ids']), self::BATCH_SIZE) as $idsChunk)
 			{
-				foreach ($this->loadRelatedItems($entityType, $idsChunk, $relatedItemSelect) as $loadedItem)
+				$loadedItems = $group['allowedCategoryIds'] === null
+					? $this->loadRelatedItems($entityType, $idsChunk, $relatedItemSelect)
+					: $this->loadRelatedItemsInCategories($entityType, $idsChunk, $relatedItemSelect, $group['allowedCategoryIds']);
+				foreach ($loadedItems as $loadedItem)
 				{
-					if (
-						$entityType->getId() === EntityType::contact()->getId()
-						&& $loadedItem instanceof Contact
-						&& $loadedItem->getCategoryId() !== 0
-					)
-					{
-						continue;
-					}
-
 					$loadedItemId = $loadedItem->getId();
 					if ($loadedItemId !== null)
 					{
-						$loadedItemsByEntityType[$entityTypeId][$loadedItemId] = $loadedItem;
+						$loadedItemsByGroup[$groupKey][$loadedItemId] = $loadedItem;
 					}
 				}
 			}
@@ -84,7 +80,13 @@ class ItemLoader
 		{
 			foreach ($relatedByOwner as $ownerId => $relatedDescriptor)
 			{
-				$value = $this->resolveLoadedRelationValue($loadedItemsByEntityType, $relatedDescriptor);
+				$groupKey = $groupKeysByField[$fieldName] ?? null;
+				$value = $groupKey === null
+					? []
+					: $this->resolveLoadedRelationValue(
+						[$relatedDescriptor['entityTypeId'] => $loadedItemsByGroup[$groupKey]],
+						$relatedDescriptor,
+					);
 				if (!$relatedDescriptor['multiple'])
 				{
 					$value = $value[0] ?? null;
@@ -100,6 +102,31 @@ class ItemLoader
 		return ItemProvider::forEntityType($entityType)
 			->withAccessCheck($this->userId, AccessMode::Restricted)
 			->getByIds($ids, $select)
+		;
+	}
+
+	/**
+	 * @param int[] $ids
+	 * @param int[] $allowedCategoryIds
+	 */
+	protected function loadRelatedItemsInCategories(
+		EntityType $entityType,
+		array $ids,
+		ItemSelect $select,
+		array $allowedCategoryIds,
+	): iterable
+	{
+		if ($allowedCategoryIds === [])
+		{
+			return [];
+		}
+
+		return ItemProvider::forEntityType($entityType)
+			->withAccessCheck($this->userId, AccessMode::Restricted)
+			->getList($select, new ItemFilter([
+				'@id' => $ids,
+				'@categoryId' => $allowedCategoryIds,
+			]))
 		;
 	}
 
@@ -369,13 +396,20 @@ class ItemLoader
 
 	/**
 	 * @param array<string, array<int, array{owner: Item, entityTypeId: int|null, ids: int[], multiple: bool}>> $relatedFieldMap
-	 * @return array<int, array<int, true>>
+	 * @return array{0: array<string, array{entityTypeId: int, allowedCategoryIds: int[]|null, relationNames: string[], ids: array<int, true>}>, 1: array<string, string>}
 	 */
-	private function collectIdsByEntityType(array $relatedFieldMap): array
+	private function collectRelationGroups(array $relatedFieldMap, ItemSelect $select): array
 	{
-		$result = [];
-		foreach ($relatedFieldMap as $relatedByOwner)
+		$groups = [];
+		$groupKeysByField = [];
+		$selectByField = $select->getRelatedCrmObjects();
+		foreach ($relatedFieldMap as $fieldName => $relatedByOwner)
 		{
+			$allowedCategoryIds = $selectByField[$fieldName]['allowedCategoryIds'] ?? null;
+			if ($allowedCategoryIds !== null)
+			{
+				sort($allowedCategoryIds);
+			}
 			foreach ($relatedByOwner as $relatedDescriptor)
 			{
 				$entityTypeId = $relatedDescriptor['entityTypeId'];
@@ -383,18 +417,33 @@ class ItemLoader
 				{
 					continue;
 				}
+				$groupKey = $entityTypeId . ':' . ($allowedCategoryIds === null ? '*' : implode(',', $allowedCategoryIds));
+				$groupKeysByField[$fieldName] = $groupKey;
+				$groups[$groupKey] ??= [
+					'entityTypeId' => $entityTypeId,
+					'allowedCategoryIds' => $allowedCategoryIds,
+					'relationNames' => [],
+					'ids' => [],
+				];
+				$groups[$groupKey]['relationNames'][$fieldName] = $fieldName;
 
 				foreach ($relatedDescriptor['ids'] as $id)
 				{
 					if ($id > 0)
 					{
-						$result[$entityTypeId][$id] = true;
+						$groups[$groupKey]['ids'][$id] = true;
 					}
 				}
 			}
 		}
 
-		return $result;
+		foreach ($groups as &$group)
+		{
+			$group['relationNames'] = array_values($group['relationNames']);
+		}
+		unset($group);
+
+		return [$groups, $groupKeysByField];
 	}
 
 	/**

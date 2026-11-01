@@ -4,6 +4,7 @@ namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\CultureFormatter;
+use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\SqlExecutionContext;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\User;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorEventLogger;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorLogger;
@@ -37,6 +38,7 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_CHANGE_BI_TOKEN_SUPERSET = '/instance/changeToken';
 	private const PROXY_ACTION_REFRESH_DOMAIN_CONNECTION = '/instance/refreshDomain';
 	private const PROXY_ACTION_CLEAR_CACHE = '/instance/clearCache';
+	private const PROXY_ACTION_CLEAR_PERMISSION_CACHE = '/instance/clearPermissionCache';
 	private const PROXY_ACTION_TIMEZONE_SET = '/timezone/set';
 	private const PROXY_ACTION_LIST_DASHBOARD = '/dashboard/list';
 	private const PROXY_ACTION_DASHBOARD_DETAIL = '/dashboard/get';
@@ -84,9 +86,29 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_GET_FILTER_VALUES = '/dashboard/getFilterValues';
 	private const PROXY_ACTION_LIST_CHART = '/chart/list';
 	private const PROXY_ACTION_LIST_DATASET = '/dataset/list';
+	private const PROXY_ACTION_LIST_PHYSICAL_DATASET = '/dataset/listPhysical';
 
 	private const PROXY_EXTENDED_STREAM_TIMEOUT = 90;
 	private const PROXY_DEMO_STREAM_TIMEOUT = 8;
+
+	/**
+	 * Timeouts of the permission cache reset. The connection bound is short - the reset carries no data and is
+	 * sent from the background job of an ordinary hit, so a person saving a role or a role relation waits out
+	 * whatever this call waits out, and an instance that does not answer at all has to cost them seconds.
+	 *
+	 * The answer bound is deliberately NOT short, and this is the non-obvious half. A slow but successful reset
+	 * must not be written down as a failure: the mark then stays pending and the tail agent re-sends it every
+	 * retry window for as long as the scan stays slow, so the cost of giving up too early is paid over and over.
+	 *
+	 * The service bounds each operation of its own and not the call, so the call as a whole has no upper bound
+	 * there and this value is the only one there is. Two consequences follow and neither is visible from here.
+	 * We give up first, and the service keeps scanning after we do - a repeat then lays a second scan over the
+	 * first on the shared cache of the engine. And there is no external number to stay above: the value is
+	 * chosen so that an ordinary reset, whose keys number the users of the portal, finishes well inside it. A
+	 * call that does not is a malfunction rather than a large portal.
+	 */
+	private const PERMISSION_CACHE_RESET_SOCKET_TIMEOUT = 5;
+	private const PERMISSION_CACHE_RESET_STREAM_TIMEOUT = 30;
 	static private self $instance;
 
 	private Sender $sender;
@@ -102,7 +124,7 @@ class ProxyIntegrator implements IntegratorInterface
 		return self::$instance;
 	}
 
-	private function createDefaultRequest(string $action): IntegratorRequest
+	protected function createDefaultRequest(string $action): IntegratorRequest
 	{
 		$statusContainer = new SupersetStatusOptionContainer();
 
@@ -222,7 +244,7 @@ class ProxyIntegrator implements IntegratorInterface
 	/**
 	 * Returns filtered list of dashboards from Superset.
 	 *
-	 * @param array $filter Proxy filter params. Allowed keys: ids, neqIds.
+	 * @param array $filter Proxy filter params. Allowed keys: ids, neqIds, ownedByRequestUser.
 	 * @return IntegratorResponse<Dto\DashboardList>
 	 */
 	public function getDashboardListByFilter(array $filter = []): IntegratorResponse
@@ -238,6 +260,12 @@ class ProxyIntegrator implements IntegratorInterface
 			$requestFilter['neqIds'] = $filter['neqIds'];
 		}
 
+		$ownedByRequestUser = !empty($filter['ownedByRequestUser']);
+		if ($ownedByRequestUser)
+		{
+			$requestFilter['ownedByRequestUser'] = true;
+		}
+
 		$response =
 			$this
 				->createDefaultRequest(self::PROXY_ACTION_LIST_DASHBOARD)
@@ -245,20 +273,40 @@ class ProxyIntegrator implements IntegratorInterface
 				->perform()
 		;
 
+		if ($ownedByRequestUser && !$response->hasErrors() && !$this->isOwnerFilterApplied($response))
+		{
+			return new IntegratorResponse(
+				status: IntegratorResponse::STATUS_NO_ACCESS,
+				errors: [new Error('Owner filter of the dashboard list was not applied by the proxy')],
+			);
+		}
+
 		return $this->parseDashboardListResponse($response);
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function getDashboardById(int $dashboardId): IntegratorResponse
+	public function getDashboardById(
+		int $dashboardId,
+		int $streamTimeout = 0,
+		bool $arbitrateServiceFailure = true,
+	): IntegratorResponse
 	{
-		$response =
+		$request =
 			$this
-				->createDefaultRequest(self::PROXY_ACTION_DASHBOARD_DETAIL)
+				->createDashboardDetailRequest($arbitrateServiceFailure)
 				->setParams(['id' => $dashboardId])
-				->perform()
 		;
+
+		if ($streamTimeout > 0)
+		{
+			$request->setSenderHttpClientParams([
+				'streamTimeout' => $streamTimeout,
+			]);
+		}
+
+		$response = $request->perform();
 
 		if ($response->hasErrors())
 		{
@@ -292,6 +340,28 @@ class ProxyIntegrator implements IntegratorInterface
 		}
 
 		return $response->setData($dashboard);
+	}
+
+	private function createDashboardDetailRequest(bool $arbitrateServiceFailure): IntegratorRequest
+	{
+		return $this->createArbitratedRequest(self::PROXY_ACTION_DASHBOARD_DETAIL, $arbitrateServiceFailure);
+	}
+
+	/**
+	 * The arbiter keeps its place at the end of the after-pipeline: it is re-added, not reordered.
+	 */
+	private function createArbitratedRequest(string $action, bool $arbitrateServiceFailure): IntegratorRequest
+	{
+		$request = $this->createDefaultRequest($action);
+		if (!$arbitrateServiceFailure)
+		{
+			$request
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->addAfter(new Middleware\StatusArbiter($this->logger, arbitrateServiceFailure: false))
+			;
+		}
+
+		return $request;
 	}
 
 	/**
@@ -732,6 +802,23 @@ class ProxyIntegrator implements IntegratorInterface
 		return $this->createDefaultRequest(self::PROXY_ACTION_CLEAR_CACHE)->perform();
 	}
 
+	/**
+	 * @inheritDoc
+	 */
+	public function clearPermissionCache(): IntegratorResponse
+	{
+		return $this
+			->createDefaultRequest(self::PROXY_ACTION_CLEAR_PERMISSION_CACHE)
+			->removeBefore(Middleware\UserAccess::getMiddlewareId())
+			->removeBefore(Middleware\RequiredDatasetSync::getMiddlewareId())
+			->setSenderHttpClientParams([
+				'socketTimeout' => self::PERMISSION_CACHE_RESET_SOCKET_TIMEOUT,
+				'streamTimeout' => self::PERMISSION_CACHE_RESET_STREAM_TIMEOUT,
+			])
+			->perform()
+		;
+	}
+
 	public function setTimezone(string $timezone): IntegratorResponse
 	{
 		return $this
@@ -992,6 +1079,29 @@ class ProxyIntegrator implements IntegratorInterface
 	/**
 	 * @inheritDoc
 	 */
+	public function getPhysicalDatasetList(): IntegratorResponse
+	{
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_PHYSICAL_DATASET)
+				->removeBefore(Middleware\UserAccess::getMiddlewareId())
+				->removeBefore(Middleware\RequiredDatasetSync::getMiddlewareId())
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		return $response->setData($resultData['datasets'] ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
 	public function getDatasetById(int $id): IntegratorResponse
 	{
 		$requestParams = [
@@ -1163,9 +1273,13 @@ class ProxyIntegrator implements IntegratorInterface
 	/**
 	 * @inheritDoc
 	 */
-	public function executeSql(string $sql, ?int $limit = null): IntegratorResponse
+	public function executeSql(
+		string $sql,
+		?int $limit = null,
+		?SqlExecutionContext $context = null,
+	): IntegratorResponse
 	{
-		if (!self::isAiToolsFeatureEnabled())
+		if (!($context?->isRest() ?? false) && !self::isAiToolsFeatureEnabled())
 		{
 			return self::aiToolsDisabledResponse();
 		}
@@ -1176,9 +1290,14 @@ class ProxyIntegrator implements IntegratorInterface
 			$params['limit'] = $limit;
 		}
 
+		$request = $this->createDefaultRequest(self::PROXY_ACTION_SQLLAB_EXECUTE);
+		if ($context !== null)
+		{
+			$request->setUser($context->user);
+		}
+
 		$response =
-			$this
-				->createDefaultRequest(self::PROXY_ACTION_SQLLAB_EXECUTE)
+			$request
 				->setParams($params)
 				->setSenderHttpClientParams([
 					'streamTimeout' => self::PROXY_EXTENDED_STREAM_TIMEOUT,
@@ -1273,6 +1392,16 @@ class ProxyIntegrator implements IntegratorInterface
 		if (isset($fields['columns']))
 		{
 			$parameters['columns'] = $fields['columns'];
+		}
+
+		if (isset($fields['description']))
+		{
+			$parameters['description'] = $fields['description'];
+		}
+
+		if (isset($fields['verbose_name']))
+		{
+			$parameters['verbose_name'] = $fields['verbose_name'];
 		}
 
 		return
@@ -1457,6 +1586,8 @@ class ProxyIntegrator implements IntegratorInterface
 		array $sort = [],
 		?int $limit = null,
 		int $offset = 0,
+		bool $arbitrateServiceFailure = true,
+		?User $user = null,
 	): IntegratorResponse
 	{
 		if (!self::isAiToolsFeatureEnabled())
@@ -1490,14 +1621,19 @@ class ProxyIntegrator implements IntegratorInterface
 			}
 		}
 
-		return $this
-			->createDefaultRequest(self::PROXY_ACTION_GET_DASHBOARD_OVERVIEW)
+		$request = $this
+			->createArbitratedRequest(self::PROXY_ACTION_GET_DASHBOARD_OVERVIEW, $arbitrateServiceFailure)
 			->setParams($params)
 			->setSenderHttpClientParams([
 				'streamTimeout' => $streamTimeout,
 			])
-			->perform()
 		;
+		if ($user !== null)
+		{
+			$request->setUser($user);
+		}
+
+		return $request->perform();
 	}
 
 	public function getFilterValues(
@@ -1508,6 +1644,7 @@ class ProxyIntegrator implements IntegratorInterface
 		?string $search = null,
 		?int $limit = null,
 		int $streamTimeout = 60,
+		bool $arbitrateServiceFailure = true,
 	): IntegratorResponse
 	{
 		if (!self::isAiToolsFeatureEnabled())
@@ -1537,7 +1674,7 @@ class ProxyIntegrator implements IntegratorInterface
 		}
 
 		return $this
-			->createDefaultRequest(self::PROXY_ACTION_GET_FILTER_VALUES)
+			->createArbitratedRequest(self::PROXY_ACTION_GET_FILTER_VALUES, $arbitrateServiceFailure)
 			->setParams($params)
 			->setSenderHttpClientParams([
 				'streamTimeout' => $streamTimeout,
@@ -1837,6 +1974,13 @@ class ProxyIntegrator implements IntegratorInterface
 	private static function normalizeExpirationTimestamp(?Date $date): int
 	{
 		return $date?->getTimestamp() ?? 0;
+	}
+
+	private function isOwnerFilterApplied(IntegratorResponse $response): bool
+	{
+		$data = $response->getData();
+
+		return is_array($data) && ($data['owner_filter_applied'] ?? null) === true;
 	}
 
 	/**

@@ -2450,6 +2450,7 @@ class TaskFilterBuilder
 	}
 
 	/**
+	 * @throws InvalidFilterException
 	 * @throws ObjectException
 	 */
 	private function translateUfFilter(string $field, string $operation, $fieldValues, bool $needEscape = true): array
@@ -2464,6 +2465,14 @@ class TaskFilterBuilder
 		if (!is_array($fieldValues))
 		{
 			$fieldValues = [$fieldValues];
+		}
+
+		foreach ($fieldValues as $value)
+		{
+			if (is_array($value))
+			{
+				throw new InvalidFilterException('Nested arrays are not allowed in user field filters');
+			}
 		}
 
 		foreach ($fieldValues as $value)

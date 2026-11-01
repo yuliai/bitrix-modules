@@ -14,6 +14,14 @@ use Bitrix\StaffTrackMobile\Public\Features\CheckInFeature;
 
 class CheckInOnboardingProvider
 {
+	public const GEO_AHA_STATE_SHOWN = 'shown';
+	public const GEO_AHA_STATE_PENDING = 'pending';
+
+	private const GEO_AHA_STATES = [
+		self::GEO_AHA_STATE_SHOWN,
+		self::GEO_AHA_STATE_PENDING,
+	];
+
 	private const MAX_SHOWS = 4;
 	private const SHOW_INTERVAL_SECONDS = 7 * 86400;
 
@@ -189,6 +197,36 @@ class CheckInOnboardingProvider
 			$userId,
 			Option::CHECKIN_ONBOARDING_EMPLOYEE_AHA_RESUME,
 			(string)$index,
+		);
+
+		$this->optionProvider->invalidateCache($userId);
+	}
+
+	public function getEmployeeGeoAhaState(int $userId): ?string
+	{
+		$state = $this->getOptionValue($userId, Option::CHECKIN_ONBOARDING_EMPLOYEE_GEO_AHA_STATE);
+
+		return in_array($state, self::GEO_AHA_STATES, true) ? $state : null;
+	}
+
+	public function setEmployeeGeoAhaState(int $userId, string $state): void
+	{
+		if (!in_array($state, self::GEO_AHA_STATES, true))
+		{
+			return;
+		}
+
+		$currentState = $this->getEmployeeGeoAhaState($userId);
+
+		if ($currentState === $state || $currentState === self::GEO_AHA_STATE_SHOWN)
+		{
+			return;
+		}
+
+		$this->optionService->save(
+			$userId,
+			Option::CHECKIN_ONBOARDING_EMPLOYEE_GEO_AHA_STATE,
+			$state,
 		);
 
 		$this->optionProvider->invalidateCache($userId);

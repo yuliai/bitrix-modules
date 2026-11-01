@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\RepeatSale\Widget;
 
 use Bitrix\Bitrix24\LicenseScanner\Manager;
+use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
 use Bitrix\Crm\RepeatSale\Statistics\PeriodType;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Router\Page\RepeatSale;
@@ -93,10 +94,11 @@ final class WidgetManager
 				return null;
 			}
 
-			$isNeedShowStartBanner = (new StartBanner())->isNeedShowImmediately();
+			$hasClients = RepeatSaleSegmentController::getInstance()->getFoundClientsCount() > 0;
+			$isNeedShowStartBanner = $hasClients && (new StartBanner())->isNeedShowImmediately();
 
 			return [
-				'type' => $availabilityChecker->isForceMode() ? 'forceStart' : 'start',
+				'type' => $hasClients && $availabilityChecker->isForceMode() ? 'forceStart' : 'start',
 				'executeImmediately' => $isNeedShowStartBanner && !Config::isToursDeactivated('crm.tour'),
 				'showSettingsButton' => $showSettingsButton,
 			];

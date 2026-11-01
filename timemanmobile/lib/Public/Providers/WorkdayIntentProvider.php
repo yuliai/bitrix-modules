@@ -9,10 +9,12 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Mobile\Config\Feature;
 use Bitrix\Timeman\Helper\TimeHelper;
 use Bitrix\Timeman\Service\DependencyManager;
 use Bitrix\Timeman\V2\Public\Command\RecordIntent\RegisterOutcomeCommand;
 use Bitrix\Timeman\V2\Public\Command\RecordIntent\RegisterShowCommand;
+use Bitrix\Timeman\V2\Public\Command\RecordIntent\SuppressPeriodCommand;
 use Bitrix\Timeman\V2\Public\Dto\RecordIntent\RecordIntentSchedule;
 use Bitrix\Timeman\V2\Public\Dto\Schedule\Schedule;
 use Bitrix\Timeman\V2\Public\Dto\Shift\Shift;
@@ -27,17 +29,22 @@ use Bitrix\TimemanMobile\Internal\Dto\WorkdayIntentScheduleDto;
 use Bitrix\TimemanMobile\Internal\Integration\Bizproc\Providers\DayPlanBotProvider;
 use Bitrix\TimemanMobile\Internal\Integration\Intranet\UserAbsence;
 use Bitrix\TimemanMobile\Internal\Integration\Stafftrack\Provider\CheckInSettingsProvider;
+use Bitrix\TimemanMobile\Public\Features\WorkReportsWithAiFeature;
 
 class WorkdayIntentProvider
 {
 	private const INTENT_WORKDAY = 'WORKDAY';
 	private const INTENT_WEEKEND = 'WEEKEND';
 	private const ABSENCE_INTENT_IDS = ['LEAVEUNPAYED', 'VACATION', 'LEAVESICK'];
+	private const SUPPRESS_REASON_DAY_OFF = 'dayOff';
+	private const SUPPRESS_REASON_ABSENCE = 'absence';
 
 	private ?int $userId;
 	private ServiceLocator $locator;
 	private ?RecordIntentProvider $recordIntentProvider = null;
 	private ?ShiftCollection $nearestShiftCollection = null;
+	private ?\Throwable $nearestShiftReadError = null;
+	private ?array $absenceTypesOnUserDay = null;
 
 	public function __construct()
 	{
@@ -83,8 +90,7 @@ class WorkdayIntentProvider
 	public function canOpenWorkdayIntentBox(): bool
 	{
 		return
-			$this->canUseTimeman()
-			&& $this->canManageWorktimeOnMobile()
+			$this->hasIntentBaseAdmission()
 			&& $this->canStartWorkday()
 		;
 	}
@@ -94,9 +100,13 @@ class WorkdayIntentProvider
 	 */
 	public function getWorkdayIntentBoxData(): WorkdayIntentBoxDto
 	{
-		if (!$this->hasIntentBaseAdmission())
+		$admissionFailure = null;
+		if (!$this->hasIntentBaseAdmission($admissionFailure))
 		{
-			return WorkdayIntentBoxDto::make(['canOpen' => false]);
+			return WorkdayIntentBoxDto::make([
+				'canOpen' => false,
+				'suppressReason' => $admissionFailure,
+			]);
 		}
 
 		$recordIntentSchedule = $this->getRecordIntentProvider()->getSchedule($this->userId);
@@ -111,6 +121,35 @@ class WorkdayIntentProvider
 			]);
 		}
 
+		// Daily conditions come after the show window: they read schedules and absences from the
+		// database, while every check above is cheap and the client asks on every foreground return.
+		try
+		{
+			$suppressReason = $this->resolveDailySuppressReason();
+		}
+		catch (\Throwable)
+		{
+			// fail-open: a broken timeman/intranet must not hide the box for the whole company
+			$suppressReason = null;
+		}
+
+		if ($suppressReason !== null)
+		{
+			// A refusal suppresses the show window on the timeman side, so the next forced reads stop
+			// at the cheap gate instead of re-running the daily conditions all day long.
+			$suppressed = $this->suppressPeriod($recordIntentSchedule);
+
+			return WorkdayIntentBoxDto::make([
+				'canOpen' => false,
+				'suppressReason' => $suppressReason,
+				// Without the write there is nothing to reschedule by: no schedule postpones the
+				// client to the next local day instead of an hourly retry over the same conditions.
+				'schedule' => $suppressed === null
+					? null
+					: WorkdayIntentScheduleDto::make($suppressed->toArray()),
+			]);
+		}
+
 		$intentList = $this->getIntents();
 
 		return WorkdayIntentBoxDto::make([
@@ -118,13 +157,23 @@ class WorkdayIntentProvider
 			'intentList' => $intentList,
 			'shifts' => $this->getNearestShifts(),
 			'preselectedIntentId' => $this->resolvePreselectedIntentId($intentList),
-			'chatIdWithAiAdvice' => DayPlanBotProvider::getBotId(),
+			'chatIdWithAiAdvice' => $this->getChatIdWithAiAdvice(),
 			'isDayStartCheckInEnabled' => (
 				CheckInSettingsProvider::isCheckInEnabled()
 				&& $this->locator->get(SettingsProvider::class)->isDayStartCheckInEnabled()
 			),
 			'schedule' => $schedule,
 		]);
+	}
+
+	private function getChatIdWithAiAdvice(): int
+	{
+		if (!Feature::isEnabled(WorkReportsWithAiFeature::class))
+		{
+			return 0;
+		}
+
+		return DayPlanBotProvider::getBotId();
 	}
 
 	/**
@@ -150,13 +199,64 @@ class WorkdayIntentProvider
 	}
 
 	/**
+	 * @return string|null reason the box is not applicable today, null when the daily conditions pass
+	 */
+	private function resolveDailySuppressReason(): ?string
+	{
+		if ($this->isDayOffByScheduleForUserDay())
+		{
+			return self::SUPPRESS_REASON_DAY_OFF;
+		}
+
+		if ($this->hasAnyAbsenceOnUserDay())
+		{
+			return self::SUPPRESS_REASON_ABSENCE;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Closes the show window on the timeman side and returns the resulting schedule, or null when
+	 * the window did not end up closed. A failed write is not an error of the box itself: the refusal
+	 * stands either way.
+	 *
+	 * @param RecordIntentSchedule $schedule
+	 * @return RecordIntentSchedule|null
+	 */
+	private function suppressPeriod(RecordIntentSchedule $schedule): ?RecordIntentSchedule
+	{
+		try
+		{
+			// The schedule goes into the command so the answer is built from it: it is resolved right
+			// above in this same request, and without it the command resolves the whole schedule anew.
+			$result = (new SuppressPeriodCommand($this->userId, $schedule->periodKey, $schedule))->run();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		$suppressed = $result->isSuccess() ? ($result->getData()['schedule'] ?? null) : null;
+		if (!$suppressed instanceof RecordIntentSchedule)
+		{
+			return null;
+		}
+
+		// The answered schedule is the proof of the write, not the success flag itself: timemanmobile
+		// ships independently of timeman, so a bound that is not ahead of now (window still open) has
+		// to reach the same branch as a failed write.
+		return $suppressed->suppressedUntilTimestamp > time() ? $suppressed : null;
+	}
+
+	/**
 	 * Base mobile admission for the intent scenario. Mirrors the gate in getWorkdayIntentBoxData:
 	 * only users who may participate are allowed to touch the timeman intent-state (which lazily
 	 * stamps firstUseAt on first resolve). Mobile eligibility is the consumer layer's responsibility.
 	 *
 	 * @return bool
 	 */
-	private function hasIntentBaseAdmission(): bool
+	private function hasIntentBaseAdmission(?string &$failureReason = null): bool
 	{
 		// Guard against an empty current user before reaching the int-typed timeman signatures
 		// (RecordProvider::canUseTimeman/canManageWorktimeOnMobile, RecordIntentProvider::getSchedule).
@@ -165,7 +265,28 @@ class WorkdayIntentProvider
 			return false;
 		}
 
-		return $this->canUseTimeman() && $this->canManageWorktimeOnMobile();
+		try
+		{
+			$shiftsEnabled = $this->locator->get(SettingsProvider::class)->isShiftsEnabled();
+		}
+		catch (\Throwable)
+		{
+			$shiftsEnabled = false;
+		}
+
+		if (!$shiftsEnabled)
+		{
+			$failureReason = WorkdayIntentBoxDto::SUPPRESS_REASON_SHIFTS_DISABLED;
+
+			return false;
+		}
+
+		if (!$this->canUseTimeman() || !$this->canManageWorktimeOnMobile())
+		{
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -179,7 +300,7 @@ class WorkdayIntentProvider
 			return (new Result())->addError(new Error('Access denied', 'access_denied'));
 		}
 
-		return (new RegisterShowCommand($this->userId, $periodKey))->run();
+		return $this->runRegisterShowCommand($periodKey);
 	}
 
 	/**
@@ -194,6 +315,16 @@ class WorkdayIntentProvider
 			return (new Result())->addError(new Error('Access denied', 'access_denied'));
 		}
 
+		return $this->runRegisterOutcomeCommand($periodKey, $outcome);
+	}
+
+	protected function runRegisterShowCommand(string $periodKey): Result
+	{
+		return (new RegisterShowCommand($this->userId, $periodKey))->run();
+	}
+
+	protected function runRegisterOutcomeCommand(string $periodKey, string $outcome): Result
+	{
 		return (new RegisterOutcomeCommand($this->userId, $periodKey, $outcome))->run();
 	}
 
@@ -221,7 +352,17 @@ class WorkdayIntentProvider
 	 */
 	public function getNearestShifts(): array
 	{
-		$shiftCollection = $this->getNearestShiftCollection();
+		try
+		{
+			$shiftCollection = $this->getNearestShiftCollection();
+		}
+		catch (\Throwable)
+		{
+			// fail-open: an unreadable schedule degrades to the same synthetic shift a free schedule
+			// produces, instead of failing the whole action after the daily conditions already passed
+			return [$this->buildFlextimeShift()];
+		}
+
 		if ($shiftCollection->isEmpty())
 		{
 			return [$this->buildFlextimeShift()];
@@ -269,13 +410,36 @@ class WorkdayIntentProvider
 	}
 
 	/**
+	 * The failure is memoized as well as the collection: the daily conditions and the payload share
+	 * one read, so a broken timeman is asked once and answers both of them the same way.
+	 *
 	 * @return ShiftCollection
+	 * @throws \Throwable the memoized error of the shift read
 	 */
 	private function getNearestShiftCollection(): ShiftCollection
 	{
-		return $this->nearestShiftCollection ??=
-			$this->locator->get(RecordProvider::class)->getNearestShifts($this->userId)
-		;
+		if ($this->nearestShiftReadError !== null)
+		{
+			throw $this->nearestShiftReadError;
+		}
+
+		if ($this->nearestShiftCollection === null)
+		{
+			try
+			{
+				$this->nearestShiftCollection =
+					$this->locator->get(RecordProvider::class)->getNearestShifts($this->userId)
+				;
+			}
+			catch (\Throwable $error)
+			{
+				$this->nearestShiftReadError = $error;
+
+				throw $error;
+			}
+		}
+
+		return $this->nearestShiftCollection;
 	}
 
 	/**
@@ -311,10 +475,7 @@ class WorkdayIntentProvider
 			return null;
 		}
 
-		$userNow = TimeHelper::getInstance()->getUserDateTimeNow($this->userId);
-		$day = new Date($userNow->format('Y-m-d'), 'Y-m-d');
-
-		foreach (UserAbsence::getAbsenceTypesByDay($this->userId, $day) as $absenceType)
+		foreach ($this->getAbsenceTypesOnUserDay() as $absenceType)
 		{
 			if (in_array($absenceType, $absenceIntentIds, true))
 			{
@@ -326,9 +487,53 @@ class WorkdayIntentProvider
 	}
 
 	/**
+	 * Any absence, without the ABSENCE_INTENT_IDS whitelist: the whitelist belongs to the
+	 * preselect (only three types are offered in the UI), while the show gate hides the box
+	 * on every kind of absence. An unavailable intranet/iblock reads as "no absence", which
+	 * degrades towards showing the box.
+	 *
+	 * @return bool
+	 */
+	private function hasAnyAbsenceOnUserDay(): bool
+	{
+		return !empty($this->getAbsenceTypesOnUserDay());
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function getAbsenceTypesOnUserDay(): array
+	{
+		if ($this->absenceTypesOnUserDay === null)
+		{
+			$userNow = TimeHelper::getInstance()->getUserDateTimeNow($this->userId);
+			$day = new Date($userNow->format('Y-m-d'), 'Y-m-d');
+
+			$this->absenceTypesOnUserDay = UserAbsence::getAbsenceTypesByDay($this->userId, $day);
+		}
+
+		return $this->absenceTypesOnUserDay;
+	}
+
+	/**
 	 * @return string
 	 */
 	private function resolveScheduleIntentId(): string
+	{
+		return $this->isDayOffByScheduleForUserDay()
+			? self::INTENT_WEEKEND
+			: self::INTENT_WORKDAY
+		;
+	}
+
+	/**
+	 * Built on getNearestShiftCollection() and not on the public getNearestShifts(): the latter
+	 * substitutes a synthetic flextime shift for an empty collection and filters shifts by the
+	 * now..now+24h window, so it never reports a day off.
+	 *
+	 * @return bool
+	 */
+	private function isDayOffByScheduleForUserDay(): bool
 	{
 		$shiftCollection = $this->getNearestShiftCollection();
 
@@ -341,42 +546,57 @@ class WorkdayIntentProvider
 				->findSchedulesByUserId($this->userId)
 			;
 
-			return empty($schedules) ? self::INTENT_WORKDAY : self::INTENT_WEEKEND;
+			return !empty($schedules);
 		}
 
 		/** @var ?Schedule $schedule */
 		$schedule = $shiftCollection->getIterator()->current()?->schedule;
 		if ($schedule === null || (!$schedule->isFixed() && !$schedule->isShifted()))
 		{
-			return self::INTENT_WORKDAY;
+			return false;
 		}
 
-		return $this->hasShiftStartingOnCurrentUserDay($shiftCollection)
-			? self::INTENT_WORKDAY
-			: self::INTENT_WEEKEND
-		;
+		return !$this->hasShiftStartingOnCurrentUserDay($shiftCollection);
 	}
 
 	/**
 	 * Checks the calendar day in the user timezone, unlike filterActualShifts()
-	 * which uses a sliding now..now+24h window. Shift->start holds the schedule
-	 * wall time encoded in UTC, so only its calendar date is comparable with
-	 * the user's local date; timestamps of these two values are not.
+	 * which uses a sliding now..now+24h window. Shift->start carries the real
+	 * instant of the shift rendered in UTC (ShiftRepository::createDateTimeUtc),
+	 * so its own calendar date is not the employee's one: it has to be converted
+	 * into their timezone first, the way the schedule owner does it
+	 * (RecordIntentService::localDate).
 	 *
 	 * @param ShiftCollection $shiftCollection
 	 * @return bool
 	 */
 	private function hasShiftStartingOnCurrentUserDay(ShiftCollection $shiftCollection): bool
 	{
-		$userDay = TimeHelper::getInstance()->getUserDateTimeNow($this->userId)->format('Y-m-d');
+		$timeHelper = TimeHelper::getInstance();
+		$timeZone = $timeHelper->getUserDateTimeZone((int)$this->userId);
+		$userDay = $timeHelper->getUserDateTimeNow($this->userId)->format('Y-m-d');
 
 		$shiftOnDay = $shiftCollection->find(
-			static fn (Shift $shift): bool =>
+			fn (Shift $shift): bool =>
 				$shift->start !== null
-				&& $shift->start->format('Y-m-d') === $userDay,
+				&& $this->localDate($shift->start->getTimestamp(), $timeZone) === $userDay,
 		);
 
 		return $shiftOnDay !== null;
+	}
+
+	/**
+	 * Calendar date of an absolute instant in the employee timezone. The same zone bounds the
+	 * suppression written on a refusal (RecordIntentService::getNextLocalDayStart), so the daily
+	 * conditions and that bound speak about one and the same calendar day of the employee.
+	 *
+	 * @param int $timestamp absolute point in time = UTC Unix-seconds
+	 * @param \DateTimeZone $timeZone
+	 * @return string
+	 */
+	private function localDate(int $timestamp, \DateTimeZone $timeZone): string
+	{
+		return (new \DateTime('@' . $timestamp))->setTimezone($timeZone)->format('Y-m-d');
 	}
 
 	/**
@@ -483,7 +703,7 @@ class WorkdayIntentProvider
 
 		$resultAbsences = [];
 
-		$addResults = UserAbsence::addAbsences($this->userId, $absences);
+		$addResults = $this->addUserAbsences($absences);
 		foreach ($addResults as $addResult)
 		{
 			if (!$addResult->isSuccess())
@@ -497,5 +717,10 @@ class WorkdayIntentProvider
 		}
 
 		return $result->setData(['absences' => array_filter($resultAbsences)]);
+	}
+
+	protected function addUserAbsences(array $absences): array
+	{
+		return UserAbsence::addAbsences($this->userId, $absences);
 	}
 }

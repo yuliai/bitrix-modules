@@ -4443,6 +4443,46 @@ class ComponentHelper
 			}
 		}
 
+		if (
+			!empty($newUserIdList)
+			&& !$extranetUser
+			&& Loader::includeModule('extranet')
+			&& !\CExtranet::isExtranetAdmin()
+		)
+		{
+			$targetUserIdList = array_values(array_unique(array_filter(
+				$newUserIdList,
+				static fn(int $userId): bool => $userId > 0,
+			)));
+			$newExtranetUserIdList = [];
+			$extranetUserGroupId = (int)\CExtranet::getExtranetUserGroupID();
+
+			if ($extranetUserGroupId > 0 && !empty($targetUserIdList))
+			{
+				$relationResult = \Bitrix\Main\UserGroupTable::getList([
+					'filter' => [
+						'=GROUP_ID' => $extranetUserGroupId,
+						'@USER_ID' => $targetUserIdList,
+					],
+					'select' => [ 'USER_ID' ],
+				]);
+				while ($relationFields = $relationResult->fetch())
+				{
+					$newExtranetUserIdList[] = (int)$relationFields['USER_ID'];
+				}
+			}
+
+			if (!empty($newExtranetUserIdList))
+			{
+				$availableExtranetUserIdList = \CExtranet::getMyGroupsUsersSimple(\CExtranet::getExtranetSiteID());
+
+				if (!empty(array_diff($newExtranetUserIdList, $availableExtranetUserIdList)))
+				{
+					$resultFields['ERROR_MESSAGE'] = Loc::getMessage('SONET_HELPER_NO_PERMISSIONS');
+				}
+			}
+		}
+
 		if ($extranetUser)
 		{
 			$destinationList = array_filter($destinationList, static function ($code) {

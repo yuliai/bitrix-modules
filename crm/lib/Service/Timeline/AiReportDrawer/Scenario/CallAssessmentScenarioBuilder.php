@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Service\Timeline\AiReportDrawer\Scenario;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Controller\AiQualityAssessmentController;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentCriteriaController;
+use Bitrix\Crm\Copilot\CallAssessment\HintStateResolver;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\AiMessageProvider;
 use Bitrix\Crm\Integration\AI\JobRepository;

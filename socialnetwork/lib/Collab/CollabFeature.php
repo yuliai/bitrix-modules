@@ -50,7 +50,7 @@ class CollabFeature
 	{
 		if (Feature::isNewProjectsOn())
 		{
-			return Requirement::checkRequiredModules()->isSuccess();
+			return Requirement::checkRequiredModulesForOpening()->isSuccess();
 		}
 
 		return

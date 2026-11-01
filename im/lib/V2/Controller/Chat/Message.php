@@ -11,6 +11,9 @@ use Bitrix\Im\V2\Controller\Filter\DiskQuickAccessGrantor;
 use Bitrix\Im\V2\Entity\View\ViewCollection;
 use Bitrix\Im\V2\Message\Delete\DeletionMode;
 use Bitrix\Im\V2\Message\Delete\DisappearService;
+use Bitrix\Im\V2\Message\Forward\ForwardMessageCollection;
+use Bitrix\Im\V2\Message\Forward\ForwardResult;
+use Bitrix\Im\V2\Message\Forward\ForwardResultFormatter;
 use Bitrix\Im\V2\Message\Forward\ForwardService;
 use Bitrix\Im\V2\Message\MessageError;
 use Bitrix\Im\V2\Message\PushFormat;
@@ -21,6 +24,7 @@ use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Message\MessageService;
 use Bitrix\Im\V2\Permission\Action;
 use Bitrix\Im\V2\Reading\Reader;
+use Bitrix\Im\V2\Reading\Unreader;
 use Bitrix\Im\V2\Result;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\CurrentUser;
@@ -35,6 +39,7 @@ class Message extends BaseController
 		'KEYBOARD',
 		'MENU',
 		'BLOCK',
+		'FILE_ID',
 	];
 	private const ALLOWED_FIELDS_SEND = [
 		'MESSAGE',
@@ -52,6 +57,7 @@ class Message extends BaseController
 		'STICKER_PARAMS',
 		'AI_ASSISTANT',
 		'BLOCK',
+		'CONTACT',
 	];
 
 	public function getPrimaryAutoWiredParameter()
@@ -95,13 +101,19 @@ class Message extends BaseController
 					}
 
 					$forwardIds = array_map('intval', $forwardIds);
-					$messageCollection = new MessageCollection($forwardIds);
+					$messageCollection = new ForwardMessageCollection($forwardIds);
+					if ($messageCollection->count() !== count(array_unique($forwardIds)))
+					{
+						$this->addError(new MessageError(MessageError::NOT_FOUND));
+
+						return null;
+					}
 					foreach ($messageCollection as $message)
 					{
 						$messageId = $message->getId();
 
 						$uuid = array_search($messageId, $forwardIds, true);
-						if ($uuid)
+						if (is_string($uuid))
 						{
 							$message->setForwardUuid($uuid);
 
@@ -194,6 +206,29 @@ class Message extends BaseController
 		}
 
 		return [];
+	}
+
+	/**
+	 * Marks the chat unread starting from the message: real unread rows plus a rolled back read
+	 * position, unlike `mark` which only writes the read-later flag of the recent row.
+	 *
+	 * The typed `Message` argument is what brings access, history start and tariff checks from the
+	 * base prefilter chain: an int id with a lookup inside would leave that filter with nothing to do.
+	 *
+	 * @restMethod im.v2.Chat.Message.unread
+	 */
+	public function unreadAction(Unreader $unreader, CurrentUser $user, \Bitrix\Im\V2\Message $message): ?array
+	{
+		$unreadResult = $unreader->unreadTo($message, (int)$user->getId());
+
+		if (!$unreadResult->isSuccess())
+		{
+			$this->addErrors($unreadResult->getErrors());
+
+			return null;
+		}
+
+		return ['result' => true];
 	}
 
 	/**
@@ -341,6 +376,15 @@ class Message extends BaseController
 		{
 			return null;
 		}
+		if (
+			$forwardMessages !== null
+			&& $forwardMessages->count() > MessageService::getMultipleActionMessageLimit()
+		)
+		{
+			$this->addError(new MessageError(MessageError::TOO_MANY_MESSAGES));
+
+			return null;
+		}
 
 		$fields['message'] = $this->getRawValue('fields')['message'] ?? $fields['message'] ?? null;
 		$fields = $this->prepareFields($fields, self::ALLOWED_FIELDS_SEND);
@@ -353,46 +397,77 @@ class Message extends BaseController
 			return null;
 		}
 
-		$fields = $result->getResult();
-		$fields['SKIP_USER_CHECK'] = 'Y';
-		$fields['WAIT_FULL_EXECUTION'] = 'N';
-
 		$sentFromUi = $restServer === null;
+		$fields = $result->getResult();
+		$messageId = null;
 
-		if ($sentFromUi)
+		if (!empty($fields))
 		{
-			$fields['SENT_FROM_UI'] = true;
-		}
+			$fields['SKIP_USER_CHECK'] = 'Y';
+			$fields['WAIT_FULL_EXECUTION'] = 'N';
 
-		$messageId = \CIMMessenger::Add($fields);
+			if ($sentFromUi)
+			{
+				$fields['SENT_FROM_UI'] = true;
+			}
+
+			$messageId = \CIMMessenger::Add($fields);
+		}
 
 		if (isset($forwardMessages) && $forwardMessages->count() > 0)
 		{
 			$forwardResult = $this->sendForwardMessages($chat, $forwardMessages, $sentFromUi);
-			if (!$forwardResult->isSuccess())
-			{
-				$this->addErrors($forwardResult->getErrors());
-
-				return null;
-			}
+			$forwardResultFormatter = new ForwardResultFormatter($forwardResult);
 
 			foreach ($forwardMessages as $message)
 			{
-				(new MessageAnalytics($message))->addShareMessage($chat);
+				if ($forwardResult instanceof ForwardResult && $forwardResult->isMessageSuccessful($message))
+				{
+					$this->addForwardMessageAnalytics($message, $chat);
+				}
 			}
 		}
 
-		if ($messageId === false && !isset($forwardResult))
+		if ($messageId === false && !isset($forwardResultFormatter))
 		{
 			$this->addError(new MessageError(MessageError::SENDING_FAILED));
 
 			return null;
 		}
+		if (!$messageId && isset($forwardResultFormatter) && !$forwardResultFormatter->hasSuccess())
+		{
+			$errors = $forwardResultFormatter->getErrors();
+			if (empty($errors))
+			{
+				$this->addError(new MessageError(MessageError::SENDING_FAILED));
+			}
+			else
+			{
+				$this->addErrors($errors);
+			}
 
-		return [
+			return null;
+		}
+
+		$response = [
 			'id' => $messageId ?: null,
-			'uuidMap' => isset($forwardResult) ? $forwardResult->getResult() : []
+			'uuidMap' => isset($forwardResultFormatter) ? $forwardResultFormatter->getUuidMap() : [],
+			'failureMap' => isset($forwardResultFormatter) ? $forwardResultFormatter->getFailureMap() : [],
 		];
+		$legacyFailureMap = isset($forwardResultFormatter)
+			? $forwardResultFormatter->getLegacyFailureMap()
+			: [];
+		if (!empty($legacyFailureMap))
+		{
+			$response['legacyFailureMap'] = $legacyFailureMap;
+		}
+
+		return $response;
+	}
+
+	protected function addForwardMessageAnalytics(\Bitrix\Im\V2\Message $message, Chat $targetChat): void
+	{
+		(new MessageAnalytics($message))->addShareMessage($targetChat);
 	}
 
 	/**
@@ -533,13 +608,6 @@ class Message extends BaseController
 		}
 
 		$service = new ForwardService($chat, $sentFromUi);
-		$result = $service->createMessages($messages);
-
-		if (!$result->hasResult())
-		{
-			return $result->addErrors($result->getErrors());
-		}
-
-		return $result;
+		return $service->createMessages($messages);
 	}
 }

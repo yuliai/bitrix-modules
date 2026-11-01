@@ -8,6 +8,7 @@ use Bitrix\Main\Security\Random;
 use Bitrix\Main\Text\Emoji;
 use Bitrix\Sign\File;
 use Bitrix\Sign\Internal\Document\TemplateTable;
+use Bitrix\Sign\Type\Document\CreationSourceType;
 use Bitrix\Sign\Type\Document\ExternalDateCreateSourceType;
 use Bitrix\Sign\Type\Document\ExternalIdSourceType;
 use Bitrix\Sign\Type\Document\InitiatedByType;
@@ -255,6 +256,24 @@ class DocumentTable extends Entity\DataManager
 				->configureTitle('Configured date format')
 				->configureNullable()
 				->addValidator(new Entity\Validator\Length(null, 50))
+			,
+			(new IntegerField('CREATION_SOURCE_TYPE'))
+				->configureTitle('Creation source type')
+				->configureRequired()
+				->configureDefaultValue(CreationSourceType::UNKNOWN->toInt())
+			,
+			(new Entity\StringField('CREATION_SOURCE_ID'))
+				->configureTitle('Creation source ID')
+				->configureNullable()
+				->addValidator(new Entity\Validator\Length(null, 32))
+			,
+			(new IntegerField('CREATION_SOURCE_ENTITY_TYPE_ID'))
+				->configureTitle('Creation source entity type ID')
+				->configureNullable()
+			,
+			(new IntegerField('CREATION_SOURCE_ENTITY_ID'))
+				->configureTitle('Creation source entity ID')
+				->configureNullable()
 			,
 			(new Entity\TextField('INVITE_MESSAGE'))
 				->configureTitle('Message attached to the invitation to sign')

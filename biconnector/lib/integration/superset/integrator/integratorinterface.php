@@ -2,6 +2,7 @@
 
 namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 
+use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\SqlExecutionContext;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Dto\User;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
 use Bitrix\Main\Type\Date;
@@ -115,6 +116,22 @@ interface IntegratorInterface
 	public function clearCache(): IntegratorResponse;
 
 	/**
+	 * Asks the image to drop the permission cache keys of this portal.
+	 *
+	 * Idempotent: absent keys are not an error, and the call may be repeated. Touches neither the data cache
+	 * nor the caches of slices and chart results - those are cleared by clearCache() and cost far more.
+	 *
+	 * An instance that does not serve is not an error of the call either, but the caller has to be able to
+	 * tell that case apart from a failure: the two hosting modes read it differently. The distinguishing
+	 * mark is the instance status the portal keeps, not the status code of the response.
+	 *
+	 * @see \Bitrix\BIConnector\Access\Table\PermissionCacheResetNotifier
+	 *
+	 * @return IntegratorResponse<null>
+	 */
+	public function clearPermissionCache(): IntegratorResponse;
+
+	/**
 	 * Updates domain connection with new domain if domain was changed.
 	 *
 	 * @return IntegratorResponse
@@ -140,7 +157,11 @@ interface IntegratorInterface
 	 *
 	 * @param array $filter Filter of dashboards. Supported keys:
 	 *  - 'ids' (int[]) — include only dashboards with these external ids;
-	 *  - 'neqIds' (int[]) — exclude dashboards with these external ids.
+	 *  - 'neqIds' (int[]) — exclude dashboards with these external ids;
+	 *  - 'ownedByRequestUser' (bool) — keep only dashboards owned by the user of the request.
+	 *    The owner is resolved by the remote side, so the portal never passes an external user id.
+	 *    While the remote side has not confirmed the filter, the method returns an error response
+	 *    instead of a list: an unfiltered list would expose dashboards of other users.
 	 * @return IntegratorResponse<Dto\DashboardList>
 	 */
 	public function getDashboardListByFilter(array $filter = []): IntegratorResponse;
@@ -149,9 +170,19 @@ interface IntegratorInterface
 	 * Returns response with dashboard with requested id.
 	 *
 	 * @param int $dashboardId
+	 * @param int $streamTimeout Read timeout of the remote call in seconds; 0 keeps the default one.
+	 *        Honoured by the proxy transport; the self-hosted one reads a local instance.
+	 * @param bool $arbitrateServiceFailure Whether a service failure is allowed to move the local
+	 *        instance status to ERROR. An unattended schedule passes false: a reading request is
+	 *        stopped by the ready gate while the instance is not READY, so such a request would
+	 *        never bring the instance back out of the status its own failure had set.
 	 * @return IntegratorResponse<Dto\Dashboard>
 	 */
-	public function getDashboardById(int $dashboardId): IntegratorResponse;
+	public function getDashboardById(
+		int $dashboardId,
+		int $streamTimeout = 0,
+		bool $arbitrateServiceFailure = true,
+	): IntegratorResponse;
 
 	/**
 	 * Returns response with dashboard credentials to embed on successful request.
@@ -250,6 +281,14 @@ interface IntegratorInterface
 	public function getDatasetList(array $ids): IntegratorResponse;
 
 	/**
+	 * Returns response with the list of every physical (non-virtual) dataset of the instance.
+	 * If response code is not OK - returns empty data.
+	 *
+	 * @return IntegratorResponse
+	 */
+	public function getPhysicalDatasetList(): IntegratorResponse;
+
+	/**
 	 * Sets owner for dashboard
 	 *
 	 * @param int $dashboardId
@@ -282,6 +321,8 @@ interface IntegratorInterface
 	 * @param array{by?: string, order?: string} $sort Drill-down sort; ignored in skeleton mode.
 	 * @param int|null $limit Drill-down row cap; ignored in skeleton mode.
 	 * @param int $offset Drill-down page offset into the sorted rows; ignored in skeleton mode.
+	 * @param bool $arbitrateServiceFailure Same meaning as in getDashboardById().
+	 * @param User|null $user The user the overview is built for; null builds it for the user of the request.
 	 * @return IntegratorResponse
 	 */
 	public function getDashboardOverview(
@@ -293,11 +334,14 @@ interface IntegratorInterface
 		array $sort = [],
 		?int $limit = null,
 		int $offset = 0,
+		bool $arbitrateServiceFailure = true,
+		?User $user = null,
 	): IntegratorResponse;
 
 	/**
 	 * Gets available values for a dashboard native filter.
 	 *
+	 * @param bool $arbitrateServiceFailure Same meaning as in getDashboardById().
 	 * @return IntegratorResponse
 	 */
 	public function getFilterValues(
@@ -308,6 +352,7 @@ interface IntegratorInterface
 		?string $search = null,
 		?int $limit = null,
 		int $streamTimeout = 60,
+		bool $arbitrateServiceFailure = true,
 	): IntegratorResponse;
 
 	// endregion
@@ -400,9 +445,14 @@ interface IntegratorInterface
 	 *
 	 * @param string $sql Raw SQL SELECT to execute against the BI database.
 	 * @param int|null $limit Optional row cap (queryLimit).
+	 * @param SqlExecutionContext|null $context Explicit execution channel and user.
 	 * @return IntegratorResponse
 	 */
-	public function executeSql(string $sql, ?int $limit = null): IntegratorResponse;
+	public function executeSql(
+		string $sql,
+		?int $limit = null,
+		?SqlExecutionContext $context = null,
+	): IntegratorResponse;
 
 	// endregion
 

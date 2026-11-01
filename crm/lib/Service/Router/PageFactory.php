@@ -49,6 +49,7 @@ final class PageFactory implements Router\Contract\PageFactory
 			Page\PermissionsPage::class,
 			Page\SalesTunnelsPage::class,
 			Page\SettingsHubPage::class,
+			Page\SettingsHubSliderPage::class,
 			Page\MessageSender\ConnectionsPage::class,
 			Page\MessageSender\CustomTemplatesListPage::class,
 		];

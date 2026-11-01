@@ -5,17 +5,18 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Public\Provider;
 
 use Bitrix\Main\Application;
-use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Rest\Internal\Access\User\Model\RestUserModel;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\Embedding;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\EmbeddingCollection;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\EmbeddingLanguage;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\EmbeddingLanguageCollection;
+use Bitrix\Rest\Internal\Repository\EmbeddingAccessRepository;
 use Bitrix\Rest\Internal\Repository\EmbeddingRepository;
 use Bitrix\Rest\Internal\Service\Embedding\EmbeddingOwnerResolver;
 use Bitrix\Rest\Lang;
 use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Public\Dto\Embedding\EmbeddingOwnerDto;
+use Bitrix\Rest\Public\Provider\Embedding\EmbeddingDtoMapper;
 use Bitrix\Rest\Public\Provider\Dto\Embedding\EmbeddingDto;
 use Bitrix\Rest\Public\Provider\Dto\Embedding\EmbeddingOpenDto;
 use Bitrix\Rest\Public\Provider\Dto\Embedding\EmbeddingViewDto;
@@ -23,15 +24,21 @@ use Bitrix\Rest\Public\Provider\Dto\Embedding\EmbeddingViewDto;
 class EmbeddingProvider
 {
 	private EmbeddingRepository $repository;
+	private EmbeddingAccessRepository $accessRepository;
 	private EmbeddingOwnerProviderRegistry $registry;
+	private EmbeddingDtoMapper $dtoMapper;
 
 	public function __construct(
 		?EmbeddingRepository $repository = null,
 		?EmbeddingOwnerProviderRegistry $registry = null,
+		?EmbeddingDtoMapper $dtoMapper = null,
+		?EmbeddingAccessRepository $accessRepository = null,
 	)
 	{
-		$this->repository = $repository ?? ServiceLocator::getInstance()->get(EmbeddingRepository::class);
+		$this->repository = $repository ?? new EmbeddingRepository();
 		$this->registry = $registry ?? new EmbeddingOwnerProviderRegistry();
+		$this->dtoMapper = $dtoMapper ?? new EmbeddingDtoMapper();
+		$this->accessRepository = $accessRepository ?? new EmbeddingAccessRepository();
 	}
 
 	public function getListByClientId(string $clientId, int $limit = 50, int $offset = 0, ?array $userIds = null): EmbeddingCollection
@@ -43,7 +50,7 @@ class EmbeddingProvider
 	{
 		$embedding = $this->repository->getById($id);
 
-		return $embedding === null ? null : $this->makeEmbeddingDto($embedding);
+		return $embedding === null ? null : $this->dtoMapper->mapFromEntity($embedding);
 	}
 
 	public function getByOwner(EmbeddingOwnerDto $owner): array
@@ -59,15 +66,8 @@ class EmbeddingProvider
 
 	public function getListByPlacement(string $placement, int $userId): array
 	{
-		if ($userId <= 0)
-		{
-			return [];
-		}
-
-		$user = RestUserModel::createFromId($userId);
-		$isAdmin = $user->isAdmin();
-
-		if (!$isAdmin && $user->getData() === null)
+		$isAdmin = $this->resolveAdminStatus($userId);
+		if ($isAdmin === null)
 		{
 			return [];
 		}
@@ -76,7 +76,47 @@ class EmbeddingProvider
 			? $this->repository->getByPlacementUnrestricted($placement, $userId)
 			: $this->repository->getByPlacementForSubject($placement, $userId);
 
-		$groups = $this->groupByOwner($rows);
+		return $this->resolveViews($rows, $userId);
+	}
+
+	public function resolveOpen(EmbeddingDto $embedding, int $userId): ?EmbeddingOpenDto
+	{
+		if (!$this->isAccessible($embedding->id, $userId))
+		{
+			return null;
+		}
+
+		$provider = $this->registry->resolve($embedding->moduleId, $embedding->entityType);
+		if ($provider === null)
+		{
+			return null;
+		}
+
+		foreach ($provider->resolveEmbeddings([$embedding], $userId) as $openItem)
+		{
+			if ($openItem->embeddingId === $embedding->id)
+			{
+				return $openItem;
+			}
+		}
+
+		return null;
+	}
+
+	private function isAccessible(int $embeddingId, int $userId): bool
+	{
+		$isAdmin = $this->resolveAdminStatus($userId);
+		if ($isAdmin === null)
+		{
+			return false;
+		}
+
+		return $isAdmin || $this->accessRepository->findAccessibleEmbeddingIds([$embeddingId], $userId) !== [];
+	}
+
+	private function resolveViews(EmbeddingCollection $embeddings, int $userId): array
+	{
+		$groups = $this->groupByOwner($embeddings);
 		if (empty($groups))
 		{
 			return [];
@@ -94,6 +134,16 @@ class EmbeddingProvider
 		ksort($views, SORT_NUMERIC);
 
 		return $views;
+	}
+
+	private function resolveAdminStatus(int $userId): ?bool
+	{
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		return RestUserModel::createFromId($userId)->isAdmin();
 	}
 
 	/**
@@ -166,7 +216,7 @@ class EmbeddingProvider
 		$result = [];
 		foreach ($embeddings as $embedding)
 		{
-			$embeddingDto = $this->makeEmbeddingDto($embedding);
+			$embeddingDto = $this->dtoMapper->mapFromEntity($embedding);
 			if ($embeddingDto !== null)
 			{
 				$result[] = $embeddingDto;
@@ -234,8 +284,7 @@ class EmbeddingProvider
 			moduleId: $embeddingDto->moduleId,
 			entityType: $embeddingDto->entityType,
 			entityId: $embeddingDto->entityId,
-			url: $openItem->url,
-			payload: $openItem->payload,
+			open: $openItem,
 		);
 	}
 

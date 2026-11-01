@@ -72,9 +72,9 @@ final class IntegratorProvider
 					->getIntegratorInfo()
 				;
 
-				// A box source failure throws nothing: the parent returns an empty DTO and even stores
-				// partner_id = 0, so an empty payload next to a license relation means the data did not
-				// arrive. Hiding the card beats offering promo to a portal that has an integrator.
+				// A box source failure throws nothing: the parent returns an empty DTO, so an empty
+				// payload next to a license relation means the data did not arrive. Hiding the card
+				// beats offering promo to a portal that has an integrator.
 				if ($this->isBoxSourceFailure($hasLicensePartner, $dto->toArray()))
 				{
 					return null;
@@ -179,8 +179,10 @@ final class IntegratorProvider
 	}
 
 	/**
-	 * The option belongs to the parent service, which stores it on box too and offers no read-only
-	 * accessor: a stored value (including zero) is what tells the network refresh already happened.
+	 * Whether reading the box source stays local. The option belongs to the parent service, which
+	 * offers no read-only accessor and treats an empty value as "not fetched yet" - and a failed
+	 * fetch stores exactly that, so a failure is never remembered and the next request that may go
+	 * to the network goes again.
 	 */
 	private function isBoxSourceStored(): bool
 	{

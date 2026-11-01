@@ -161,6 +161,7 @@ class MenuItemProvider
 			new MenuItem(
 				id: 'settings',
 				text: Loc::getMessage('IM_NAVIGATION_MENU_SETTINGS'),
+				isVisible: !$this->applicationFeatures->isChatShellNavigationWebAvailable,
 				sort: self::SORT_SETTINGS,
 			),
 		];

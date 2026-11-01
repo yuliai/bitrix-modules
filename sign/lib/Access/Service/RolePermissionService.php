@@ -41,6 +41,29 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 	public const PERMISSION_UNIQUE_FIELDS = ['ROLE_ID', 'PERMISSION_ID'];
 
 	/**
+	 * Values of role permissions already read from {@see PermissionTable} within this request, keyed by the
+	 * role set and the permission id {@see self::buildPermissionValueCacheKey()}. A null is an answer of its
+	 * own and is remembered like any value: the pair has no stored row. A read that failed is never stored -
+	 * the caller cannot tell it from "no permission", and remembering it would deny for the rest of the
+	 * request. Nothing else lives here: applying the value to an item (its owner, the departments) stays in
+	 * the rule.
+	 *
+	 * The lifetime is this instance and so one request at most; there is no persistent cache behind it.
+	 *
+	 * Reset by every write path of the table: {@see self::saveRolePermissions()}, {@see self::deleteRole()}
+	 * and {@see self::applyPermissionChanges()} here, and
+	 * {@see \Bitrix\Sign\Access\Install\AccessInstaller} where it writes the rows itself. A new write path
+	 * has to reset it as well - {@see self::resetPermissionValueCache()} is safe to call at any point, at
+	 * worst it costs a repeated read.
+	 *
+	 * Acknowledged boundaries, both leaving the answer at the value the pair had before the write: a write
+	 * made by another process, and a row written straight through the ORM table, as the test helpers do.
+	 *
+	 * @var array<string, string|null>
+	 */
+	private array $permissionValueCache = [];
+
+	/**
 	 * @param list<array{id: string, title: string, accessRights: list<array{id: string, value: string|int}>}> $permissionSettings permission settings array
 	 */
 	public function saveRolePermissions(array &$permissionSettings): void
@@ -97,6 +120,12 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 			{
 				PermissionWriteLock::release();
 			}
+
+			// Unconditional and after the commit: a write that broke halfway still leaves part of the rows
+			// changed, so what the readers remember is untrustworthy either way. After the release of the
+			// lock, not before it: this call can build the service of the locator and throw, and a throw
+			// here would leave the lock held until the connection closes.
+			$this->resetPermissionValueCacheOfEveryReader();
 		}
 	}
 
@@ -136,6 +165,7 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 		finally
 		{
 			PermissionWriteLock::release();
+			$this->resetPermissionValueCacheOfEveryReader();
 		}
 	}
 
@@ -453,25 +483,35 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 	 */
 	private function applyPermissionChanges(array $changes): void
 	{
-		foreach ($changes['delete'] as $roleId => $permissionIds)
+		try
 		{
-			PermissionTable::deleteList([
-				'=ROLE_ID' => $roleId,
-				'=PERMISSION_ID' => $permissionIds,
-			]);
-		}
+			foreach ($changes['delete'] as $roleId => $permissionIds)
+			{
+				PermissionTable::deleteList([
+					'=ROLE_ID' => $roleId,
+					'=PERMISSION_ID' => $permissionIds,
+				]);
+			}
 
-		foreach ($changes['update'] as $rowId => $row)
-		{
-			$this->checkWriteResult(PermissionTable::update($rowId, $row));
-		}
+			foreach ($changes['update'] as $rowId => $row)
+			{
+				$this->checkWriteResult(PermissionTable::update($rowId, $row));
+			}
 
-		foreach ($changes['add'] as $row)
+			foreach ($changes['add'] as $row)
+			{
+				// The lock is advisory and the write goes on without it, so a row the delta reports as missing may
+				// already exist by the time it is written: an upsert on the unique index gives the row its target value
+				// where a plain insert would break the index instead.
+				PermissionTable::merge($row, ['VALUE' => $row['VALUE']], self::PERMISSION_UNIQUE_FIELDS);
+			}
+		}
+		finally
 		{
-			// The lock is advisory and the write goes on without it, so a row the delta reports as missing may
-			// already exist by the time it is written: an upsert on the unique index gives the row its target value
-			// where a plain insert would break the index instead.
-			PermissionTable::merge($row, ['VALUE' => $row['VALUE']], self::PERMISSION_UNIQUE_FIELDS);
+			// The authoritative reset is the one of saveRolePermissions(), which runs after the commit; this
+			// one runs while the transaction is still open and is redundant on that path. It is here for the
+			// callers that reach this method directly, so that no write path is left without a reset.
+			$this->resetPermissionValueCacheOfEveryReader();
 		}
 	}
 
@@ -542,15 +582,15 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 			return null;
 		}
 
+		$cacheKey = $this->buildPermissionValueCacheKey($roles, $permissionId);
+		if (array_key_exists($cacheKey, $this->permissionValueCache))
+		{
+			return $this->permissionValueCache[$cacheKey];
+		}
+
 		try
 		{
-			$permissions = PermissionTable::query()
-				->setSelect(['VALUE'])
-				->whereIn('ROLE_ID', $roles)
-				->where('PERMISSION_ID', $permissionId)
-				->exec()
-				->fetchAll()
-			;
+			$permissions = $this->fetchPermissionRows($roles, $permissionId);
 
 			$isValueFound = false;
 			$max = '';
@@ -563,11 +603,93 @@ class RolePermissionService extends \Bitrix\Crm\Integration\Sign\Access\Service\
 				}
 			}
 
-			return !$isValueFound ? null : $max;
+			$value = !$isValueFound ? null : $max;
+			$this->permissionValueCache[$cacheKey] = $value;
+
+			return $value;
 		}
 		catch (ObjectPropertyException|ArgumentException|SystemException $e)
 		{
 			return null;
+		}
+	}
+
+	/**
+	 * The read of {@see self::getValueForPermission()} on its own, so that a test can make it fail: the
+	 * failure of an ORM read is not reachable through the arguments, and without it the promise that a failed
+	 * read is not remembered cannot be checked at all.
+	 *
+	 * @param list<int|string> $roles
+	 * @return list<array{VALUE: string}>
+	 * @throws ObjectPropertyException|ArgumentException|SystemException
+	 */
+	protected function fetchPermissionRows(array $roles, string $permissionId): array
+	{
+		return PermissionTable::query()
+			->setSelect(['VALUE'])
+			->whereIn('ROLE_ID', $roles)
+			->where('PERMISSION_ID', $permissionId)
+			->exec()
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * Injective on the set of roles: the order and the keys of the array do not matter, while two different
+	 * sets can never build one string. The length before every role is what gives the second half - a plain
+	 * separator lets ['1', '2,3'] and ['1,2', '3'] meet, and a met key here is another role set's permission
+	 * value, not a missed cache. The sort is SORT_STRING for the same reason: a non-numeric role id compares
+	 * as zero under SORT_NUMERIC and the order stops being defined.
+	 *
+	 * @param list<int|string> $roles
+	 */
+	private function buildPermissionValueCacheKey(array $roles, string $permissionId): string
+	{
+		$normalizedRoles = array_unique(array_map('strval', $roles));
+		sort($normalizedRoles, SORT_STRING);
+
+		$body = '';
+		foreach ($normalizedRoles as $role)
+		{
+			$body .= strlen($role) . ':' . $role;
+		}
+
+		return count($normalizedRoles) . '|' . $body . '|' . $permissionId;
+	}
+
+	/**
+	 * Drops the values this instance remembers. One-way safe: at worst it costs a repeated read, it can never
+	 * hand out another role set's value. Goes nowhere near the service locator on purpose -
+	 * {@see self::resetPermissionValueCacheOfEveryReader()} is the one that does, and a locator lookup from
+	 * here would come back to this very object and recurse without an end.
+	 */
+	public function resetPermissionValueCache(): void
+	{
+		$this->permissionValueCache = [];
+	}
+
+	/**
+	 * Resets both instances a write can leave stale: this one and the one the readers take from the locator
+	 * {@see \Bitrix\Sign\Access\Rule\BaseRule}. They are different objects whenever the write goes through a
+	 * service built with new, as the permission page does, and the same object otherwise - the reset is
+	 * idempotent either way.
+	 */
+	private function resetPermissionValueCacheOfEveryReader(): void
+	{
+		$this->resetPermissionValueCache();
+
+		try
+		{
+			Container::instance()->getRolePermissionService()?->resetPermissionValueCache();
+		}
+		catch (\Throwable $exception)
+		{
+			// Called from the finally of a write, a throw here would replace the result of that write. There is
+			// nothing stale to drop in this case either: the service of the locator failed to be built, so no
+			// reader of this request holds a cache of it.
+			$this->getLogger()->error(
+				'Unable to reset the permission value cache of the locator: ' . $exception->getMessage(),
+			);
 		}
 	}
 

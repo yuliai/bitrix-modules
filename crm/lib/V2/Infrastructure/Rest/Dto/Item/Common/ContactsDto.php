@@ -29,6 +29,7 @@ class ContactsDto extends Dto
 
 	#[Editable]
 	#[ElementsType(Type::Integer)]
+	#[ElementType('int')]
 	#[ElementsInArrayFrom(ItemProvider::class, ['entityTypeId' => OwnerType::CONTACT])]
 	#[Filterable]
 	public array $contactsId;

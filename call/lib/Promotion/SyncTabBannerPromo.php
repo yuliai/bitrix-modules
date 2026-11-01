@@ -2,6 +2,7 @@
 
 namespace Bitrix\Call\Promotion;
 
+use Bitrix\Call\Service\CallLogService;
 use Bitrix\Call\Settings;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\UI\Tour;
@@ -22,6 +23,18 @@ final class SyncTabBannerPromo
 		// Short-circuit before building the Tour: Tour::isAvailable() writes the portal-wide
 		// activation date, and portals without the sync preset must stay untouched.
 		if (!Settings::isSyncPresetEnabled())
+		{
+			return false;
+		}
+
+		if (self::getUserId() < 1)
+		{
+			return false;
+		}
+
+		// The banner leads to /sync/, which a guest has no access to; the check sits before
+		// Tour so a guest visit does not spend the promo show meant for a real user.
+		if ((new CallLogService())->isGuestUser(self::getUserId()))
 		{
 			return false;
 		}

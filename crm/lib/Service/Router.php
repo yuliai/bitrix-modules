@@ -556,6 +556,22 @@ class Router
 		return $this->getUrlForTemplate('bitrix:crm.settings-hub');
 	}
 
+	public function getSettingsHubNavigationUrl(
+		string $navigationId,
+		array $queryParameters = [],
+	): Uri
+	{
+		if (preg_match('/^[a-z0-9-]+$/D', $navigationId) !== 1)
+		{
+			throw new ArgumentException('Navigation id is invalid.', 'navigationId');
+		}
+
+		$uri = new Uri(SITE_DIR . "crm/settings-hub/slider/{$navigationId}/");
+		$uri->addParams($queryParameters);
+
+		return $uri;
+	}
+
 	public function getExternalTypeListUrl(): Uri
 	{
 		return new Uri(SITE_DIR . 'automation/type/');

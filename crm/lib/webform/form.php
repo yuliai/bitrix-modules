@@ -40,6 +40,7 @@ class Form
 		'USE_CAPTCHA' => 'N',
 		'USE_LICENCE' => 'N',
 		'LICENCE_BUTTON_IS_CHECKED' => 'Y',
+		'LICENCE_BUTTON_ACCEPT_BY_SUBMIT' => 'N',
 		'FIELDS' => array(),
 		'PRESET_FIELDS' => array(),
 		'INVOICE_SETTINGS' => array(),
@@ -56,11 +57,17 @@ class Form
 	protected $isEmbeddedAvailableChanged = false;
 	protected $forceBuild = false;
 	protected $integration;
+	private ?Telemetry\RecorderInterface $telemetryRecorder;
 
-	public function __construct($id = null, array $params = null)
+	public function __construct(
+		$id = null,
+		array $params = null,
+		?Telemetry\RecorderInterface $telemetryRecorder = null,
+	)
 	{
 		$this->params = self::$defaultParams;
 		$this->integration = new Options\Integration($this);
+		$this->telemetryRecorder = $telemetryRecorder;
 		if ($id)
 		{
 			$this->load($id);
@@ -343,16 +350,27 @@ class Form
 		}
 
 		$this->params['AGREEMENTS'] = Internals\AgreementTable::getList([
-			'select' => ['AGREEMENT_ID', 'CHECKED', 'REQUIRED'],
+			'select' => ['AGREEMENT_ID', 'CHECKED', 'REQUIRED', 'ACCEPT_BY_SUBMIT'],
 			'filter' => ['=FORM_ID' => $id]
 		])->fetchAll();
 		if ($this->params['AGREEMENT_ID'])
 		{
+			foreach ($this->params['AGREEMENTS'] as $agreement)
+			{
+				if ((int)$agreement['AGREEMENT_ID'] === (int)$this->params['AGREEMENT_ID'])
+				{
+					$this->params['LICENCE_BUTTON_ACCEPT_BY_SUBMIT'] = $agreement['ACCEPT_BY_SUBMIT'];
+
+					break;
+				}
+			}
+
 			$this->params['AGREEMENTS'] = array_merge(
 				[[
 					'AGREEMENT_ID' => $this->params['AGREEMENT_ID'],
 					'CHECKED' => $this->params['LICENCE_BUTTON_IS_CHECKED'] === 'Y' ? 'Y' : 'N',
 					'REQUIRED' => 'Y',
+					'ACCEPT_BY_SUBMIT' => ($this->params['LICENCE_BUTTON_ACCEPT_BY_SUBMIT'] ?? 'N') === 'Y' ? 'Y' : 'N',
 				]],
 				$this->params['AGREEMENTS']
 			);
@@ -361,6 +379,7 @@ class Form
 		{
 			$this->params['AGREEMENT_ID'] = $this->params['AGREEMENTS'][0]['AGREEMENT_ID'];
 			$this->params['LICENCE_BUTTON_IS_CHECKED'] = $this->params['AGREEMENTS'][0]['CHECKED'];
+			$this->params['LICENCE_BUTTON_ACCEPT_BY_SUBMIT'] = $this->params['AGREEMENTS'][0]['ACCEPT_BY_SUBMIT'];
 		}
 
 		$responsibleQueue = new ResponsibleQueue($id);
@@ -395,6 +414,7 @@ class Form
 				'AGREEMENT_ID' => $agreementId,
 				'CHECKED' => $agreement['CHECKED'] === 'Y' ? 'Y' : 'N',
 				'REQUIRED' => $agreement['REQUIRED'] === 'Y' ? 'Y' : 'N',
+				'ACCEPT_BY_SUBMIT' => ($agreement['ACCEPT_BY_SUBMIT'] ?? 'N') === 'Y' ? 'Y' : 'N',
 			];
 		}
 		unset($result['AGREEMENTS']);
@@ -404,8 +424,11 @@ class Form
 			{
 				$agreements[] = [
 					'AGREEMENT_ID' => $result['AGREEMENT_ID'],
-					'CHECKED' => $result['LICENCE_BUTTON_IS_CHECKED'] === 'Y' ? 'Y' : 'N',
+					'CHECKED' => !$this->id && !Embed\Config::isAcceptBySubmitEnabled()
+						? 'N'
+						: ($result['LICENCE_BUTTON_IS_CHECKED'] === 'Y' ? 'Y' : 'N'),
 					'REQUIRED' => 'Y',
+					'ACCEPT_BY_SUBMIT' => ($result['LICENCE_BUTTON_ACCEPT_BY_SUBMIT'] ?? 'N') === 'Y' ? 'Y' : 'N',
 				];
 			}
 			elseif (isset($result['LICENCE_BUTTON_IS_CHECKED']))
@@ -418,10 +441,38 @@ class Form
 					}
 
 					$agreements[$index]['CHECKED'] = $result['LICENCE_BUTTON_IS_CHECKED'] === 'Y' ? 'Y' : 'N';
+					$agreements[$index]['ACCEPT_BY_SUBMIT'] = ($result['LICENCE_BUTTON_ACCEPT_BY_SUBMIT'] ?? 'N') === 'Y'
+						? 'Y'
+						: 'N';
 				}
 			}
 		}
 		$result['AGREEMENT_ID'] = null;
+		unset($result['LICENCE_BUTTON_ACCEPT_BY_SUBMIT']);
+
+		if (!Embed\Config::isAcceptBySubmitEnabled())
+		{
+			$storedSubmitAgreementIds = [];
+			if ($this->id)
+			{
+				$storedAgreements = Internals\AgreementTable::getList([
+					'select' => ['AGREEMENT_ID'],
+					'filter' => ['=FORM_ID' => $this->id, '=ACCEPT_BY_SUBMIT' => 'Y'],
+				]);
+				while ($storedAgreement = $storedAgreements->fetch())
+				{
+					$storedSubmitAgreementIds[(int)$storedAgreement['AGREEMENT_ID']] = true;
+				}
+			}
+
+			foreach ($agreements as &$agreement)
+			{
+				$agreement['ACCEPT_BY_SUBMIT'] = isset(
+					$storedSubmitAgreementIds[(int)$agreement['AGREEMENT_ID']]
+				) ? 'Y' : 'N';
+			}
+			unset($agreement);
+		}
 
 		$fields = $result['FIELDS'];
 		unset($result['FIELDS']);
@@ -770,6 +821,7 @@ class Form
 
 			$dependency['FORM_ID'] = $this->id;
 
+			unset($dependency['ID']);
 			$dependencyResult = Internals\FieldDependenceTable::add($dependency);
 			$this->prepareResult('DEPENDENCIES', $dependencyResult);
 		}
@@ -1635,14 +1687,20 @@ class Form
 			'CALLBACK_PHONE' => $fieldPhoneValue,
 			'ENTITIES' => isset($resultParameters['ENTITIES']) ? $resultParameters['ENTITIES'] : [],
 		);
-		$result = new Result(null, $data);
+		$result = $this->createResult($data);
 		$result->save();
 		if ($result->hasErrors())
 		{
 			$this->errors = $result->getErrors();
+			$this->markTelemetryValidationError($resultParameters);
 		}
 		else
 		{
+			if ($result->getId())
+			{
+				$this->completeTelemetry($resultParameters, $resultFields);
+			}
+
 			if ($fieldEmailValue)
 			{
 				self::sendEventFormSent(array(
@@ -1768,6 +1826,91 @@ class Form
 		}
 
 		return $result;
+	}
+
+	protected function createResult(array $data): Result
+	{
+		return new Result(null, $data);
+	}
+
+	private function markTelemetryValidationError(array $resultParameters): void
+	{
+		$attemptId = $this->getTelemetryAttemptId($resultParameters);
+		if ($attemptId === null)
+		{
+			return;
+		}
+
+		$context = $resultParameters['TELEMETRY_CONTEXT'] ?? [];
+		$formId = (int)$this->id;
+		$this->recordTelemetry(
+			static function (Telemetry\RecorderInterface $recorder) use ($attemptId, $context, $formId): void {
+				if (($context['ensureAttempt'] ?? false) === true)
+				{
+					$recorder->start(
+						$attemptId,
+						$formId,
+						(string)($context['source'] ?? Telemetry\SubmissionClassifier::SOURCE_UNKNOWN),
+						is_string($context['userAgent'] ?? null) ? $context['userAgent'] : null,
+					);
+				}
+				$recorder->markError($attemptId, 'validation');
+			},
+		);
+	}
+
+	private function completeTelemetry(array $resultParameters, array $resultFields): void
+	{
+		$attemptId = $this->getTelemetryAttemptId($resultParameters);
+		if ($attemptId === null)
+		{
+			return;
+		}
+
+		$fields = array_map(
+			static fn(array $field): array => [
+				'type' => $field['type'] ?? null,
+				'value' => $field['values'] ?? ($field['value'] ?? null),
+				'hidden' => $field['hidden'] ?? false,
+			],
+			$resultFields,
+		);
+		$formId = (int)$this->id;
+		$templateId = isset($this->params['TEMPLATE_ID']) && is_string($this->params['TEMPLATE_ID'])
+			? $this->params['TEMPLATE_ID']
+			: null
+		;
+
+		$this->recordTelemetry(
+			static function (Telemetry\RecorderInterface $recorder) use (
+				$attemptId,
+				$formId,
+				$fields,
+				$templateId,
+			): void {
+				$recorder->complete($attemptId, $formId, $fields, $templateId);
+			},
+		);
+	}
+
+	private function getTelemetryAttemptId(array $resultParameters): ?string
+	{
+		$context = $resultParameters['TELEMETRY_CONTEXT'] ?? null;
+		$attemptId = is_array($context) ? ($context['attemptId'] ?? null) : null;
+
+		return is_string($attemptId) && $attemptId !== '' ? $attemptId : null;
+	}
+
+	private function recordTelemetry(callable $operation): void
+	{
+		try
+		{
+			$this->telemetryRecorder ??= new Telemetry\Recorder();
+			$operation($this->telemetryRecorder);
+		}
+		catch (\Throwable)
+		{
+		}
 	}
 
 	protected function sendEventFormSent($fields)

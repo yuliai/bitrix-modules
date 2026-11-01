@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Public\Provider\Field;
 
-use Bitrix\Crm\V2\Internal\Service\Field\Requirement\RequirementService;
-use Bitrix\Crm\V2\Public\Entity\Field\Requirement;
-use Bitrix\Crm\V2\Public\Entity\Field\RequirementException;
-use Bitrix\Crm\V2\Public\Entity\Field\RequirementTechnicalException;
+use Bitrix\Crm\V2\Internal\Service\Field\Requirement\Service;
+use Bitrix\Crm\V2\Public\Entity\Field\Requirement\Exception;
+use Bitrix\Crm\V2\Public\Entity\Field\Requirement\Requirement;
 use Bitrix\Crm\V2\Public\EntityType;
 
 /**
@@ -17,14 +16,17 @@ use Bitrix\Crm\V2\Public\EntityType;
  */
 final class RequirementProvider
 {
-	private readonly RequirementService $service;
+	/** Result data key containing a field requirement. */
+	public const DATA_REQUIREMENT = 'requirement';
+
+	private readonly Service $service;
 
 	private function __construct(
 		private readonly EntityType $entityType,
 		private readonly int $userId,
 	)
 	{
-		$this->service = new RequirementService();
+		$this->service = new Service();
 	}
 
 	public static function forEntityType(EntityType $entityType, int $userId): self
@@ -33,8 +35,8 @@ final class RequirementProvider
 	}
 
 	/**
-	 * @throws RequirementException
-	 * @throws RequirementTechnicalException
+	 * @throws Exception
+	 * @throws \RuntimeException
 	 */
 	public function get(string $fieldId, ?int $categoryId = null): Requirement
 	{

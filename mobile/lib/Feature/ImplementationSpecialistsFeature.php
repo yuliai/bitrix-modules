@@ -9,18 +9,22 @@ use Bitrix\Main\Config\Option;
 
 final class ImplementationSpecialistsFeature extends FeatureFlag
 {
-	public function isEnabled(): bool
+	use MyCompanySectionElement;
+
+	private const OPTION_CODE = 'feature_implementation_specialists_enabled';
+
+	protected function isOptionEnabled(): bool
 	{
-		return Option::get('mobile', 'feature_implementation_specialists_enabled', 'N') === 'Y';
+		return $this->isOptionOn('mobile', self::OPTION_CODE, false);
 	}
 
 	public function enable(): void
 	{
-		Option::set('mobile', 'feature_implementation_specialists_enabled', 'Y');
+		Option::set('mobile', self::OPTION_CODE, 'Y');
 	}
 
 	public function disable(): void
 	{
-		Option::delete('mobile', ['name' => 'feature_implementation_specialists_enabled']);
+		Option::delete('mobile', ['name' => self::OPTION_CODE]);
 	}
 }

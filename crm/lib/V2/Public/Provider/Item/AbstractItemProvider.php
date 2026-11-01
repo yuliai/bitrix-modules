@@ -30,6 +30,7 @@ use Bitrix\Crm\V2\Internal\Service\Loader\MultifieldLoader;
 use Bitrix\Crm\V2\Internal\Service\Loader\ObserverLoader;
 use Bitrix\Crm\V2\Internal\Service\Loader\ParentLoader;
 use Bitrix\Crm\V2\Internal\Service\Loader\ProductRowLoader;
+use Bitrix\Crm\V2\Internal\Service\Loader\TrackingSourceLoader;
 use Bitrix\Crm\V2\Internal\Service\Loader\UtmLoader;
 use Bitrix\Crm\V2\Public\Entity\Item\Interface\HasCategoriesInterface;
 use Bitrix\Crm\V2\Public\Entity\Item\Item;
@@ -1901,6 +1902,11 @@ abstract class AbstractItemProvider
 		if ($select->shouldLoadUtm())
 		{
 			(new UtmLoader())->load($items, $select);
+		}
+
+		if ($select->shouldLoadTrackingSource())
+		{
+			(new TrackingSourceLoader())->load($items, $select);
 		}
 
 		if ($select->shouldLoadRelatedCrmObjects())

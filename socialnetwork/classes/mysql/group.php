@@ -2,8 +2,12 @@
 
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/socialnetwork/classes/general/group.php");
 
+use Bitrix\Socialnetwork\Collab\Control\ExternalMembershipValidator;
+use Bitrix\Socialnetwork\V2\Internal\Cache\DeferredCacheFeature;
+use Bitrix\Socialnetwork\V2\Internal\Cache\DeferredTagCleaner;
 use Bitrix\Socialnetwork\Internals\Registry\GroupRegistry;
 use Bitrix\Socialnetwork\Item\Workgroup\Type;
+use Bitrix\Socialnetwork\Provider\GroupProvider;
 use Bitrix\Socialnetwork\Util;
 use Bitrix\Socialnetwork\WorkgroupTable;
 use Bitrix\Socialnetwork\WorkgroupSiteTable;
@@ -128,7 +132,15 @@ class CSocNetGroup extends CAllSocNetGroup
 
 				if(defined("BX_COMP_MANAGED_CACHE"))
 				{
-					$CACHE_MANAGER->ClearByTag("sonet_group");
+					$CACHE_MANAGER->ClearByTag("sonet_group_".$ID);
+					if (DeferredCacheFeature::isOn())
+					{
+						DeferredTagCleaner::getInstance()->clearByTag('sonet_group');
+					}
+					else
+					{
+						$CACHE_MANAGER->ClearByTag("sonet_group");
+					}
 				}
 
 				$USER_FIELD_MANAGER->Update("SONET_GROUP", $ID, $arFields);
@@ -185,6 +197,14 @@ class CSocNetGroup extends CAllSocNetGroup
 		if (!$arGroupOld)
 		{
 			$APPLICATION->ThrowException(GetMessage("SONET_NO_GROUP"), "ERROR_NO_GROUP");
+			return false;
+		}
+
+		$preflight = ExternalMembershipValidator::validateFields($ID, $arFields, [], $arGroupOld);
+		if (!$preflight->isSuccess())
+		{
+			$APPLICATION->ThrowException(implode('; ', $preflight->getErrorMessages()));
+
 			return false;
 		}
 
@@ -405,6 +425,7 @@ class CSocNetGroup extends CAllSocNetGroup
 		}
 
 		$isUserFieldUpdated = (bool)$USER_FIELD_MANAGER->Update("SONET_GROUP", $ID, $arFields);
+		GroupProvider::getInstance()->invalidate((int)$ID);
 
 		if (
 			!$isUserFieldUpdated
@@ -426,10 +447,18 @@ class CSocNetGroup extends CAllSocNetGroup
 			self::clearGroupCache($ID, $bClearCommonTag);
 		}
 
+		// Keep the legacy payload intact; expose write field names separately for selective invalidation.
+		$changedFields = $fieldsToWrite + $arFields1;
+		if ($isTypeMaterialized)
+		{
+			$changedFields['TYPE'] = $restoredType;
+		}
+		$changedFieldNames = array_keys($changedFields);
+
 		$events = GetModuleEvents("socialnetwork", "OnSocNetGroupUpdate");
 		while ($arEvent = $events->Fetch())
 		{
-			ExecuteModuleEventEx($arEvent, array($ID, &$arFields));
+			ExecuteModuleEventEx($arEvent, array($ID, &$arFields, $changedFieldNames));
 		}
 
 		EventService\Service::addEvent(EventService\EventDictionary::EVENT_WORKGROUP_UPDATE, [
@@ -628,11 +657,14 @@ class CSocNetGroup extends CAllSocNetGroup
 				}
 			}
 
+			$arSelectFieldsUpper = array_map('mb_strtoupper', $arSelectFields);
 			foreach ($arOrder as $by => $order)
 			{
-				if (!in_array($by, $arSelectFields))
+				$by = mb_strtoupper($by);
+				if (!in_array($by, $arSelectFieldsUpper, true))
 				{
 					$arSelectFields[] = $by;
+					$arSelectFieldsUpper[] = $by;
 				}
 			}
 		}
@@ -879,13 +911,25 @@ class CSocNetGroup extends CAllSocNetGroup
 
 		if (defined("BX_COMP_MANAGED_CACHE"))
 		{
-			if ($clearCommonTag)
-			{
-				$CACHE_MANAGER->ClearByTag("sonet_group");
-			}
 			$CACHE_MANAGER->ClearByTag("sonet_group_".$groupId);
 			$CACHE_MANAGER->ClearByTag("sonet_user2group_G".$groupId);
-			$CACHE_MANAGER->ClearByTag("sonet_user2group");
+
+			if (DeferredCacheFeature::isOn())
+			{
+				if ($clearCommonTag)
+				{
+					DeferredTagCleaner::getInstance()->clearByTag('sonet_group');
+				}
+				DeferredTagCleaner::getInstance()->clearByTag('sonet_user2group');
+			}
+			else
+			{
+				if ($clearCommonTag)
+				{
+					$CACHE_MANAGER->ClearByTag("sonet_group");
+				}
+				$CACHE_MANAGER->ClearByTag("sonet_user2group");
+			}
 		}
 	}
 }

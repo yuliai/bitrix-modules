@@ -78,7 +78,6 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 		Provider\Zoom::class,
 		Provider\CallTracker::class,
 		Provider\StoreDocument::class,
-		Provider\Document::class,
 		Provider\SignDocument::class,
 		Provider\SignB2eDocument::class,
 		Provider\ToDo\ToDo::class,
@@ -94,6 +93,7 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 		Provider\Booking\WaitListItem::class,
 		Provider\RepeatSale::class,
 		Provider\EntityExclusion::class,
+		Provider\Sync::class,
 	];
 
 	/** The providers the timeline controller serves - map Nr7, fixed by DTO-03. */
@@ -109,7 +109,6 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 		Provider\RestApp::class,
 		Provider\Visit::class,
 		Provider\Zoom::class,
-		Provider\Document::class,
 		Provider\SignDocument::class,
 		Provider\SignB2eDocument::class,
 		Provider\ToDo\ToDo::class,
@@ -122,6 +121,7 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 		Provider\Bizproc\Task::class,
 		Provider\RepeatSale::class,
 		Provider\EntityExclusion::class,
+		Provider\Sync::class,
 	];
 
 	/**
@@ -131,7 +131,6 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 	 */
 	private const PROVIDERS_BUILDING_THEIR_OWN_TIMELINE_ITEM = [
 		Provider\OpenLine::class,
-		Provider\Document::class,
 		Provider\SignDocument::class,
 		Provider\SignB2eDocument::class,
 		Provider\ToDo\ToDo::class,
@@ -155,6 +154,7 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 		Provider\Bizproc\Task::class,
 		Provider\RepeatSale::class,
 		Provider\EntityExclusion::class,
+		Provider\Sync::class,
 	];
 
 	private readonly Closure $providerFactory;
@@ -374,7 +374,6 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 			$this->legacyDescriptor(Provider\Delivery::class),
 			$this->legacyDescriptor(Provider\CallTracker::class),
 			$this->legacyDescriptor(Provider\StoreDocument::class),
-			$this->legacyDescriptor(Provider\Document::class),
 			$this->legacyDescriptor(Provider\SignDocument::class),
 			$this->legacyDescriptor(Provider\SignB2eDocument::class),
 			$this->legacyDescriptor(Provider\Payment::class),
@@ -402,6 +401,10 @@ final class ProviderRegistry implements ProviderRegistryInterface, TimelineParti
 			$this->legacyDescriptor(
 				className: Provider\RepeatSale::class,
 				registeredWhen: static fn(): bool => Feature::enabled(Feature\RepeatSale::class),
+			),
+			$this->legacyDescriptor(
+				className: Provider\Sync::class,
+				availableWhen: static fn(): bool => Provider\Sync::isAvailable(),
 			),
 			// Declared after the providers of the legacy list because it is no member of that list: the wait
 			// belongs to the timeline and to nothing else - both of its lists, and no card of its own.

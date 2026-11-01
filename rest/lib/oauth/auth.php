@@ -10,15 +10,14 @@ namespace Bitrix\Rest\OAuth;
 
 
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\DI\ServiceLocator;
-use Bitrix\Main\Loader;
 use Bitrix\Rest\Application;
 use Bitrix\Rest\AuthStorageInterface;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\Engine\Access\HoldEntity;
 use Bitrix\Rest\Event\Session;
 use Bitrix\Rest\Internal\Access\UserAccessChecker;
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface;
+use Bitrix\Rest\Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanExceptionInterface;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Public\Provider\ApplicationProvider;
 use Bitrix\Main\SystemException;
@@ -135,7 +134,7 @@ class Auth
 								$tokenInfo['exception'] = $accessException;
 							}
 						}
-						$tokenInfo = static::appendVibePlusUpsellProjection(
+						$tokenInfo = static::appendUpsellProjection(
 							$tokenInfo,
 							userId: $upsellUserId,
 						);
@@ -225,33 +224,18 @@ class Auth
 		return null;
 	}
 
-	private static function appendVibePlusUpsellProjection(
+	private static function appendUpsellProjection(
 		array $tokenInfo,
 		?\Closure $projectionResolver = null,
 		int $userId = 0,
 	): array
 	{
+		$projectionResolver ??= static fn(int $resolvedUserId) => (new TariffAccessService())
+			->getUpsellProjection($resolvedUserId)
+		;
+
 		try
 		{
-			if ($projectionResolver === null)
-			{
-				if (!Loader::includeModule('bitrix24'))
-				{
-					return $tokenInfo;
-				}
-
-				$serviceLocator = ServiceLocator::getInstance();
-				if (!$serviceLocator->has(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class))
-				{
-					return $tokenInfo;
-				}
-
-				$projectionResolver = static fn(int $resolvedUserId) => $serviceLocator
-					->get(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class)
-					->getProjectionForUser($resolvedUserId)
-				;
-			}
-
 			$projection = $projectionResolver($userId);
 		}
 		catch (\Throwable)
@@ -259,12 +243,7 @@ class Auth
 			return $tokenInfo;
 		}
 
-		if (!$projection instanceof \Bitrix\Bitrix24\Public\ValueObject\VibePlusUpsellProjection)
-		{
-			return $tokenInfo;
-		}
-
-		return array_replace($tokenInfo, $projection->toArray());
+		return $projection === null ? $tokenInfo : array_replace($tokenInfo, $projection->toArray());
 	}
 
 	public static function getAuthKey(array $query)

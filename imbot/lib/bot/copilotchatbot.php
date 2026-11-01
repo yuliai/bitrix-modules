@@ -424,6 +424,11 @@ class CopilotChatBot extends Base
 			return false;
 		}
 
+		if (self::isScheduledTaskRequest($targetMessage->getParams()->toRestFormat()))
+		{
+			return false;
+		}
+
 		$context = self::getContext(self::CONTEXT_MODULE, self::CONTEXT_ID);
 		$engine = self::getEngineByChat($chat, $context);
 		$serviceRestriction = self::checkAiServeRestriction($engine, (int)$messageFields['FROM_USER_ID']);
@@ -594,6 +599,11 @@ class CopilotChatBot extends Base
 		$targetMessage->load($preparedFields);
 
 		if ($targetMessage->getAuthorId() === self::getBotId())
+		{
+			return false;
+		}
+
+		if (self::isScheduledTaskRequest($targetMessage->getParams()->toRestFormat()))
 		{
 			return false;
 		}

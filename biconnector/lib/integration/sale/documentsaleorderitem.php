@@ -43,7 +43,7 @@ class DocumentSaleOrderItem extends Dataset
 
 	protected function getTableDescriptionFull(): string
 	{
-		return $this->getMessage('SALE_DOCUMENT_SALEORDER_ITEM_TABLE_DESCRIPTION_FULL', '');
+		return $this->getMessage('SALE_DOCUMENT_SALEORDER_ITEM_TABLE_DESCRIPTION_FULL_MSGVER_1', '');
 	}
 
 	/**

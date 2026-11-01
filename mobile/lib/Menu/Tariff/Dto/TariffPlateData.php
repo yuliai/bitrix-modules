@@ -15,5 +15,6 @@ final class TariffPlateData extends Dto
 	public ?string $expireText;
 	public ?int $daysLeft;
 	public bool $cta;
+	public bool $ctaForced;
 	public bool $isDemoAvailable;
 }

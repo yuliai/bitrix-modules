@@ -288,7 +288,6 @@ abstract class Base
 		{
 			return $this->getAggregatedData(
 				$parameters,
-				$dateFormats,
 				$queryWhere,
 				$strQueryWhere,
 				$sqlWhere,
@@ -469,6 +468,57 @@ abstract class Base
 	}
 
 	/**
+	 * Whether this connector has an executor for a delegated aggregation (design §6.2).
+	 *
+	 * Asked exactly where the acceptance of the block used to ask for the aggregation dialect, which is
+	 * before the block is parsed: on a dataset without an executor a syntactically broken block has to
+	 * keep answering AGGREGATION_UNSUPPORTED rather than AGGREGATION_BAD_REQUEST.
+	 *
+	 * The default is no delegation, so a new connector type never starts delegating by accident.
+	 */
+	protected function canDelegateAggregation(): bool
+	{
+		return false;
+	}
+
+	/**
+	 * Turns an accepted block into the executable form of this connector (design §6.2).
+	 *
+	 * The pre-aggregation WHERE and the joins are the ones of the raw path, which is what makes the
+	 * aggregate equal to the one computed over the raw rows. The response schema, the fingerprints and
+	 * the list of touched fields are formed by the caller, not here.
+	 *
+	 * @param Aggregation\Request $request Block already parsed and validated against the capabilities.
+	 * @param Aggregation\DatasetSchema $schema Schema of the dataset the block is addressed to.
+	 * @param string $whereClause Compiled pre-aggregation predicate, empty when there is no filter.
+	 * @param string $joins Compiled join list of the raw path, empty when there are none.
+	 *
+	 * @return string Record of the query: the statement on the SQL path, the canonical block on a
+	 *     channel that sends the block itself.
+	 *
+	 * @throws Aggregation\AggregationException
+	 */
+	protected function buildAggregatedQuery(
+		Aggregation\Request $request,
+		Aggregation\DatasetSchema $schema,
+		string $whereClause,
+		string $joins,
+	): string
+	{
+		// The condition and the builder are one pair: a connector that answers the condition and builds
+		// nothing must not delegate, even when only one half of the pair was implemented.
+		throw Aggregation\AggregationException::unsupported('the connector builds no aggregated query');
+	}
+
+	/**
+	 * Date formats of the answer being prepared, for the implementations of the two members above.
+	 */
+	protected function getDateFormats(): array
+	{
+		return $this->dateFormats;
+	}
+
+	/**
 	 * The dialect of the underlying connection, or null when it cannot generate aggregated SQL.
 	 */
 	protected function getAggregationDialect(): ?BiAggregationDialectInterface
@@ -503,14 +553,15 @@ abstract class Base
 	}
 
 	/**
-	 * Builds the aggregated query instead of the row query (design §6.2).
+	 * Accepts the block and prepares the aggregated answer instead of the row one (design §6.2).
 	 *
-	 * The pre-aggregation WHERE, the joins and the field expressions are the ones of the raw path,
-	 * which is what makes the aggregate equal to the one computed over the raw rows.
+	 * Everything that does not depend on the connector type lives here: the order of the checks, the
+	 * structural parse, the validation against the capabilities, the response schema and the
+	 * fingerprints. Only the executable form of the block is built by the connector itself, through
+	 * buildAggregatedQuery().
 	 */
 	private function getAggregatedData(
 		array $parameters,
-		array $dateFormats,
 		\CBIConnectorSqlBuilder $queryWhere,
 		string $strQueryWhere,
 		array $sqlWhere,
@@ -540,10 +591,12 @@ abstract class Base
 				);
 			}
 
-			$dialect = $this->getAggregationDialect();
-			if ($dialect === null)
+			// Asked here and not below the parse: the refusal of a connector that cannot delegate has to
+			// reach the client before the block is read, so the code of a broken block stays the one of
+			// the missing executor.
+			if (!$this->canDelegateAggregation())
 			{
-				throw Aggregation\AggregationException::unsupported('dialect does not support aggregation');
+				throw Aggregation\AggregationException::unsupported('the connector does not delegate aggregation');
 			}
 
 			$schema = $this->getDatasetSchema();
@@ -558,8 +611,7 @@ abstract class Base
 				$queryWhere->RegisterSelectedField($fieldName, $schema->getFieldInfo($fieldName));
 			}
 
-			$builder = new Aggregation\SqlBuilder($dialect, $schema, $dateFormats);
-			$query = $builder->build($request, $strQueryWhere, $queryWhere->GetJoins());
+			$query = $this->buildAggregatedQuery($request, $schema, $strQueryWhere, $queryWhere->GetJoins());
 
 			$responseSchema = [];
 			foreach ($request->getResponseAliases() as $alias)

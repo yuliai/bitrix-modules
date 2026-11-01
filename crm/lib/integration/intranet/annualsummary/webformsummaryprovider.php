@@ -28,6 +28,31 @@ final class WebFormSummaryProvider implements SummaryProviderInterface
 		'views' => 'crm.webform.views',
 		'submissions' => 'crm.webform.submissions',
 		'abandonedFills' => 'crm.webform.abandoned_fills',
+		'averageFillTimeSeconds' => 'crm.webform.average_fill_time_seconds',
+		'fullyFilled' => 'crm.webform.fully_filled',
+		'sourceSite' => 'crm.webform.source.site',
+		'sourceLanding' => 'crm.webform.source.landing',
+		'sourceQr' => 'crm.webform.source.qr',
+		'sourceEmail' => 'crm.webform.source.email',
+		'sourceMessenger' => 'crm.webform.source.messenger',
+		'sourceDirectLink' => 'crm.webform.source.direct_link',
+		'sourceWidget' => 'crm.webform.source.widget',
+		'sourceUnknown' => 'crm.webform.source.unknown',
+		'deviceDesktop' => 'crm.webform.device.desktop',
+		'deviceMobile' => 'crm.webform.device.mobile',
+		'deviceOther' => 'crm.webform.device.other',
+		'errorValidation' => 'crm.webform.error.validation',
+		'errorOther' => 'crm.webform.error.other',
+		'typeEvent' => 'crm.webform.type.event',
+		'typeStatistics' => 'crm.webform.type.statistics',
+		'typeFeedback' => 'crm.webform.type.feedback',
+		'typeOther' => 'crm.webform.type.other',
+	];
+	private const LEGACY_METRIC_KEYS = [
+		'createdForms',
+		'views',
+		'submissions',
+		'abandonedFills',
 	];
 
 	private int $lastUserId = 0;
@@ -75,7 +100,7 @@ final class WebFormSummaryProvider implements SummaryProviderInterface
 		$this->lastUserId = $userIds === [] ? 0 : max($userIds);
 
 		[$allowedUserIds, $deniedUserIds] = $this->partitionUserIdsByAccess($userIds);
-		$this->summaryCleaner->delete($deniedUserIds, array_values(self::METRICS));
+		$this->deleteDeniedMetrics($deniedUserIds);
 		$collection = new EntityCollection();
 		if ($allowedUserIds === [])
 		{
@@ -105,10 +130,22 @@ final class WebFormSummaryProvider implements SummaryProviderInterface
 			return $collection;
 		}
 
+		[$allowedUserIds, $deniedUserIds] = $this->partitionUserIdsByAccess($allowedUserIds);
+		$this->deleteDeniedMetrics($deniedUserIds);
+		if ($allowedUserIds === [])
+		{
+			return $collection;
+		}
+
 		foreach ($allowedUserIds as $userId)
 		{
 			foreach (self::METRICS as $totalKey => $summaryId)
 			{
+				if (!in_array($totalKey, self::LEGACY_METRIC_KEYS, true) && !array_key_exists($totalKey, $totals))
+				{
+					continue;
+				}
+
 				$collection->add(new Summary($userId, $summaryId, (int)($totals[$totalKey] ?? 0)));
 			}
 		}
@@ -135,6 +172,15 @@ final class WebFormSummaryProvider implements SummaryProviderInterface
 		}
 
 		return array_values($normalized);
+	}
+
+	/** @param int[] $userIds */
+	private function deleteDeniedMetrics(array $userIds): void
+	{
+		if ($userIds !== [])
+		{
+			$this->summaryCleaner->delete($userIds, array_values(self::METRICS));
+		}
 	}
 
 	/**

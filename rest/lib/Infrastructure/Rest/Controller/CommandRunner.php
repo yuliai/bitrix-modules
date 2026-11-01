@@ -61,7 +61,7 @@ trait CommandRunner
 
 			if (
 				$previousException instanceof
-					Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface
+					Internal\Exception\Payment\FeatureNotAvailableOnCurrentPlanExceptionInterface
 			)
 			{
 				throw new \Bitrix\Rest\V3\Exception\FeatureNotAvailableOnCurrentPlanException($previousException);

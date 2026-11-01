@@ -864,7 +864,7 @@ class AIManager
 		{
 			'LIMIT_IS_EXCEEDED_BAAS' => ErrorCode::getAILimitOfRequestsExceededError([
 				'sliderCode' => BaasManager::isAvailable()
-					? BaasManager::SLIDER_CODE_EMPTY_MARKET_PACKAGES
+					? BaasManager::getEmptyPackagesSliderCode()
 					: BaasManager::SLIDER_CODE_EMPTY_BAAS_PACKAGES,
 				'limitCode' => self::AI_LIMIT_BAAS,
 			]),
@@ -911,7 +911,7 @@ class AIManager
 
 	/**
 	 * @internal Resets the cached Tuning\Manager so that subsequent calls re-read the `ai.tuning` option.
-	 *           Intended for tests that mutate global AI settings between cases.
+	 *           Call after changing global AI settings through another Tuning\Manager instance.
 	 */
 	public static function resetGlobalSettingsCache(): void
 	{

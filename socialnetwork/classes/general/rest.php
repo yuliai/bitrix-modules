@@ -1,5 +1,7 @@
 <?php
 
+use Bitrix\Socialnetwork\Collab\Control\ExternalMembershipValidator;
+use Bitrix\Socialnetwork\Collab\Control\ExternalMembershipValidationContext;
 use Bitrix\Disk\File;
 use Bitrix\Intranet\Integration\Templates\Bitrix24\ThemePicker;
 use Bitrix\Main\ArgumentException;
@@ -2300,6 +2302,12 @@ class CSocNetLogRestService extends IRestService
 			}
 		}
 
+		$preflight = ExternalMembershipValidator::validateFields((int)$groupID, $arFields);
+		if (!$preflight->isSuccess())
+		{
+			throw new RestException(implode('; ', $preflight->getErrorMessages()));
+		}
+
 		$res = CSocNetGroup::Update($groupID, $arFields, false);
 		if ((int)$res <= 0)
 		{
@@ -2583,6 +2591,12 @@ class CSocNetLogRestService extends IRestService
 			throw new RestException('Socialnetwork group not found');
 		}
 
+		$preflight = ExternalMembershipValidator::validateUsers((int)$groupID, $arUserID, UserToGroupTable::ROLE_USER);
+		if (!$preflight->isSuccess())
+		{
+			throw new RestException(implode('; ', $preflight->getErrorMessages()));
+		}
+
 		foreach ($arUserID as $user_id)
 		{
 			$isCurrentUserTmp = (self::getCurrentUserId() === (int)$user_id);
@@ -2664,17 +2678,61 @@ class CSocNetLogRestService extends IRestService
 			$userIdList = [ $userIdList ];
 		}
 
-		$res = CSocNetGroup::getList(array(), array(
-			"ID" => $groupId
-		));
+		$res = CSocNetGroup::getList([], ['ID' => $groupId], false, false, ['ID', 'OWNER_ID', 'TYPE']);
 		$groupFields = $res->fetch();
 		if (!is_array($groupFields))
 		{
 			throw new RestException('Socialnetwork group not found');
 		}
 
+		$useMembershipPolicy = !Loader::includeModule('extranet') && $groupFields['TYPE'] === Type::Collab->value;
+		if ($useMembershipPolicy)
+		{
+			$userIdList = array_values(array_filter(array_unique(array_map('intval', $userIdList)),
+				static fn(int $id): bool => $id > 0,
+			));
+			$existingUserIds = [];
+			foreach (array_chunk($userIdList, 500) as $batch)
+			{
+				$users = \Bitrix\Main\UserTable::getList([
+					'select' => ['ID'],
+					'filter' => ['@ID' => $batch],
+				]);
+				while ($user = $users->fetch())
+				{
+					$existingUserIds[] = (int)$user['ID'];
+				}
+			}
+			$userIdList = array_values(array_intersect($userIdList, $existingUserIds));
+			if ($userIdList === [])
+			{
+				return [];
+			}
+			$relations = UserToGroupTable::getList([
+				'select' => ['USER_ID'],
+				'filter' => ['=GROUP_ID' => $groupId, '@USER_ID' => $userIdList],
+			]);
+			$relatedUserIds = [];
+			while ($relation = $relations->fetch())
+			{
+				$relatedUserIds[] = (int)$relation['USER_ID'];
+			}
+			$userIdList = array_values(array_diff($userIdList, $relatedUserIds));
+			if ($userIdList === [])
+			{
+				return [];
+			}
+
+			$preflight = ExternalMembershipValidator::validateUsers((int)$groupId, $userIdList, UserToGroupTable::ROLE_USER);
+			if (!$preflight->isSuccess())
+			{
+				throw new RestException(implode('; ', $preflight->getErrorMessages()));
+			}
+		}
+
 		if (
 			!empty($userIdList)
+			&& !$useMembershipPolicy
 			&& Loader::includeModule('intranet')
 		)
 		{
@@ -2722,6 +2780,9 @@ class CSocNetLogRestService extends IRestService
 			}
 		}
 
+		$validationContext = $useMembershipPolicy ? ExternalMembershipValidationContext::create(
+			(int)$groupId, $userIdList, UserToGroupTable::ROLE_USER,
+		) : null;
 		$successUserId = [];
 
 		foreach ($userIdList as $userId)
@@ -2741,7 +2802,7 @@ class CSocNetLogRestService extends IRestService
 				"MESSAGE" => '',
 				"INITIATED_BY_TYPE" => UserToGroupTable::INITIATED_BY_GROUP,
 				"INITIATED_BY_USER_ID" => $groupFields['OWNER_ID']
-			]))
+			], validationContext: $validationContext))
 			{
 				$successUserId[] = $userId;
 
@@ -2791,38 +2852,50 @@ class CSocNetLogRestService extends IRestService
 			$userIdList = [ $userIdList ];
 		}
 
-		$res = CSocNetGroup::getList(array(), array(
-			"ID" => $groupId
-		));
+		$res = CSocNetGroup::getList([], ['ID' => $groupId], false, false, ['ID', 'OWNER_ID', 'TYPE']);
 		$groupFields = $res->fetch();
 		if (!is_array($groupFields))
 		{
 			throw new RestException('Socialnetwork group not found');
 		}
 
-		$successUserId = [];
-
-		$resRelation = UserToGroupTable::getList(array(
-			'filter' => array(
-				'GROUP_ID' => $groupId,
-				'@USER_ID' => $userIdList
-			),
-			'select' => array('ID', 'USER_ID', 'ROLE')
-		));
+		$relationsToUpdate = [];
+		$resRelation = UserToGroupTable::getList([
+			'filter' => ['=GROUP_ID' => $groupId, '@USER_ID' => $userIdList],
+			'select' => ['ID', 'USER_ID', 'ROLE'],
+		]);
 		while ($relation = $resRelation->fetch())
 		{
-			if (
-				$relation['ROLE'] === $role
-				|| $relation['ROLE'] === UserToGroupTable::ROLE_OWNER
-			)
+			if ($relation['ROLE'] !== $role && $relation['ROLE'] !== UserToGroupTable::ROLE_OWNER)
 			{
-				continue;
+				$relationsToUpdate[] = $relation;
 			}
+		}
+		if ($relationsToUpdate === [])
+		{
+			return [];
+		}
+		$userIdList = array_column($relationsToUpdate, 'USER_ID');
+		$useMembershipPolicy = !Loader::includeModule('extranet') && $groupFields['TYPE'] === Type::Collab->value;
+		if ($useMembershipPolicy)
+		{
+			$preflight = ExternalMembershipValidator::validateUsers((int)$groupId, $userIdList, $role);
+			if (!$preflight->isSuccess())
+			{
+				throw new RestException(implode('; ', $preflight->getErrorMessages()));
+			}
+		}
+		$validationContext = $useMembershipPolicy ? ExternalMembershipValidationContext::create(
+			(int)$groupId, $userIdList, $role,
+		) : null;
+		$successUserId = [];
 
+		foreach ($relationsToUpdate as $relation)
+		{
 			if (CSocNetUserToGroup::update($relation['ID'], [
 				"ROLE" => $role,
 				"=DATE_UPDATE" => CDatabase::currentTimeFunction(),
-			]))
+			], $validationContext))
 			{
 				$successUserId[] = $relation['USER_ID'];
 			}

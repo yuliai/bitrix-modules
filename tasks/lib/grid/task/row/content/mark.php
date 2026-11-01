@@ -58,8 +58,9 @@ class Mark extends Content
 				$encodedValue = Json::encode(['listValue' => $mark]);
 				echo $this->renderControlButton(
 					[
+						'id' => "task-grade-button-{$taskId}",
 						'class' => "task-grade-and-report {$markClass} {$addInReportClass}",
-						'aria-haspopup' => 'dialog',
+						'aria-haspopup' => 'menu',
 						'aria-expanded' => 'false',
 						'aria-label' => Loc::getMessage($markText),
 						'title' => Loc::getMessage($markText),

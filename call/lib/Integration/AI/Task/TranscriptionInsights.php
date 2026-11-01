@@ -4,6 +4,7 @@ namespace Bitrix\Call\Integration\AI\Task;
 
 use Bitrix\Main\Result;
 use Bitrix\Main\Web\Json;
+use Bitrix\Call\Settings;
 use Bitrix\Call\Integration\AI\Outcome;
 use Bitrix\Call\Integration\AI\SenseType;
 use Bitrix\Call\Integration\AI\CallAIError;
@@ -70,11 +71,12 @@ class TranscriptionInsights extends AITask
 
 	/**
 	 * Outcome version for compatibility with previous variant.
+	 * Version 2 marks a result produced by the prompt with per-speaker evaluation.
 	 * @return int
 	 */
 	public function getVersion(): int
 	{
-		return in_array(\Bitrix\Main\Application::getInstance()->getLicense()->getRegion(), ['ru', 'by']) ? 2 : 1;
+		return CallAISettings::isSpeakerEvaluationAvailable() ? 2 : 1;
 	}
 
 	/**
@@ -171,18 +173,23 @@ class TranscriptionInsights extends AITask
 		return $result->setData(['payload' => $payload]);
 	}
 
+	/**
+	 * Availability of the per-speaker evaluation is decided by the predicate alone, so the prompt
+	 * with evaluation and the raised version of {@see self::getVersion()} cannot diverge.
+	 * The CIS check only picks the base prompt and says nothing about the evaluation.
+	 * @return string
+	 */
 	protected function getPromptCode(): string
 	{
-		$promptCode = self::PROMPT_ID;
-		if (\Bitrix\Main\Application::getInstance()->getLicense()->isCis())
+		if (CallAISettings::isSpeakerEvaluationAvailable())
 		{
-			$promptCode = self::PROMPT_ID_CIS;
-			if (in_array(\Bitrix\Main\Application::getInstance()->getLicense()->getRegion(), ['ru', 'by']))
-			{
-				$promptCode = self::PROMPT_ID_CIS_EVALUATION;
-			}
+			return self::PROMPT_ID_CIS_EVALUATION;
 		}
-		return $promptCode;
+
+		return Settings::isCisRegion()
+			? self::PROMPT_ID_CIS
+			: self::PROMPT_ID
+		;
 	}
 
 	public function getAIEngineCategory(): string

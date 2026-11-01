@@ -7,11 +7,11 @@ use Bitrix\StaffTrack\Public\Services\CheckInMarkerAggregator;
 class CheckInMarkerNormalizer
 {
 	/**
-	 * @param array{kind: string, event: array, duration: ?int, auto: ?array, timestamp: int} $marker
+	 * @param array{kind: string, event: array, duration: ?int, observedDuration: ?int, auto: ?array, timestamp: int} $marker
 	 * @param array<int, array> $rawRowsById
 	 * @param array $files
 	 * @param int $timezoneOffset
-	 * @return array{id: int, kind: string, lat: ?float, lon: ?float, address: string, time: int, duration: ?int, description: string, files: array, auto: ?array, userId: int, entityType: int, dateCreate: string}
+	 * @return array{id: int, kind: string, lat: ?float, lon: ?float, address: string, time: int, duration: ?int, observedDuration: ?int, description: string, files: array, auto: ?array, userId: int, entityType: int, dateCreate: string}
 	 */
 	public static function normalize(array $marker, array $rawRowsById, array $files, int $timezoneOffset): array
 	{
@@ -34,6 +34,10 @@ class CheckInMarkerNormalizer
 			'address' => self::resolveAddress($reference, $event),
 			'time' => $timestamp,
 			'duration' => $marker['duration'],
+			// How much of the duration the day still has records for. The field is newer than the shape
+			// around it, so a marker put together outside buildMarkers() can arrive without it - unlike
+			// duration a line above. Absent reads as null, never counted, not as nothing observed.
+			'observedDuration' => $marker['observedDuration'] ?? null,
 			'description' => $isStay ? '' : $base['description'],
 			'files' => $base['files'],
 			'auto' => self::normalizeAuto($marker['auto']),
@@ -43,7 +47,12 @@ class CheckInMarkerNormalizer
 		];
 	}
 
-	private static function resolveReferencePoint(array $marker): array
+	/**
+	 * The point a marker is drawn at. A merged visit is drawn where the tracker stood rather than where
+	 * the employee pressed the button, so the coordinates of the card, of the pin on the map and of
+	 * whoever counts the visits of the day all come from here and are never resolved a second time.
+	 */
+	public static function resolveReferencePoint(array $marker): array
 	{
 		if ($marker['kind'] === CheckInMarkerAggregator::KIND_MERGED && !empty($marker['auto']))
 		{

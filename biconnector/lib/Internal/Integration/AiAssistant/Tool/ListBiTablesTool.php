@@ -5,6 +5,12 @@ namespace Bitrix\BIConnector\Internal\Integration\AiAssistant\Tool;
 use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Table\ListBiTablesOperation;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class ListBiTablesTool extends BaseBiTool
@@ -15,6 +21,11 @@ final class ListBiTablesTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'list_bi_tables';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Read;
 	}
 
 	public function getDescription(): string
@@ -58,6 +69,47 @@ final class ListBiTablesTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$schema = isset($args['schema']) && is_string($args['schema']) && $args['schema'] !== ''
+			? $args['schema']
+			: null
+		;
+
+		$limit = self::LIMIT_DEFAULT;
+		if (isset($args['limit']) && is_numeric($args['limit']))
+		{
+			$limit = (int)$args['limit'];
+		}
+
+		$offset = 0;
+		if (isset($args['offset']) && is_numeric($args['offset']))
+		{
+			$offset = (int)$args['offset'];
+		}
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$result = ServiceLocator::getInstance()->get(ListBiTablesOperation::class)->execute(
+			$schema,
+			$limit,
+			$offset,
+			new Actor($userId, Channel::Mcp),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException(OperationRefusal::forTool($result));
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

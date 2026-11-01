@@ -6,7 +6,13 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\Chart\ChartParamsBuilder;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Chart\ReplaceChartConfigOperation;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class ReplaceChartConfigTool extends BaseBiTool
@@ -14,6 +20,11 @@ final class ReplaceChartConfigTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'replace_chart_config';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -190,6 +201,56 @@ final class ReplaceChartConfigTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$chartId = (int)($args['chartId'] ?? 0);
+		$config = array_diff_key($args, array_flip(['chartId', 'confirm']));
+		$actor = new Actor($userId, Channel::Mcp);
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(ReplaceChartConfigOperation::class);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->preview($chartId, $config, $actor);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+
+			return
+				[
+					'requiresConfirmation' => true,
+					'action' => 'replace_chart_config',
+				]
+				+ $preview->getData()
+				+ [
+					'impact' => 'The chart configuration will be FULLY overwritten (visualization '
+						. 'type, dataset, metrics, dimensions, xAxis, filters, rowLimit and the '
+						. 'temporal column). Any field not re-passed reverts to defaults, not to '
+						. 'the chart\'s previous values. The chart name and description are kept.',
+					'confirmHint' => 'Show this preview to the user; only AFTER they explicitly approve, call '
+						. 'replace_chart_config again with the same arguments and confirm=true.',
+				]
+			;
+		}
+
+		$result = $operation->execute($chartId, $config, $actor);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

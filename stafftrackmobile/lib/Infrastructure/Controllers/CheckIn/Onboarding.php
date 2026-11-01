@@ -17,10 +17,17 @@ final class Onboarding extends Base
 {
 	private const STAGE_ONBOARDING = 'onboarding';
 	private const STAGE_AHA = 'aha';
+	private const STAGE_GEO_AHA = 'geo_aha';
+
+	private const GEO_AHA_STEP_STATES = [
+		0 => CheckInOnboardingProvider::GEO_AHA_STATE_PENDING,
+		1 => CheckInOnboardingProvider::GEO_AHA_STATE_SHOWN,
+	];
 
 	private const ALLOWED_STAGES = [
 		self::STAGE_ONBOARDING,
 		self::STAGE_AHA,
+		self::STAGE_GEO_AHA,
 	];
 
 	/**
@@ -54,7 +61,7 @@ final class Onboarding extends Base
 	 * `canEnableFeatures` is false when there is nothing left to enable, which turns the tour into preview mode.
 	 *
 	 * @ajaxAction stafftrackmobile.v2.CheckIn.Onboarding.getConfig
-	 * @return array{type: string, isPlanningServiceEnabled: bool, isWorkReportsEnabled: bool, canEnableFeatures: bool, employeeAhaResumeIndex: int, isGeoFeaturesAvailableByRegion: bool}
+	 * @return array{type: string, isPlanningServiceEnabled: bool, isWorkReportsEnabled: bool, canEnableFeatures: bool, employeeAhaResumeIndex: int, employeeGeoAhaState: string|null, isGeoFeaturesAvailableByRegion: bool}
 	 */
 	#[CloseSession]
 	#[IntranetOnly]
@@ -74,6 +81,7 @@ final class Onboarding extends Base
 				&& $settingsProvider->isWorkTimeToolAvailable()
 				&& !$onboardingProvider->isCheckInEnabledForHierarchy($userId),
 			'employeeAhaResumeIndex' => $onboardingProvider->getEmployeeAhaResumeIndex($userId),
+			'employeeGeoAhaState' => $onboardingProvider->getEmployeeGeoAhaState($userId),
 			'isGeoFeaturesAvailableByRegion' => Feature::isGeoFeaturesAvailableByRegion(),
 		];
 	}
@@ -144,6 +152,19 @@ final class Onboarding extends Base
 		if ($stage === self::STAGE_ONBOARDING)
 		{
 			$provider->markEmployeeOnboardingShown($userId);
+		}
+		elseif ($stage === self::STAGE_GEO_AHA)
+		{
+			$state = self::GEO_AHA_STEP_STATES[$step] ?? null;
+
+			if ($state === null)
+			{
+				$this->addError(new Error('Unknown geo aha step: ' . $step, 422));
+
+				return null;
+			}
+
+			$provider->setEmployeeGeoAhaState($userId, $state);
 		}
 		else
 		{

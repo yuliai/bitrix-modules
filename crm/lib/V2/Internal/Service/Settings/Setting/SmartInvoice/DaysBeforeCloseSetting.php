@@ -10,9 +10,8 @@ use Bitrix\Crm\Model\Field\DefaultValue\CloseDateConfigurator;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\V2\Internal\Entity\Settings\SettingDescription;
 use Bitrix\Crm\V2\Internal\Service\Settings\AbstractSetting;
-use Bitrix\Crm\V2\Internal\Service\Settings\Schema\IntegerSchema;
-use Bitrix\Crm\V2\Internal\Service\Settings\Setting\SettingTitleProvider;
-use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Crm\V2\Internal\Entity\Settings\Schema\IntegerSchema;
+use Bitrix\Crm\V2\Internal\Service\Settings\SettingTitleProvider;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use CCrmOwnerType;
@@ -26,7 +25,7 @@ final class DaysBeforeCloseSetting extends AbstractSetting
 	public const CODE = 'crm.smart_invoice.days_before_close';
 	private const TYPE_NOT_FOUND_ERROR_CODE = 'SMART_INVOICE_TYPE_NOT_FOUND';
 
-	public function __construct(private readonly ?CloseDateConfigurator $closeDateConfigurator = null)
+	public function __construct(private readonly CloseDateConfigurator $closeDateConfigurator)
 	{
 	}
 
@@ -47,7 +46,7 @@ final class DaysBeforeCloseSetting extends AbstractSetting
 
 	public function getValue(): int
 	{
-		return $this->getCloseDateConfigurator()->resolveDefaultCloseDateDays(CCrmOwnerType::SmartInvoice);
+		return $this->closeDateConfigurator->resolveDefaultCloseDateDays(CCrmOwnerType::SmartInvoice);
 	}
 
 	protected function apply(mixed $value): Result
@@ -65,11 +64,6 @@ final class DaysBeforeCloseSetting extends AbstractSetting
 		return $type->save();
 	}
 
-	private function getCloseDateConfigurator(): CloseDateConfigurator
-	{
-		return $this->closeDateConfigurator
-			?? ServiceLocator::getInstance()->get(CloseDateConfigurator::class);
-	}
 
 	private function resolveType(): ?Type
 	{

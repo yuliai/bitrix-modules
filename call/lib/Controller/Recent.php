@@ -6,6 +6,7 @@ use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\ActionFilter\Scope;
 use Bitrix\Main\Error;
 use Bitrix\Call\Recent as RecentService;
+use Bitrix\Call\Settings;
 use Bitrix\Call\Model\CallUserTable;
 
 /**
@@ -14,10 +15,12 @@ use Bitrix\Call\Model\CallUserTable;
 class Recent extends Controller
 {
 	/**
-	 * Whitelist of fields exposed by {@see self::getActiveAction()}. Anything
-	 * else returned by {@see \Bitrix\Call\Recent::getActiveCalls()} (PUBLIC_ID,
-	 * PARENT_ID/UUID, ENDPOINT, AI_ANALYZE, USERS, USER_DATA, ...) is dropped
-	 * before the response is sent.
+	 * Whitelist of fields exposed by {@see self::getActiveAction()} in the lean
+	 * (default) form. Anything else returned by
+	 * {@see \Bitrix\Call\Recent::getActiveCalls()} (PUBLIC_ID, PARENT_ID/UUID,
+	 * ENDPOINT, AI_ANALYZE, ...) is dropped before the response is sent. USERS
+	 * and USER_DATA are added on top of this list only when the caller opts in
+	 * via `withUserData` -- see {@see self::USER_DATA_FIELDS}.
 	 */
 	private const RESPONSE_FIELDS = [
 		'ID',
@@ -42,26 +45,60 @@ class Recent extends Controller
 	];
 
 	/**
+	 * Fields appended to every call in the full form (`withUserData = true`).
+	 * They bring the getActive payload to parity with the init-preload snapshot
+	 * so a joined-late client can instantiate the call without an extra request.
+	 */
+	private const USER_DATA_FIELDS = [
+		'USERS',
+		'USER_DATA',
+	];
+
+	/**
+	 * Values treated as boolean `true` for the flag parameters. AJAX delivers
+	 * them as 'Y'/'1' strings, REST as native true/1; everything else (including
+	 * the 'N' string, which is truthy under a naive bool cast) is false. Mirrors
+	 * {@see \Bitrix\Call\Controller\CallManager}.
+	 */
+	private const VALID_TRUE_VALUES = [true, 1, '1', 'Y', 'y', 'true'];
+
+	/**
 	 * @inheritDoc
 	 */
 	public function configureActions(): array
 	{
 		return [
 			'getActive' => [
-				'+prefilters' => [new Scope(Scope::AJAX)],
+				'+prefilters' => [new Scope(Scope::AJAX | Scope::REST)],
 			],
 		];
 	}
 
 	/**
-	 * Returns active calls of the current user (the "recent" surface).
+	 * Returns active calls of the current user (the "recent" surface). Served on
+	 * both transports: AJAX (web) and REST (mobile via getRestClient).
 	 *
-	 * Reads from {@see \Bitrix\Call\Cache\ActiveCallsCache} via
-	 * {@see \Bitrix\Call\Recent::getActiveCalls()}. Returns `calls: []` when
-	 * {@see \Bitrix\Call\Settings::isNewCallsEnabled()} is off. Active call
-	 * horizon is 12 hours.
+	 * By default the snapshot is served cache-first via
+	 * {@see \Bitrix\Call\Recent::getActiveCallsForUser()}; when `forceRecalc` is
+	 * truthy it is rebuilt from `b_call_user` via
+	 * {@see \Bitrix\Call\Recent::updateUserActiveCallsCacheThrottled()} instead --
+	 * a safety net for the "joined-late, cache not warm yet" race, not the default
+	 * path, and throttled per user so it cannot be abused as a rebuild-storm DoS.
+	 *
+	 * Returns `calls: []` (degradation, not an error) when
+	 * {@see \Bitrix\Call\Settings::isNewCallsEnabled()} is off.
+	 * Active call horizon is 12 hours.
+	 *
+	 * The response is lean by default (whitelist below). With `withUserData`
+	 * truthy the full form additionally exposes USERS and USER_DATA so a client
+	 * that joined the call late can instantiate it without a second round-trip.
 	 *
 	 * @restMethod call.Recent.getActive
+	 *
+	 * @param mixed $forceRecalc Rebuild the snapshot instead of reading cache.
+	 *                           Accepts 'Y'/'N' (AJAX) or true/false (REST).
+	 * @param mixed $withUserData Include USERS and USER_DATA (full form).
+	 *                            Accepts 'Y'/'N' (AJAX) or true/false (REST).
 	 *
 	 * Response shape:
 	 * ```
@@ -96,26 +133,41 @@ class Recent extends Controller
 	 * ]
 	 * ```
 	 *
-	 * Fields produced by the cache layer but intentionally not exposed:
+	 * Fields produced by the cache layer but always dropped:
 	 * `IS_PUBLIC`, `PUBLIC_ID`, `PARENT_ID`, `PARENT_UUID`, `ENDPOINT`,
-	 * `AI_ANALYZE`, `USERS`, `USER_DATA`.
+	 * `AI_ANALYZE`. `USERS` and `USER_DATA` are opt-in via `withUserData`.
 	 *
 	 * @return array|null `null` is returned together with `USER_NOT_AUTHORIZED`
 	 *                    in the error list when the request has no current user.
 	 */
-	public function getActiveAction(): ?array
+	public function getActiveAction($forceRecalc = false, $withUserData = false): ?array
 	{
-		$userId = $this->getCurrentUser()?->getId();
-		if (!$userId)
+		$userId = (int)($this->getCurrentUser()?->getId() ?? 0);
+		if ($userId <= 0)
 		{
 			$this->addError(new Error('User not authorized', 'USER_NOT_AUTHORIZED'));
 			return null;
 		}
 
-		$activeCalls = RecentService::getActiveCalls();
+		if (!Settings::isNewCallsEnabled())
+		{
+			return ['calls' => []];
+		}
+
+		$forceRecalc = in_array($forceRecalc, self::VALID_TRUE_VALUES, true);
+		$withUserData = in_array($withUserData, self::VALID_TRUE_VALUES, true);
+
+		$activeCalls = $forceRecalc
+			? RecentService::updateUserActiveCallsCacheThrottled($userId)
+			: RecentService::getActiveCallsForUser($userId);
+
 		$userStateByCallId = $this->loadUserStateByCallId(array_keys($activeCalls), $userId);
 
-		$allowed = array_flip(self::RESPONSE_FIELDS);
+		$responseFields = $withUserData
+			? [...self::RESPONSE_FIELDS, ...self::USER_DATA_FIELDS]
+			: self::RESPONSE_FIELDS;
+		$allowed = array_flip($responseFields);
+
 		$calls = [];
 		foreach ($activeCalls as $callId => $callData)
 		{

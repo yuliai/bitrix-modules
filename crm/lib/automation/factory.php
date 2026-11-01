@@ -175,13 +175,7 @@ class Factory
 
 	public static function canUseBizprocDesigner()
 	{
-		if (Loader::includeModule('bitrix24'))
-		{
-			$feature = 'crm_automation_designer';
-			return Feature::isFeatureEnabled($feature);
-		}
-
-		return true;
+		return DesignerAvailability::getInstance()->isAvailable();
 	}
 
 	public static function isBizprocDesignerSupported(int $entityTypeId): bool

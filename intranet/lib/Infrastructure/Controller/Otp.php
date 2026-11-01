@@ -19,6 +19,7 @@ use Bitrix\Intranet\Internal\Integration\Main\VerifyEmailService;
 use Bitrix\Intranet\Internal\Integration\Main\VerifyPhoneService;
 use Bitrix\Intranet\Internal\Integration\Security\PersonalOtp;
 use Bitrix\Intranet\Internal\Integration\Security\RecoveryCodes;
+use Bitrix\Intranet\Internal\Service\Otp\DeferredSkipDeviceConnectAccess;
 use Bitrix\Intranet\Internal\Service\Otp\MobilePush;
 use Bitrix\Intranet\Internal\Service\Otp\PersonalMobilePush;
 use Bitrix\Intranet\Internal\Service\Otp\RecoverAccessRequestService;
@@ -52,6 +53,7 @@ use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\HttpHeaders;
 use Bitrix\Security\Controller\PushOtp;
+use Bitrix\Security\Mfa\Otp as SecurityOtp;
 use Bitrix\Security\Mfa\OtpException;
 use Bitrix\Intranet\Entity\User;
 
@@ -140,11 +142,25 @@ class Otp extends Controller
 					new HttpMethod([HttpMethod::METHOD_POST]),
 				],
 			],
+			'changeAuthPhone' => $this->getDeferredContactActionConfig(),
+			'sendConfirmationCode' => $this->getDeferredContactActionConfig(),
+			'confirmationPhoneNumber' => $this->getDeferredContactActionConfig(),
+			'changeAuthEmail' => $this->getDeferredContactActionConfig(),
+			'sendEmailConfirmation' => $this->getDeferredContactActionConfig(),
+			'confirmationEmail' => $this->getDeferredContactActionConfig(),
 			'isTrusted' => [
 				'+prefilters' => [
 					new HttpMethod([HttpMethod::METHOD_POST]),
 				],
 			],
+		];
+	}
+
+	private function getDeferredContactActionConfig(): array
+	{
+		return [
+			'-prefilters' => ['\\Bitrix\\Main\\Engine\\ActionFilter\\Authentication'],
+			'+prefilters' => [new HttpMethod([HttpMethod::METHOD_POST])],
 		];
 	}
 
@@ -204,7 +220,7 @@ class Otp extends Controller
 		return new Result();
 	}
 
-	public function startSkipDeviceConnectAction(): ?array
+	public function startSkipDeviceConnectAction(?string $signedUserId = null): ?array
 	{
 		$skipDeviceConnect = $this->createSkipDeviceConnectService();
 
@@ -215,8 +231,8 @@ class Otp extends Controller
 			return null;
 		}
 
-		$user = $this->getCurrentIntranetUser();
-		if (!$user || !$this->canCurrentUserEditOtp($user))
+		$user = $this->getSkipDeviceConnectUser($signedUserId);
+		if (!$user)
 		{
 			$this->addError(new Error('No rights', 'SKIP_DEVICE_CONNECT_ACCESS_DENIED'));
 
@@ -231,7 +247,7 @@ class Otp extends Controller
 		}
 
 		$personalOtp = $this->createPersonalOtp($user);
-		if ($personalOtp->isInitialized())
+		if (!$personalOtp->canSkipDeviceConnect())
 		{
 			$this->addError(new Error('OTP is already initialized', 'SKIP_DEVICE_CONNECT_OTP_INITIALIZED'));
 
@@ -273,12 +289,12 @@ class Otp extends Controller
 		return $flow;
 	}
 
-	public function completeSkipDeviceConnectAction(string $flowId): ?array
+	public function completeSkipDeviceConnectAction(string $flowId, ?string $signedUserId = null): ?array
 	{
 		$skipDeviceConnect = $this->createSkipDeviceConnectService();
-		$user = $this->getCurrentIntranetUser();
+		$user = $this->getSkipDeviceConnectUser($signedUserId);
 
-		if (!$user || !$this->canCurrentUserEditOtp($user))
+		if (!$user)
 		{
 			$this->addError(new Error('No rights', 'SKIP_DEVICE_CONNECT_ACCESS_DENIED'));
 
@@ -304,6 +320,18 @@ class Otp extends Controller
 						return ['activated' => true];
 					}
 
+					$securityAvailable = $this->isSecurityModuleAvailable();
+					if (
+						$securityAvailable
+						&& $this->wasSkipDeviceConnectCompletedByFlow($this->createPersonalOtp($user), $flowId)
+					)
+					{
+						SecurityOtp::cleanCache($user->getId());
+						$skipDeviceConnect->complete($user, $flowId);
+
+						return ['activated' => true];
+					}
+
 					if (!$this->isSkipDeviceConnectAllowed())
 					{
 						$skipDeviceConnect->cancel($user, $flowId);
@@ -312,7 +340,7 @@ class Otp extends Controller
 						return null;
 					}
 
-					if (!$this->isSecurityModuleAvailable() || !$this->isPushOtpAvailable())
+					if (!$securityAvailable || !$this->isPushOtpAvailable())
 					{
 						$this->addError(new Error('Push OTP is not available', 'SKIP_DEVICE_CONNECT_PUSH_UNAVAILABLE'));
 
@@ -341,28 +369,26 @@ class Otp extends Controller
 					try
 					{
 						$personalOtp = $this->createPersonalOtp($user);
-						if ($personalOtp->isInitialized())
+						if (!$personalOtp->canSkipDeviceConnect())
 						{
 							$connection->commitTransaction();
-
-							if (
-								$personalOtp->isActivated()
-								&& $personalOtp->isPushType()
-								&& $personalOtp->isDeviceConnectSkipped()
-							)
-							{
-								$skipDeviceConnect->complete($user, $flowId);
-
-								return ['activated' => true];
-							}
-
 							$skipDeviceConnect->cancel($user, $flowId);
 							$this->addError(new Error('OTP was initialized in another mode', 'SKIP_DEVICE_CONNECT_OTP_CONFLICT'));
 
 							return null;
 						}
 
-						$personalOtp->setupSkipDeviceConnect();
+						$personalOtp->setupSkipDeviceConnect($flowId);
+						if (!$this->canLoginByChannel($user, $confirmedChannel))
+						{
+							$connection->rollbackTransaction();
+							SecurityOtp::cleanCache($user->getId());
+							$this->sendSkipDeviceConnectEvent('callback_rejected');
+							$this->addError(new Error('The selected contact is not confirmed', 'SKIP_DEVICE_CONNECT_CHANNEL_UNCONFIRMED'));
+
+							return null;
+						}
+
 						$personalOtp->activate();
 						if (!$personalOtp->isActivated())
 						{
@@ -374,6 +400,7 @@ class Otp extends Controller
 					catch (OtpException $exception)
 					{
 						$connection->rollbackTransaction();
+						SecurityOtp::cleanCache($user->getId());
 						$this->addError(new Error($exception->getMessage(), 'SKIP_DEVICE_CONNECT_ACTIVATION_FAILED'));
 
 						return null;
@@ -381,10 +408,12 @@ class Otp extends Controller
 					catch (\Throwable $exception)
 					{
 						$connection->rollbackTransaction();
+						SecurityOtp::cleanCache($user->getId());
 
 						throw $exception;
 					}
 
+					SecurityOtp::cleanCache($user->getId());
 					$skipDeviceConnect->complete($user, $flowId);
 					$this->sendSkipDeviceConnectEvent('activated');
 
@@ -400,9 +429,21 @@ class Otp extends Controller
 		}
 	}
 
-	public function cancelSkipDeviceConnectAction(string $flowId): void
+	private function wasSkipDeviceConnectCompletedByFlow(PersonalOtp $personalOtp, string $flowId): bool
 	{
-		$user = $this->getCurrentIntranetUser();
+		$initParams = $personalOtp->getInitParams();
+
+		return $personalOtp->isActivated()
+			&& $personalOtp->isPushType()
+			&& $personalOtp->isDeviceConnectSkipped()
+			&& is_string($initParams['skipDeviceConnectFlowHash'] ?? null)
+			&& hash_equals($initParams['skipDeviceConnectFlowHash'], hash('sha256', $flowId))
+		;
+	}
+
+	public function cancelSkipDeviceConnectAction(string $flowId, ?string $signedUserId = null): void
+	{
+		$user = $this->getSkipDeviceConnectUser($signedUserId);
 		if ($user !== null)
 		{
 			try
@@ -429,6 +470,85 @@ class Otp extends Controller
 		$currentUserId = (int)CurrentUser::get()->getId();
 
 		return $currentUserId > 0 ? (new UserRepository())->getUserById($currentUserId) : null;
+	}
+
+	protected function getSkipDeviceConnectUser(?string $signedUserId): ?User
+	{
+		$currentUser = $this->getCurrentIntranetUser();
+		if ($currentUser !== null)
+		{
+			return $this->canCurrentUserEditOtp($currentUser) ? $currentUser : null;
+		}
+
+		if (!Loader::includeModule('security'))
+		{
+			return null;
+		}
+
+		$userId = (new DeferredSkipDeviceConnectAccess())->getDeferredUserId($signedUserId);
+
+		return $userId === null ? null : $this->getIntranetUserById($userId);
+	}
+
+	protected function getIntranetUserById(int $userId): ?User
+	{
+		return (new UserRepository())->getUserById($userId);
+	}
+
+	private function canAccessContactConfirmation(
+		User $user,
+		?string $flowId,
+		?string $signedUserId,
+		string $channel,
+	): bool
+	{
+		if ($this->getCurrentIntranetUser() !== null)
+		{
+			return $this->canCurrentUserEditOtp($user);
+		}
+
+		$deferredUser = $this->getSkipDeviceConnectUser($signedUserId);
+		if ($deferredUser === null || $deferredUser->getId() !== $user->getId() || $flowId === null)
+		{
+			return false;
+		}
+
+		if (
+			!$this->isSkipDeviceConnectAllowed()
+			|| !$this->isSecurityModuleAvailable()
+			|| !$this->isPushOtpAvailable()
+			|| !$this->createPersonalOtp($user)->canSkipDeviceConnect()
+		)
+		{
+			return false;
+		}
+
+		$skipDeviceConnect = $this->createSkipDeviceConnectService();
+		if ($skipDeviceConnect->isCompleted($user, $flowId))
+		{
+			return false;
+		}
+
+		return in_array(
+			$channel,
+			$skipDeviceConnect->getAvailableChannels($user, $flowId),
+			true,
+		);
+	}
+
+	protected function createVerifyPhoneService(User $user): VerifyPhoneService
+	{
+		return VerifyPhoneService::createFor2Fa($user);
+	}
+
+	protected function requirePhoneConfirmation(User $user): void
+	{
+		PersonalMobilePush::createByUser($user)->requirePhoneConfirmation();
+	}
+
+	protected function clearPhoneConfirmationRequirement(User $user): void
+	{
+		PersonalMobilePush::createByUser($user)->clearPhoneConfirmationRequirement();
 	}
 
 	protected function canCurrentUserEditOtp(User $user): bool
@@ -722,7 +842,12 @@ class Otp extends Controller
 	/**
 	 * @throws ArgumentException
 	 */
-	public function changeAuthPhoneAction(User $user, Phone $phoneNumber): bool
+	public function changeAuthPhoneAction(
+		User $user,
+		Phone $phoneNumber,
+		?string $flowId = null,
+		?string $signedUserId = null,
+	): bool
 	{
 		if (!Loader::includeModule('security'))
 		{
@@ -733,22 +858,19 @@ class Otp extends Controller
 
 		try
 		{
-			$permission = new UserPermission($user);
-
-			if (!$permission->canEdit())
+			if (!$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_PHONE))
 			{
 				$this->addError(new Error("No rights"));
 
 				return false;
 			}
 
-			$verifyPhoneService = new VerifyPhoneService($user);
+			$verifyPhoneService = $this->createVerifyPhoneService($user);
 			$verifyPhoneService->changeAuthPhone($phoneNumber);
 
 			if (!$verifyPhoneService->isConfirmed($phoneNumber))
 			{
-				$personalMobilePush = PersonalMobilePush::createByUser($user);
-				$personalMobilePush->requirePhoneConfirmation();
+				$this->requirePhoneConfirmation($user);
 			}
 
 			return true;
@@ -767,9 +889,14 @@ class Otp extends Controller
 		}
 	}
 
-	public function sendConfirmationCodeAction(User $user, string $smsTemplate = 'SMS_USER_CONFIRM_NUMBER'): ?array
+	public function sendConfirmationCodeAction(
+		User $user,
+		string $smsTemplate = 'SMS_USER_CONFIRM_NUMBER',
+		?string $flowId = null,
+		?string $signedUserId = null,
+	): ?array
 	{
-		if (!(new UserPermission($user))->canEdit())
+		if (!$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_PHONE))
 		{
 			$this->addError(new Error("No rights"));
 
@@ -778,7 +905,7 @@ class Otp extends Controller
 
 		try
 		{
-			return VerifyPhoneService::createFor2Fa($user)->sendCodeByTemplate($smsTemplate);
+			return $this->createVerifyPhoneService($user)->sendCodeByTemplate($smsTemplate);
 		}
 		catch (SendException $exception)
 		{
@@ -793,7 +920,12 @@ class Otp extends Controller
 	/**
 	 * @throws SystemException|LoaderException
 	 */
-	public function confirmationPhoneNumberAction(User $user, string $code, ?string $flowId = null): ?bool
+	public function confirmationPhoneNumberAction(
+		User $user,
+		string $code,
+		?string $flowId = null,
+		?string $signedUserId = null,
+	): ?bool
 	{
 		if (!Loader::includeModule('security'))
 		{
@@ -804,7 +936,7 @@ class Otp extends Controller
 
 		try
 		{
-			if (!(new UserPermission($user))->canEdit())
+			if (!$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_PHONE))
 			{
 				$this->addError(new Error("No rights"));
 
@@ -813,10 +945,10 @@ class Otp extends Controller
 
 			$confirmation = function () use ($user, $code): bool
 			{
-				$confirmed = (new VerifyPhoneService($user))->confirmPhoneNumber($code);
+				$confirmed = $this->createVerifyPhoneService($user)->confirmPhoneNumber($code);
 				if ($confirmed)
 				{
-					PersonalMobilePush::createByUser($user)->clearPhoneConfirmationRequirement();
+					$this->clearPhoneConfirmationRequirement($user);
 				}
 
 				return $confirmed;
@@ -840,7 +972,7 @@ class Otp extends Controller
 		}
 	}
 
-	public function changeAuthEmailAction(Email $email)
+	public function changeAuthEmailAction(Email $email, ?string $flowId = null, ?string $signedUserId = null)
 	{
 		if (!Loader::includeModule('security'))
 		{
@@ -849,10 +981,15 @@ class Otp extends Controller
 			return false;
 		}
 
-		return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
+		if ($this->getCurrentIntranetUser() !== null)
+		{
+			return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
+		}
+
+		return $this->sendDeferredEmailConfirmation($email, $flowId, $signedUserId);
 	}
 
-	public function sendEmailConfirmationAction(Email $email)
+	public function sendEmailConfirmationAction(Email $email, ?string $flowId = null, ?string $signedUserId = null)
 	{
 		if (!Loader::includeModule('security'))
 		{
@@ -861,13 +998,41 @@ class Otp extends Controller
 			return [];
 		}
 
+		if ($this->getCurrentIntranetUser() !== null)
+		{
+			return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
+		}
+
+		return $this->sendDeferredEmailConfirmation($email, $flowId, $signedUserId);
+	}
+
+	private function sendDeferredEmailConfirmation(Email $email, ?string $flowId, ?string $signedUserId): ?array
+	{
+		$user = $this->getSkipDeviceConnectUser($signedUserId);
+		if (
+			$user === null
+			|| $flowId === null
+			|| !$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_EMAIL)
+			|| !$this->isEmailChannelAvailable($user)
+		)
+		{
+			$this->addError(new Error('No rights', 'SKIP_DEVICE_CONNECT_ACCESS_DENIED'));
+
+			return null;
+		}
+
 		return $this->forward(PushOtp::class, 'sendConfirmationEmail', ['email' => $email->getValue()]);
 	}
 
 	/**
 	 * @throws SystemException|LoaderException
 	 */
-	public function confirmationEmailAction(string $code, string $signedData, ?string $flowId = null)
+	public function confirmationEmailAction(
+		string $code,
+		string $signedData,
+		?string $flowId = null,
+		?string $signedUserId = null,
+	)
 	{
 		if (!Loader::includeModule('security'))
 		{
@@ -877,6 +1042,51 @@ class Otp extends Controller
 		}
 
 		$user = $this->getCurrentIntranetUser();
+		if ($user === null)
+		{
+			$user = $this->getSkipDeviceConnectUser($signedUserId);
+			if (
+				$user === null
+				|| $flowId === null
+				|| !$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_EMAIL)
+				|| !$this->isEmailChannelAvailable($user)
+			)
+			{
+				$this->addError(new Error('No rights', 'SKIP_DEVICE_CONNECT_ACCESS_DENIED'));
+
+				return false;
+			}
+
+			$confirmation = function () use ($user, $code, $signedData, $flowId, $signedUserId): bool {
+				if (
+					!$this->canAccessContactConfirmation($user, $flowId, $signedUserId, SkipDeviceConnect::CHANNEL_EMAIL)
+					|| !$this->isEmailChannelAvailable($user)
+				)
+				{
+					$this->addError(new Error('No rights', 'SKIP_DEVICE_CONNECT_ACCESS_DENIED'));
+
+					return false;
+				}
+				$this->forward(PushOtp::class, 'confirmEmail', [
+					'code' => $code,
+					'signedData' => $signedData,
+				]);
+				if ($this->hasErrors())
+				{
+					return false;
+				}
+
+				return $this->canLoginByChannel($user, SkipDeviceConnect::CHANNEL_EMAIL);
+			};
+
+			return $this->runSkipDeviceConnectConfirmation(
+				$user,
+				$flowId,
+				SkipDeviceConnect::CHANNEL_EMAIL,
+				$confirmation,
+			);
+		}
+
 		$confirmation = function () use ($code, $signedData): bool
 		{
 			$this->forward(PushOtp::class, 'confirmEmail', [
@@ -911,6 +1121,16 @@ class Otp extends Controller
 			return $skipDeviceConnect->runLocked(
 				$user,
 				function () use ($skipDeviceConnect, $user, $flowId, $channel, $confirmation): bool {
+					if (
+						$skipDeviceConnect->isCompleted($user, $flowId)
+						|| !in_array($channel, $skipDeviceConnect->getAvailableChannels($user, $flowId), true)
+					)
+					{
+						$this->addError(new Error('Skip device connection intent was not found', 'SKIP_DEVICE_CONNECT_NO_INTENT'));
+
+						return false;
+					}
+
 					if (!$confirmation())
 					{
 						return false;

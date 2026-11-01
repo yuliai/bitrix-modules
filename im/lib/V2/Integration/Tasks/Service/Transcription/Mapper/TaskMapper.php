@@ -18,7 +18,6 @@ use Bitrix\Tasks\V2\Internal\Entity\Task;
 use Bitrix\Tasks\V2\Internal\Entity\Priority;
 use Bitrix\Tasks\V2\Internal\Entity\User;
 use Bitrix\Tasks\V2\Internal\Entity\UserCollection;
-use CIMShare;
 use CTimeZone;
 
 class TaskMapper
@@ -35,7 +34,6 @@ class TaskMapper
 	public function convertFromTranscribedMessage(
 		array $taskData,
 		Message $message,
-		string $transcribedText,
 		int $initiatorId,
 		bool $isMultipleMessages = false,
 	): ?Task
@@ -61,7 +59,7 @@ class TaskMapper
 
 		return new Task(
 			title: $title,
-			description: $this->prepareDescription($taskData['description'] ?? '', $message, $transcribedText),
+			description: $taskData['description'] ?? '',
 			creator: $creator,
 			responsible: $responsible,
 			deadlineTs: $this->prepareDeadline($taskData['deadline'] ?? '', \Bitrix\Im\V2\Entity\User\User::getInstance($initiatorId)->getTimezone()),
@@ -73,21 +71,6 @@ class TaskMapper
 			dependsOn: $this->prepareRelatedTasks($chat),
 			scenarios: $this->prepareScenarios($message, $isMultipleMessages),
 		);
-	}
-
-	private function prepareDescription(string $description, Message $message, string $transcribedText): string
-	{
-		$chat = $message->getChat();
-
-		$quote = CIMShare::prepareText([
-			'CHAT_ID' => $chat->getChatId(),
-			'MESSAGE_ID' => $message->getMessageId(),
-			'MESSAGE_TYPE' => $chat->getType(),
-			'MESSAGE' => $transcribedText,
-			'AUTHOR_ID' => $message->getAuthorId(),
-		]);
-
-		return "{$description}\n{$quote}";
 	}
 
 	private function prepareDeadline(string $formattedDeadline, ?string $userTimeZone = null): ?int

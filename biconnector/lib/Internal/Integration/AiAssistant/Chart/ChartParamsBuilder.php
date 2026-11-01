@@ -65,21 +65,26 @@ final class ChartParamsBuilder
 	 *   ownerId?: int,
 	 * }
 	 *
+	 * @param (\Closure(string): \Throwable)|null $refusal What an invalid DSL is thrown as, given its description;
+	 *     McpException by default.
+	 *
 	 * @return array Payload for Superset POST /chart/.
-	 * @throws McpException on invalid DSL.
+	 * @throws McpException on invalid DSL, unless another refusal is given.
 	 */
-	public static function build(array $dsl): array
+	public static function build(array $dsl, ?\Closure $refusal = null): array
 	{
+		$refusal ??= static fn(string $message): \Throwable => new McpException($message);
+
 		$datasetId = (int)($dsl['datasetId'] ?? 0);
 		if ($datasetId <= 0)
 		{
-			throw new McpException('datasetId is required and must be a positive integer.');
+			throw $refusal('datasetId is required and must be a positive integer.');
 		}
 
 		$vizTypeAlias = (string)($dsl['vizType'] ?? '');
 		if (!isset(self::VIZ_TYPE_MAP[$vizTypeAlias]))
 		{
-			throw new McpException(
+			throw $refusal(
 				'Unknown vizType "' . $vizTypeAlias . '". Allowed: ' . implode(', ', self::VIZ_TYPES) . '.'
 			);
 		}
@@ -88,22 +93,22 @@ final class ChartParamsBuilder
 		$name = trim((string)($dsl['name'] ?? ''));
 		if ($name === '')
 		{
-			throw new McpException('Chart name is required.');
+			throw $refusal('Chart name is required.');
 		}
 
 		$temporalColumn = trim((string)($dsl['temporalColumn'] ?? ''));
 		if ($temporalColumn === '')
 		{
-			throw new McpException(
+			throw $refusal(
 				'temporalColumn is required: every chart must bind to the dashboard '
 				. 'date filter via a TEMPORAL_RANGE filter on a date/datetime column. '
 				. 'Pass the real column name from the dataset (e.g. CREATED_DATE).'
 			);
 		}
 
-		$metrics = self::normalizeMetrics($dsl['metrics'] ?? []);
-		$dimensions = self::normalizeStringList($dsl['dimensions'] ?? [], 'dimensions');
-		$filters = self::normalizeFilters($dsl['filters'] ?? []);
+		$metrics = self::normalizeMetrics($dsl['metrics'] ?? [], $refusal);
+		$dimensions = self::normalizeStringList($dsl['dimensions'] ?? [], 'dimensions', $refusal);
+		$filters = self::normalizeFilters($dsl['filters'] ?? [], $refusal);
 		$rowLimit = self::normalizeRowLimit($dsl['rowLimit'] ?? null, $vizTypeAlias);
 
 		$params = self::buildParams(
@@ -116,6 +121,7 @@ final class ChartParamsBuilder
 			$rowLimit,
 			(string)($dsl['xAxis'] ?? ''),
 			$temporalColumn,
+			$refusal,
 		);
 
 		$payload = [
@@ -150,10 +156,14 @@ final class ChartParamsBuilder
 		int $rowLimit,
 		string $xAxis,
 		string $temporalColumn,
+		\Closure $refusal,
 	): array
 	{
 		$datasource = $datasetId . '__table';
-		$adhocFilters = array_map([self::class, 'buildAdhocFilter'], $filters);
+		$adhocFilters = array_map(
+			static fn(array $filter): array => self::buildAdhocFilter($filter, $refusal),
+			$filters,
+		);
 
 		// Every chart must react to the dashboard date filter. Superset's
 		// merge_extra_form_data (utils/core.py) rewrites the comparator of any
@@ -186,12 +196,12 @@ final class ChartParamsBuilder
 			case 'scatter':
 				if (empty($metrics))
 				{
-					throw new McpException($vizTypeAlias . ' chart requires at least one metric.');
+					throw $refusal($vizTypeAlias . ' chart requires at least one metric.');
 				}
 				$xAxisColumn = $xAxis !== '' ? $xAxis : (string)($dimensions[0] ?? '');
 				if ($xAxisColumn === '')
 				{
-					throw new McpException($vizTypeAlias . ' chart requires xAxis (or at least one dimension).');
+					throw $refusal($vizTypeAlias . ' chart requires xAxis (or at least one dimension).');
 				}
 				$groupby = array_values(array_filter(
 					$dimensions,
@@ -233,11 +243,11 @@ final class ChartParamsBuilder
 			case 'pie':
 				if (empty($metrics))
 				{
-					throw new McpException('pie chart requires exactly one metric.');
+					throw $refusal('pie chart requires exactly one metric.');
 				}
 				if (empty($dimensions))
 				{
-					throw new McpException('pie chart requires at least one dimension.');
+					throw $refusal('pie chart requires at least one dimension.');
 				}
 
 				return [
@@ -298,7 +308,7 @@ final class ChartParamsBuilder
 			case 'big_number':
 				if (empty($metrics))
 				{
-					throw new McpException('big_number chart requires exactly one metric.');
+					throw $refusal('big_number chart requires exactly one metric.');
 				}
 
 				return [
@@ -314,14 +324,14 @@ final class ChartParamsBuilder
 				];
 		}
 
-		throw new McpException('Unsupported vizType: ' . $vizTypeAlias);
+		throw $refusal('Unsupported vizType: ' . $vizTypeAlias);
 	}
 
-	private static function normalizeMetrics(mixed $raw): array
+	private static function normalizeMetrics(mixed $raw, \Closure $refusal): array
 	{
 		if (!is_array($raw))
 		{
-			throw new McpException('metrics must be an array.');
+			throw $refusal('metrics must be an array.');
 		}
 
 		$result = [];
@@ -329,7 +339,7 @@ final class ChartParamsBuilder
 		{
 			if (!is_array($metric))
 			{
-				throw new McpException('metrics[' . $idx . '] must be an object.');
+				throw $refusal('metrics[' . $idx . '] must be an object.');
 			}
 
 			$column = trim((string)($metric['column'] ?? ''));
@@ -337,11 +347,11 @@ final class ChartParamsBuilder
 
 			if ($column === '')
 			{
-				throw new McpException('metrics[' . $idx . '].column is required.');
+				throw $refusal('metrics[' . $idx . '].column is required.');
 			}
 			if (!in_array($aggregate, self::AGGREGATES, true))
 			{
-				throw new McpException(
+				throw $refusal(
 					'metrics[' . $idx . '].aggregate must be one of: ' . implode(', ', self::AGGREGATES) . '.'
 				);
 			}
@@ -369,11 +379,11 @@ final class ChartParamsBuilder
 		return $result;
 	}
 
-	private static function normalizeStringList(mixed $raw, string $fieldName): array
+	private static function normalizeStringList(mixed $raw, string $fieldName, \Closure $refusal): array
 	{
 		if (!is_array($raw))
 		{
-			throw new McpException($fieldName . ' must be an array of strings.');
+			throw $refusal($fieldName . ' must be an array of strings.');
 		}
 
 		$result = [];
@@ -381,7 +391,7 @@ final class ChartParamsBuilder
 		{
 			if (!is_string($value))
 			{
-				throw new McpException($fieldName . '[' . $idx . '] must be a string.');
+				throw $refusal($fieldName . '[' . $idx . '] must be a string.');
 			}
 			$trimmed = trim($value);
 			if ($trimmed === '')
@@ -394,11 +404,11 @@ final class ChartParamsBuilder
 		return array_values(array_unique($result));
 	}
 
-	private static function normalizeFilters(mixed $raw): array
+	private static function normalizeFilters(mixed $raw, \Closure $refusal): array
 	{
 		if (!is_array($raw))
 		{
-			throw new McpException('filters must be an array.');
+			throw $refusal('filters must be an array.');
 		}
 
 		$result = [];
@@ -406,7 +416,7 @@ final class ChartParamsBuilder
 		{
 			if (!is_array($filter))
 			{
-				throw new McpException('filters[' . $idx . '] must be an object.');
+				throw $refusal('filters[' . $idx . '] must be an object.');
 			}
 
 			$column = trim((string)($filter['column'] ?? ''));
@@ -414,11 +424,11 @@ final class ChartParamsBuilder
 
 			if ($column === '')
 			{
-				throw new McpException('filters[' . $idx . '].column is required.');
+				throw $refusal('filters[' . $idx . '].column is required.');
 			}
 			if (!isset(self::FILTER_OPERATORS[$operatorRaw]))
 			{
-				throw new McpException(
+				throw $refusal(
 					'filters[' . $idx . '].operator must be one of: '
 					. implode(', ', array_keys(self::FILTER_OPERATORS)) . '.'
 				);
@@ -434,7 +444,7 @@ final class ChartParamsBuilder
 		return $result;
 	}
 
-	private static function buildAdhocFilter(array $filter): array
+	private static function buildAdhocFilter(array $filter, \Closure $refusal): array
 	{
 		if ($filter['operator'] === 'TEMPORAL_RANGE')
 		{
@@ -442,7 +452,7 @@ final class ChartParamsBuilder
 				'clause' => 'WHERE',
 				'subject' => $filter['column'],
 				'operator' => 'TEMPORAL_RANGE',
-				'comparator' => self::normalizeTemporalRangeValue($filter['value'], $filter['column']),
+				'comparator' => self::normalizeTemporalRangeValue($filter['value'], $filter['column'], $refusal),
 				'expressionType' => 'SIMPLE',
 			];
 		}
@@ -462,14 +472,14 @@ final class ChartParamsBuilder
 	 *   - string  — used as-is ("Last 6 months", "2024-01-01 : 2024-03-31", "No filter")
 	 *   - array of two scalars — joined as "from : to"
 	 */
-	private static function normalizeTemporalRangeValue(mixed $value, string $column): string
+	private static function normalizeTemporalRangeValue(mixed $value, string $column, \Closure $refusal): string
 	{
 		if (is_string($value))
 		{
 			$trimmed = trim($value);
 			if ($trimmed === '')
 			{
-				throw new McpException(
+				throw $refusal(
 					'Filter on `' . $column . '` with operator=between requires a non-empty value '
 					. '(e.g. "Last 6 months" or "2024-01-01 : 2024-03-31").'
 				);
@@ -482,7 +492,7 @@ final class ChartParamsBuilder
 		{
 			if (count($value) !== 2)
 			{
-				throw new McpException(
+				throw $refusal(
 					'Filter on `' . $column . '` with operator=between requires value to be '
 					. 'a [from, to] array of two strings or a single Superset time expression string.'
 				);
@@ -491,7 +501,7 @@ final class ChartParamsBuilder
 			$to = trim((string)$value[array_key_last($value)]);
 			if ($from === '' || $to === '')
 			{
-				throw new McpException(
+				throw $refusal(
 					'Filter on `' . $column . '` with operator=between: both `from` and `to` must be non-empty.'
 				);
 			}
@@ -499,7 +509,7 @@ final class ChartParamsBuilder
 			return $from . ' : ' . $to;
 		}
 
-		throw new McpException(
+		throw $refusal(
 			'Filter on `' . $column . '` with operator=between requires a string value or '
 			. '[from, to] array.'
 		);

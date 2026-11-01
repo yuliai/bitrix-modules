@@ -6466,9 +6466,13 @@ class CAllCrmActivity
 		{
 			return false;
 		}
-		if (isset($cache[$ID]))
+
+		// Keyed per user; without explicit permissions the key comes from the same fallback the check uses.
+		$userPermissions ??= CCrmAuthorizationHelper::GetUserPermissions();
+		$userID = (int)$userPermissions->GetUserID();
+		if (isset($cache[$ID][$userID]))
 		{
-			return $cache[$ID];
+			return $cache[$ID][$userID];
 		}
 
 		$bindings = self::GetBindings($ID);
@@ -6478,13 +6482,13 @@ class CAllCrmActivity
 			{
 				if(self::CheckUpdatePermission($binding['OWNER_TYPE_ID'], $binding['OWNER_ID'], $userPermissions))
 				{
-					$cache[$ID] = true;
+					$cache[$ID][$userID] = true;
 
 					return true;
 				}
 			}
 			unset($binding);
-			$cache[$ID] = false;
+			$cache[$ID][$userID] = false;
 
 			return false;
 		}
@@ -6496,7 +6500,7 @@ class CAllCrmActivity
 			&& CCrmOwnerType::IsDefined($ownerTypeID)
 			&& self::CheckUpdatePermission($ownerTypeID, $ownerID, $userPermissions);
 
-		$cache[$ID] = $result;
+		$cache[$ID][$userID] = $result;
 
 		return $result;
 	}

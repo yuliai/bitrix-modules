@@ -14,6 +14,8 @@ use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
+use Bitrix\Mobile\Config\Feature;
+use Bitrix\Mobile\Feature\MyCompanyFeature;
 use Bitrix\Mobile\Internal\Integration\Market\Subscription;
 use Bitrix\Mobile\Menu\Tariff\TariffPlateProvider;
 
@@ -48,7 +50,10 @@ class MenuTariff extends Controller
 		$provider = new TariffPlateProvider();
 
 		// The same gate the plate is rendered by: the action must not outlive the UI it belongs to.
-		if (!$provider->isVisible())
+		// The demo of the subscription is offered in the section alone, so the rollout of the section
+		// joins that gate; the employee half of the section is already held by the intranet prefilter
+		// and by the intranet user term of isVisible().
+		if (Feature::isDisabled(MyCompanyFeature::class) || !$provider->isVisible())
 		{
 			return AjaxJson::createError(
 				new ErrorCollection([

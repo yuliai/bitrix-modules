@@ -17,7 +17,11 @@ use Bitrix\Crm\V2\Public\Entity\Requisite\RequisiteAddress;
 use Bitrix\Crm\V2\Public\Entity\Requisite\RequisiteBankDetail;
 use Bitrix\Crm\V2\Public\Entity\Requisite\RequisiteError;
 use Bitrix\Crm\V2\Public\Provider\Requisite\Exception\NotFoundException;
+use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\ItemId;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Error;
+use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
 
 /**
@@ -137,6 +141,28 @@ final class RequisiteProvider
 		}
 
 		return $this->toPublicList([$requisite], $select, $relations)[0];
+	}
+
+	/** @return Result<ItemId> */
+	public function resolveRequisiteOwner(int $requisiteId, int $userId): Result
+	{
+		$result = new Result();
+		$requisite = $this->requisites->findById(
+			$requisiteId,
+			[Requisite::ownerTypeId, Requisite::ownerId],
+		);
+		if (
+			$requisite === null
+			|| $requisite->ownerId === null
+			|| !$this->permissions->canRead($requisite->ownerTypeId, $requisite->ownerId, $userId)
+		)
+		{
+			return $result->addError(new Error('The requisite was not found.', RequisiteError::REQUISITE_NOT_FOUND));
+		}
+
+		return $result->setData([
+			'owner' => new ItemId(EntityType::fromId($requisite->ownerTypeId), $requisite->ownerId),
+		]);
 	}
 
 	/**

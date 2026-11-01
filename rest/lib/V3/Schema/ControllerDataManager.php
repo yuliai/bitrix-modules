@@ -8,6 +8,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Rest\V3\Attribute\Description;
 use Bitrix\Rest\V3\Attribute\DtoType;
 use Bitrix\Rest\V3\Attribute\Enabled;
+use Bitrix\Rest\V3\Attribute\FieldAccess;
 use Bitrix\Rest\V3\Attribute\McpTool;
 use Bitrix\Rest\V3\Attribute\OrmEntity;
 use Bitrix\Rest\V3\Attribute\Scope;
@@ -36,6 +37,8 @@ final class ControllerDataManager
 
 	private const GENERATED_DTO_CACHE_KEY = 'rest.v3.ControllerDataManager.generatedDto.cache.key';
 
+	private const GENERATED_DTO_CATALOG_CACHE_KEY = 'rest.v3.ControllerDataManager.generatedDtoCatalog.cache.key';
+
 	private static array $byName;
 
 	private static array $byModule;
@@ -45,6 +48,8 @@ final class ControllerDataManager
 	private array $reflections = [];
 
 	private array $dtos = [];
+
+	private ?GeneratedDtoCatalog $generatedDtoCatalog = null;
 
 	public function getData()
 	{
@@ -59,7 +64,9 @@ final class ControllerDataManager
 		$items = CacheManager::get(self::CONTROLLERS_DATA_CACHE_KEY);
 		if ($items !== null)
 		{
-			foreach ($items as $controllerCacheData)
+			$controllersCacheData = $items['controllers'] ?? $items;
+			$this->generatedDtoCatalog = $this->restoreGeneratedDtoCatalogFromCacheData($items);
+			foreach ($controllersCacheData as $controllerCacheData)
 			{
 				if (!Loader::includeModule($controllerCacheData['module']))
 				{
@@ -74,6 +81,7 @@ final class ControllerDataManager
 		else
 		{
 			$controllersCacheData = [];
+			$this->generatedDtoCatalog = new GeneratedDtoCatalog();
 
 			$this->systemControllersData[Field::class] = new ControllerData(
 				module: 'rest',
@@ -123,15 +131,9 @@ final class ControllerDataManager
 				) {
 					$schemaProvider = new ($moduleConfig->schemaProviderClass);
 
-					foreach ($schemaProvider->getDataForDtoGeneration() as $generatedDto)
+					foreach ($this->getGeneratedDtosFromSchemaProvider($schemaProvider) as $generatedDto)
 					{
-						if (!$generatedDto instanceof GeneratedDto)
-						{
-							throw new \InvalidArgumentException('SchemaProvider::getDataForDtoGeneration must return array of GeneratedDto instances.');
-						}
-
-						Generator::generateByDto($generatedDto);
-						$generatedDtoCacheData[] = $generatedDto;
+						$this->registerGeneratedDto($generatedDto, $moduleId, $generatedDtoCacheData);
 					}
 
 					foreach ($schemaProvider->getControllersData() as $controllerData)
@@ -186,10 +188,22 @@ final class ControllerDataManager
 
 				foreach ($discoveredControllersData as $controllerName => $controllerData)
 				{
-					$dto = $this->getDtoByClass($controllerData->dtoFqcn);
+					$dto = $this->registerDto($controllerData->dtoFqcn);
 					if ($dto !== null)
 					{
 						$this->addDtoFieldMethods($dto, $controllerData, $declaredActionUris);
+					}
+					elseif (
+						$controllerData->dtoFqcn !== null
+						&& $this->getGeneratedDtoCatalog()->hasDto($controllerData->dtoFqcn)
+					)
+					{
+						$this->addDtoFieldMethodsForResourceUri(
+							$controllerData->dtoFqcn,
+							$controllerData->module,
+							$controllerData->getUri(),
+							$declaredActionUris,
+						);
 					}
 
 					$this->registerControllerData($controllerName, $controllerData, $controllersCacheData);
@@ -216,7 +230,16 @@ final class ControllerDataManager
 				self::$byModule[$systemControllerData->module][$systemControllerData->controllerFqcn] = $systemControllerData;
 			}
 
-			CacheManager::set(self::CONTROLLERS_DATA_CACHE_KEY, $controllersCacheData, CacheManager::ONE_HOUR_TTL);
+			$generatedDtoCatalog = $this->getGeneratedDtoCatalog();
+			CacheManager::set(
+				self::CONTROLLERS_DATA_CACHE_KEY,
+				[
+					'controllers' => $controllersCacheData,
+					'generatedDtoCatalog' => $generatedDtoCatalog->getCacheData(),
+				],
+				CacheManager::ONE_HOUR_TTL,
+			);
+			$this->saveGeneratedDtoCatalog($generatedDtoCatalog);
 		}
 
 		return [
@@ -346,6 +369,211 @@ final class ControllerDataManager
 		CacheManager::set(self::GENERATED_DTO_CACHE_KEY . '.' . $moduleId, $generatedDtoCacheData, CacheManager::ONE_HOUR_TTL);
 	}
 
+	private function registerGeneratedDto(GeneratedDto $generatedDto, string $moduleId, array &$generatedDtoCacheData): void
+	{
+		$this->getGeneratedDtoCatalog()->registerDto($generatedDto, $moduleId);
+		$generatedDtoCacheData[] = $generatedDto;
+		$this->saveGeneratedDtoByFqcn($generatedDto);
+	}
+
+	/**
+	 * @param array<string, mixed> $cacheData
+	 */
+	private function restoreGeneratedDtoCatalogFromCacheData(array $cacheData): GeneratedDtoCatalog
+	{
+		$catalog = $cacheData['generatedDtoCatalog'] ?? null;
+		if (is_array($catalog))
+		{
+			return GeneratedDtoCatalog::fromCacheData($catalog);
+		}
+
+		if ($catalog instanceof GeneratedDtoCatalog)
+		{
+			$this->saveGeneratedDtosByFqcn($catalog);
+			$catalog = GeneratedDtoCatalog::fromCacheData($catalog->getCacheData());
+			$controllersCacheData = $cacheData['controllers'] ?? $cacheData;
+			CacheManager::set(
+				self::CONTROLLERS_DATA_CACHE_KEY,
+				[
+					'controllers' => $controllersCacheData,
+					'generatedDtoCatalog' => $catalog->getCacheData(),
+				],
+				CacheManager::ONE_HOUR_TTL,
+			);
+			$this->saveGeneratedDtoCatalog($catalog);
+
+			return $catalog;
+		}
+
+		$controllersCacheData = $cacheData['controllers'] ?? $cacheData;
+		$catalog = $this->createGeneratedDtoCatalogFromCachedControllersData($controllersCacheData);
+		CacheManager::set(
+			self::CONTROLLERS_DATA_CACHE_KEY,
+			[
+				'controllers' => $controllersCacheData,
+				'generatedDtoCatalog' => $catalog->getCacheData(),
+			],
+			CacheManager::ONE_HOUR_TTL,
+		);
+		$this->saveGeneratedDtoCatalog($catalog);
+
+		return $catalog;
+	}
+
+	/**
+	 * @param array<string, array{module: string}> $controllersCacheData
+	 */
+	private function createGeneratedDtoCatalogFromCachedControllersData(array $controllersCacheData): GeneratedDtoCatalog
+	{
+		$catalog = new GeneratedDtoCatalog();
+		$moduleIds = [];
+		foreach ($controllersCacheData as $controllerCacheData)
+		{
+			$moduleId = $controllerCacheData['module'] ?? null;
+			if (is_string($moduleId) && $moduleId !== '')
+			{
+				$moduleIds[$moduleId] = $moduleId;
+			}
+		}
+
+		foreach ($moduleIds as $moduleId)
+		{
+			foreach ($this->getGeneratedDtosByModuleId($moduleId) as $generatedDto)
+			{
+				if (!$generatedDto instanceof GeneratedDto)
+				{
+					throw new \InvalidArgumentException('Generated DTO cache must contain GeneratedDto instances.');
+				}
+
+				$catalog->registerDto($generatedDto, $moduleId);
+				$this->saveGeneratedDtoByFqcn($generatedDto);
+			}
+		}
+
+		return $catalog;
+	}
+
+	public function getGeneratedDtoCatalog(): GeneratedDtoCatalog
+	{
+		if ($this->generatedDtoCatalog === null)
+		{
+			$cachedCatalog = CacheManager::get(self::GENERATED_DTO_CATALOG_CACHE_KEY);
+			if (is_array($cachedCatalog))
+			{
+				$this->generatedDtoCatalog = GeneratedDtoCatalog::fromCacheData($cachedCatalog);
+			}
+			elseif ($cachedCatalog instanceof GeneratedDtoCatalog)
+			{
+				$this->saveGeneratedDtosByFqcn($cachedCatalog);
+				$this->generatedDtoCatalog = GeneratedDtoCatalog::fromCacheData($cachedCatalog->getCacheData());
+				$this->saveGeneratedDtoCatalog($this->generatedDtoCatalog);
+			}
+			else
+			{
+				$cacheData = CacheManager::get(self::CONTROLLERS_DATA_CACHE_KEY);
+				$this->generatedDtoCatalog = is_array($cacheData)
+					? $this->restoreGeneratedDtoCatalogFromCacheData($cacheData)
+					: new GeneratedDtoCatalog();
+			}
+		}
+
+		return $this->generatedDtoCatalog;
+	}
+
+	private function saveGeneratedDtoCatalog(GeneratedDtoCatalog $catalog): void
+	{
+		CacheManager::set(
+			self::GENERATED_DTO_CATALOG_CACHE_KEY,
+			$catalog->getCacheData(),
+			CacheManager::ONE_HOUR_TTL,
+		);
+	}
+
+	/**
+	 * @return GeneratedDto[]
+	 */
+	public function getGeneratedDtoClosure(string ...$trustedRoots): array
+	{
+		return $this->getGeneratedDtoCatalog()->getClosureByResolver(
+			$this->getGeneratedDtoByFqcn(...),
+			...$trustedRoots,
+		);
+	}
+
+	private function getGeneratedDtoByFqcn(string $fqcn): ?GeneratedDto
+	{
+		$catalog = $this->getGeneratedDtoCatalog();
+		if (!$catalog->hasDto($fqcn))
+		{
+			return null;
+		}
+
+		$cachedDto = CacheManager::get($this->getGeneratedDtoCacheKey($fqcn), CacheManager::ONE_HOUR_TTL);
+		if ($cachedDto instanceof GeneratedDto)
+		{
+			return $cachedDto;
+		}
+
+		$dto = $catalog->getDto($fqcn);
+		if ($dto !== null)
+		{
+			return $dto;
+		}
+
+		$moduleId = $catalog->getModuleId($fqcn);
+		if ($moduleId !== null)
+		{
+			foreach ($this->getGeneratedDtosByModuleId($moduleId) as $generatedDto)
+			{
+				if (!$generatedDto instanceof GeneratedDto)
+				{
+					throw new \InvalidArgumentException('Generated DTO cache must contain GeneratedDto instances.');
+				}
+
+				if ($generatedDto->getFQCN() === $fqcn)
+				{
+					$this->saveGeneratedDtoByFqcn($generatedDto);
+
+					return $generatedDto;
+				}
+			}
+		}
+
+		CacheManager::cleanAll();
+		unset(self::$byName, self::$byModule);
+		$this->generatedDtoCatalog = null;
+		$this->getData();
+		$dto = $this->getGeneratedDtoCatalog()->getDto($fqcn);
+		if ($dto === null)
+		{
+			throw new \RuntimeException(sprintf('Generated DTO descriptor for "%s" could not be restored.', $fqcn));
+		}
+
+		return $dto;
+	}
+
+	private function saveGeneratedDtoByFqcn(GeneratedDto $generatedDto): void
+	{
+		CacheManager::set(
+			$this->getGeneratedDtoCacheKey($generatedDto->getFQCN()),
+			$generatedDto,
+			CacheManager::ONE_HOUR_TTL,
+		);
+	}
+
+	private function saveGeneratedDtosByFqcn(GeneratedDtoCatalog $catalog): void
+	{
+		foreach ($catalog->getClosure(...array_keys($catalog->getCacheData()['dependencies'])) as $generatedDto)
+		{
+			$this->saveGeneratedDtoByFqcn($generatedDto);
+		}
+	}
+
+	private function getGeneratedDtoCacheKey(string $fqcn): string
+	{
+		return self::GENERATED_DTO_CACHE_KEY . '.fqcn.' . $fqcn;
+	}
+
 	private function getDtoByClass(?string $dtoClass): ?Dto
 	{
 		if ($dtoClass === null)
@@ -368,12 +596,28 @@ final class ControllerDataManager
 		return $this->dtos[$dtoClass];
 	}
 
+	private function registerDto(?string $dtoClass): ?Dto
+	{
+		if ($dtoClass === null || $this->getGeneratedDtoCatalog()->hasDto($dtoClass))
+		{
+			return null;
+		}
+
+		return $this->getDtoByClass($dtoClass);
+	}
+
 	/**
 	 * @param array<string, true> $declaredActionUris
 	 */
 	private function addDtoFieldMethods(Dto $dto, ControllerData $controllerData, array $declaredActionUris): void
 	{
-		$this->addDtoFieldMethodsForResourceUri($dto, $controllerData->module, $controllerData->getUri(), $declaredActionUris);
+		$this->addDtoFieldMethodsForResourceUri(
+			$dto::class,
+			$controllerData->module,
+			$controllerData->getUri(),
+			$declaredActionUris,
+			$dto,
+		);
 	}
 
 	/**
@@ -381,6 +625,7 @@ final class ControllerDataManager
 	 */
 	private function addDtoFieldMethodsForCustomController(ControllerData $controllerData, array $declaredActionUris): void
 	{
+		/** @var array<string, Dto|string> $dtoByResourceUri */
 		$dtoByResourceUri = [];
 		foreach ($controllerData->getMethods() as $methodDescription)
 		{
@@ -390,16 +635,26 @@ final class ControllerDataManager
 				continue;
 			}
 
-			$dto = $this->getDtoByClass($methodDescription->dtoFqcn ?? $controllerData->dtoFqcn);
-			if ($dto !== null)
+			$dtoClass = $methodDescription->dtoFqcn ?? $controllerData->dtoFqcn;
+			if ($dtoClass === null)
 			{
-				$dtoByResourceUri[$resourceUri] = $dto;
+				continue;
 			}
+
+			$dtoByResourceUri[$resourceUri] = $this->registerDto($dtoClass) ?? $dtoClass;
 		}
 
-		foreach ($dtoByResourceUri as $resourceUri => $dto)
+		foreach ($dtoByResourceUri as $resourceUri => $dtoOrClass)
 		{
-			$this->addDtoFieldMethodsForResourceUri($dto, $controllerData->module, $resourceUri, $declaredActionUris);
+			$dto = $dtoOrClass instanceof Dto ? $dtoOrClass : null;
+			$dtoClass = $dto !== null ? $dto::class : $dtoOrClass;
+			$this->addDtoFieldMethodsForResourceUri(
+				$dtoClass,
+				$controllerData->module,
+				$resourceUri,
+				$declaredActionUris,
+				$dto,
+			);
 		}
 	}
 
@@ -427,8 +682,18 @@ final class ControllerDataManager
 	/**
 	 * @param array<string, true> $declaredActionUris
 	 */
-	private function addDtoFieldMethodsForResourceUri(Dto $dto, string $module, string $resourceUri, array $declaredActionUris): void
+	private function addDtoFieldMethodsForResourceUri(
+		string $dtoClass,
+		string $module,
+		string $resourceUri,
+		array $declaredActionUris,
+		?Dto $dto = null,
+	): void
 	{
+		/** @var FieldAccess|null $fieldAccessAttribute */
+		$fieldAccessAttribute = $dto?->getAttributeByName(FieldAccess::class);
+		$accessProvider = $fieldAccessAttribute?->provider;
+
 		$listMethodUri = $resourceUri . '.field.list';
 
 		if (!isset($declaredActionUris[$listMethodUri]))
@@ -443,8 +708,10 @@ final class ControllerDataManager
 				title: null,
 				description: null,
 				queryParams: [
-					'dtoClass' => $dto::class
-				]
+					'dtoClass' => $dtoClass,
+				],
+				accessProvider: $accessProvider,
+				resourceDtoFqcn: $dtoClass,
 			);
 
 			$this->systemControllersData[Field::class]->addMethod($listMethodDescription);
@@ -464,14 +731,16 @@ final class ControllerDataManager
 				title: null,
 				description: null,
 				queryParams: [
-					'dtoClass' => $dto::class
-				]
+					'dtoClass' => $dtoClass,
+				],
+				accessProvider: $accessProvider,
+				resourceDtoFqcn: $dtoClass,
 			);
 
 			$this->systemControllersData[Field::class]->addMethod($getMethodDescription);
 		}
 
-		if ($dto->issetUserFields())
+		if ($dto !== null && $dto->issetUserFields())
 		{
 			$entityId = $dto->getAttributeByName(OrmEntity::class)->getUserFieldId();
 			$customMethods = ['list', 'get', 'delete', 'update', 'add'];
@@ -491,6 +760,8 @@ final class ControllerDataManager
 						title: null,
 						description: null,
 						queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
+						accessProvider: $accessProvider,
+						resourceDtoFqcn: $dto::class,
 					);
 					$this->systemControllersData[Custom::class]->addMethod($customMethodDescription);
 				}
@@ -508,6 +779,8 @@ final class ControllerDataManager
 						title: null,
 						description: null,
 						queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
+						accessProvider: $accessProvider,
+						resourceDtoFqcn: $dto::class,
 					);
 					$this->systemControllersData[Custom\Enum::class]->addMethod($customEnumMethodDescription);
 				}
@@ -539,8 +812,44 @@ final class ControllerDataManager
 	public function getGeneratedDtosByModuleId(string $moduleId): array
 	{
 		$dtos = CacheManager::get(self::GENERATED_DTO_CACHE_KEY . '.' . $moduleId);
+		if ($dtos === null && Loader::includeModule($moduleId))
+		{
+			$moduleConfig = ServiceLocator::getInstance()->get(ModuleManager::class)->getConfigs()[$moduleId] ?? null;
+			$schemaProviderClass = $moduleConfig?->schemaProviderClass;
+			$dtos = [];
+
+			if (
+				$schemaProviderClass !== null
+				&& class_exists($schemaProviderClass)
+				&& is_subclass_of($schemaProviderClass, SchemaProvider::class)
+			)
+			{
+				$dtos = $this->getGeneratedDtosFromSchemaProvider(new $schemaProviderClass());
+			}
+
+			$this->saveGeneratedDtosByModuleId($moduleId, $dtos);
+		}
 
 		return $dtos !== null ? $dtos : [];
+	}
+
+	/**
+	 * @return GeneratedDto[]
+	 */
+	private function getGeneratedDtosFromSchemaProvider(SchemaProvider $schemaProvider): array
+	{
+		$dtos = [];
+		foreach ($schemaProvider->getDataForDtoGeneration() as $generatedDto)
+		{
+			if (!$generatedDto instanceof GeneratedDto)
+			{
+				throw new \InvalidArgumentException('SchemaProvider::getDataForDtoGeneration must return array of GeneratedDto instances.');
+			}
+
+			$dtos[] = $generatedDto;
+		}
+
+		return $dtos;
 	}
 
 	/**

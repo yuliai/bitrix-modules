@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Rest\Internal\Service\Embedding;
 
+use Bitrix\Rest\EO_Placement;
 use Bitrix\Rest\Internal\Entity\Application\Embedding\Embedding;
 
 final class EmbeddingOwnerResolver
@@ -55,14 +56,37 @@ final class EmbeddingOwnerResolver
 		];
 	}
 
-	public static function resolveAppIdForEmbedding(Embedding $embedding): ?int
+	public static function isNonAppOwner(array $row): bool
 	{
-		return self::resolveAppId([
-			'MODULE_ID' => (string)$embedding->getModuleId(),
-			'ENTITY_TYPE' => (string)$embedding->getEntityType(),
-			'ENTITY_ID' => (string)$embedding->getEntityId(),
-			'APP_ID' => (int)$embedding->getAppId(),
+		$owner = self::normalize($row);
+
+		return $owner !== [] && $owner['APP_ID'] === null;
+	}
+
+	public static function isNonAppOwnerPlacement(EO_Placement $placement): bool
+	{
+		return self::isNonAppOwner([
+			'APP_ID' => $placement->getAppId(),
+			'MODULE_ID' => $placement->getModuleId(),
+			'ENTITY_TYPE' => $placement->getEntityType(),
+			'ENTITY_ID' => $placement->getEntityId(),
 		]);
+	}
+
+	public static function isNonAppOwnerEmbedding(Embedding $embedding): bool
+	{
+		return self::isNonAppOwner([
+			'APP_ID' => $embedding->getAppId(),
+			'MODULE_ID' => $embedding->getModuleId(),
+			'ENTITY_TYPE' => $embedding->getEntityType(),
+			'ENTITY_ID' => $embedding->getEntityId(),
+		]);
+	}
+
+	public static function isAppOwnerType(string $moduleId, string $entityType): bool
+	{
+		return self::canonicalizeOwnerPart($moduleId) === self::MODULE_ID_REST
+			&& self::canonicalizeOwnerPart($entityType) === self::ENTITY_TYPE_APP;
 	}
 
 	public static function resolveAppId(array $row): ?int
@@ -76,10 +100,7 @@ final class EmbeddingOwnerResolver
 			return null;
 		}
 
-		$moduleId = self::canonicalizeOwnerPart((string)$row['MODULE_ID']);
-		$entityType = self::canonicalizeOwnerPart((string)$row['ENTITY_TYPE']);
-
-		if ($moduleId !== self::MODULE_ID_REST || $entityType !== self::ENTITY_TYPE_APP)
+		if (!self::isAppOwnerType((string)$row['MODULE_ID'], (string)$row['ENTITY_TYPE']))
 		{
 			return null;
 		}

@@ -11,11 +11,50 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Rest\Internal\Exception\ArgumentException;
 use Bitrix\Rest\Internal\Model\EmbeddingAccessTable;
+use Bitrix\Rest\Internal\Service\Embedding\EmbeddingAccessCodeNormalizer;
 use Bitrix\Rest\Internal\Service\Embedding\EmbeddingOwnerResolver;
 use Bitrix\Rest\PlacementTable;
 
 class EmbeddingAccessRepository
 {
+	public function findAccessibleEmbeddingIds(array $embeddingIds, int $userId): array
+	{
+		if ($userId <= 0)
+		{
+			return [];
+		}
+
+		$embeddingIds = $this->normalizeEmbeddingIds($embeddingIds);
+		if ($embeddingIds === [])
+		{
+			return [];
+		}
+
+		$accessCodes = \CAccess::GetUserCodesArray($userId);
+		if ($accessCodes === [])
+		{
+			return [];
+		}
+		$accessCodes[] = EmbeddingAccessCodeNormalizer::ACCESS_CODE_AUTHORIZED;
+
+		$accessibleIds = [];
+		$result = EmbeddingAccessTable::query()
+			->setSelect(['EMBEDDING_ID'])
+			->whereIn('EMBEDDING_ID', $embeddingIds)
+			->whereIn('ACCESS_CODE', $accessCodes)
+			->exec()
+		;
+		while ($row = $result->fetch())
+		{
+			$accessibleIds[(int)$row['EMBEDDING_ID']] = true;
+		}
+
+		return array_values(array_filter(
+			$embeddingIds,
+			static fn(int $embeddingId): bool => isset($accessibleIds[$embeddingId]),
+		));
+	}
+
 	public function replaceForEmbeddings(
 		string $moduleId,
 		string $entityType,
@@ -93,6 +132,14 @@ class EmbeddingAccessRepository
 		;
 
 		return array_map(static fn(array $row): int => (int)$row['ID'], $rows);
+	}
+
+	private function normalizeEmbeddingIds(array $embeddingIds): array
+	{
+		return array_values(array_unique(array_filter(
+			array_map('intval', $embeddingIds),
+			static fn(int $embeddingId): bool => $embeddingId > 0,
+		)));
 	}
 
 	private function keyByEmbeddingId(array $accessCodesByEmbeddingId): array

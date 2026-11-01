@@ -183,7 +183,7 @@ class Task
 
 		$messages = Loc::loadLanguageFile(__FILE__, $languageId);
 		$result['bizproc_task']['TABLE_DESCRIPTION'] = $messages['BP_BIC_TASK_TABLE'] ?: 'bizproc_task';
-		$result['bizproc_task']['TABLE_DESCRIPTION_FULL'] = $messages['BP_BIC_TASK_TABLE_DESCRIPTION_FULL'] ?? '';
+		$result['bizproc_task']['TABLE_DESCRIPTION_FULL'] = $messages['BP_BIC_TASK_TABLE_DESCRIPTION_FULL_MSGVER_1'] ?? '';
 		foreach ($result['bizproc_task']['FIELDS'] as $fieldCode => &$fieldInfo)
 		{
 			$fieldInfo['FIELD_DESCRIPTION'] = !empty($messages['BP_BIC_TASK_FIELD_' . $fieldCode]) ? $messages['BP_BIC_TASK_FIELD_' . $fieldCode] : $fieldCode;

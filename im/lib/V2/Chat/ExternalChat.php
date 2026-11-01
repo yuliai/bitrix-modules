@@ -44,6 +44,16 @@ use Bitrix\Main\DI\ServiceLocator;
 
 class ExternalChat extends GroupChat
 {
+	/**
+	 * People land in an external chat because the owning module put them there - a task participant,
+	 * a project member - and that module asks for the history explicitly. Forcing it hidden left them
+	 * with an empty chat. The rule can only force hiding, never showing, so an explicit choice - the
+	 * history checkbox of the invite window, which a task chat does show - survives it. A type that
+	 * handles BeforeUsersAddEvent can still overwrite that choice before the relation is created:
+	 * TASKS_TASK did until its handler was fixed.
+	 */
+	protected const EXTRANET_CAN_SEE_HISTORY_ON_EXPLICIT_ADD = true;
+
 	protected Config $config;
 
 	private static array $loadedChatIds = [];

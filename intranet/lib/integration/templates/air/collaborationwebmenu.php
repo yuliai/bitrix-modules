@@ -11,6 +11,9 @@ use Bitrix\Main\Engine\CurrentUser;
 
 class CollaborationWebMenu
 {
+	private const SYNC_MAIN_ITEM_ID = 'menu_sync_main';
+	private const SYNC_TELEPHONY_ITEM_ID = 'menu_sync_telephony';
+
 	public static function getMenuId(string $context): ?string
 	{
 		if (
@@ -38,17 +41,7 @@ class CollaborationWebMenu
 			return null;
 		}
 
-		$sections = [
-			'messenger' => CollaborationSection::getMessenger(false),
-			'sync' => CollaborationSection::getSync(),
-			'calendar' => CollaborationSection::getCalendar(true),
-			'mail' => CollaborationSection::getMail(),
-			'notification' => CollaborationSection::getNotifications(),
-			'boards' => CollaborationSection::getBoards(),
-			'documents' => CollaborationSection::getOnlineDocs(),
-			'feed' => CollaborationSection::getFeed(),
-			'disk' => CollaborationSection::getDisk(),
-		];
+		$sections = self::getSections(true);
 		$counters = \CUserCounter::GetValues(CurrentUser::get()->getId());
 		$legacyId = self::getLegacyMenuId(SITE_DIR);
 
@@ -61,6 +54,22 @@ class CollaborationWebMenu
 			],
 			'ITEMS' => self::compose($sections, $chatItems, $counters, $context === 'messenger'),
 		];
+	}
+
+	public static function getCollapsibleItemIds(): array
+	{
+		$itemIds = [];
+		foreach (self::getSections(false) as $section)
+		{
+			if (!($section['available'] ?? false))
+			{
+				continue;
+			}
+
+			$itemIds[] = self::convertSection($section)['ID'];
+		}
+
+		return $itemIds;
 	}
 
 	public static function getLegacyMenuId(string $siteDir): string
@@ -109,6 +118,11 @@ class CollaborationWebMenu
 				}
 			}
 
+			if ($id === 'sync' && isset($chatItems['call']))
+			{
+				$item['ITEMS'] = self::getSyncItems($item, $chatItems['call']);
+			}
+
 			if (in_array($id, ['feed', 'disk'], true))
 			{
 				$item['IS_DISABLED'] = true;
@@ -125,14 +139,40 @@ class CollaborationWebMenu
 		return $items;
 	}
 
+	public static function applyActiveState(array $items, array $fileMenuItemsById): array
+	{
+		foreach ($items as &$item)
+		{
+			$item['IS_ACTIVE'] = $fileMenuItemsById[$item['ID']]['IS_ACTIVE'] ?? false;
+			if (!$item['IS_ACTIVE'] || empty($item['ITEMS']))
+			{
+				continue;
+			}
+
+			foreach ($item['ITEMS'] as &$subItem)
+			{
+				if (($subItem['URL'] ?? '') === ($item['URL'] ?? ''))
+				{
+					$subItem['IS_ACTIVE'] = true;
+				}
+			}
+			unset($subItem);
+		}
+		unset($item);
+
+		return $items;
+	}
+
 	public static function prepareLeftMenuItems(
 		array $items,
 		string $menuId,
 		string $entryUrl,
 		string $siteDir,
+		array $collapsibleItemIds,
 	): array
 	{
 		$descendantIds = ['menu_teamwork' => true];
+		$preservedGroupIds = [];
 		$descendantCounterIds = [];
 		$descendantLinks = [];
 		$collaborationItemIndex = null;
@@ -142,10 +182,20 @@ class CollaborationWebMenu
 			if (isset($descendantIds[$item['GROUP_ID'] ?? '']))
 			{
 				$descendantIds[$item['ID']] = true;
-				if (in_array(($item['ITEM_TYPE'] ?? ''), ['custom', 'self', 'standard', 'admin'], true))
+				if (
+					in_array(($item['ITEM_TYPE'] ?? ''), ['custom', 'self', 'standard', 'admin'], true)
+					|| !in_array($item['ID'], $collapsibleItemIds, true)
+				)
 				{
-					unset($item['GROUP_ID']);
-					$item['PARAMS']['parent_id'] = null;
+					if (!isset($preservedGroupIds[$item['GROUP_ID'] ?? '']))
+					{
+						unset($item['GROUP_ID']);
+						$item['PARAMS']['parent_id'] = null;
+					}
+					if (($item['IS_GROUP'] ?? '') === 'Y')
+					{
+						$preservedGroupIds[$item['ID']] = true;
+					}
 					$result[] = $item;
 
 					continue;
@@ -229,6 +279,38 @@ class CollaborationWebMenu
 			'SUB_LINK' => $data['sub_link'] ?? '',
 			'ITEMS' => $data['sub_menu'] ?? [],
 			'ON_CLICK' => $section['onclick'] ?? $data['onclick'] ?? '',
+		];
+	}
+
+	private static function getSyncItems(array $syncItem, array $callItem): array
+	{
+		return [
+			[
+				'ID' => self::SYNC_MAIN_ITEM_ID,
+				'TEXT' => $syncItem['TEXT'],
+				'URL' => $syncItem['URL'],
+			],
+			[
+				'ID' => self::SYNC_TELEPHONY_ITEM_ID,
+				'TEXT' => $callItem['TEXT'] ?? '',
+				'URL' => '',
+				'ON_CLICK' => $callItem['ON_CLICK'] ?? '',
+			],
+		];
+	}
+
+	private static function getSections(bool $includeSubMenu): array
+	{
+		return [
+			'messenger' => CollaborationSection::getMessenger(false),
+			'sync' => CollaborationSection::getSync(),
+			'calendar' => CollaborationSection::getCalendar($includeSubMenu),
+			'mail' => CollaborationSection::getMail(),
+			'notification' => CollaborationSection::getNotifications(),
+			'boards' => CollaborationSection::getBoards(),
+			'documents' => CollaborationSection::getOnlineDocs(),
+			'feed' => CollaborationSection::getFeed(),
+			'disk' => CollaborationSection::getDisk($includeSubMenu),
 		];
 	}
 

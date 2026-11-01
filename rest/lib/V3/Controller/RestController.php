@@ -29,6 +29,7 @@ use Bitrix\Rest\V3\Interaction\Response\ResponseWithRelations;
 use Bitrix\Rest\V3\Controller\ActionFilter\IdempotencyFilter;
 use Bitrix\Rest\V3\Idempotency\IdempotencyKeyResolver;
 use Bitrix\Rest\V3\Idempotency\IdempotencyService;
+use Bitrix\Rest\V3\Schema\MethodDescription;
 use Bitrix\Rest\V3\Schema\Scope;
 use Bitrix\Rest\V3\Structure\Filtering\FilterStructure;
 use CRestServer;
@@ -53,6 +54,8 @@ abstract class RestController extends Controller
 	protected ?string $dtoClass = null;
 
 	protected ?array $queryParams = null;
+
+	protected ?MethodDescription $methodDescription = null;
 
 	protected ?CRestServer $server = null;
 
@@ -365,6 +368,22 @@ abstract class RestController extends Controller
 	public function setQueryParams(?array $queryParams): RestController
 	{
 		$this->queryParams = $queryParams;
+
+		return $this;
+	}
+
+	/**
+	 * Schema description of the running method. Set by every call channel while building
+	 * the controller; filters that need the schema of the route read it from here.
+	 */
+	public function getMethodDescription(): ?MethodDescription
+	{
+		return $this->methodDescription;
+	}
+
+	public function setMethodDescription(?MethodDescription $methodDescription): self
+	{
+		$this->methodDescription = $methodDescription;
 
 		return $this;
 	}

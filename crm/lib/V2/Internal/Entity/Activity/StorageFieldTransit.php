@@ -7,7 +7,7 @@ namespace Bitrix\Crm\V2\Internal\Entity\Activity;
 use Bitrix\Main\ArgumentException;
 
 /**
- * Carries the storage columns of a legacy input that the typed model does not hold, or holds in a
+ * Carries the storage columns of a legacy input that the typed model cannot write, or writes in a
  * poorer form, from the entry point of the pipeline down to the repository and to the steps that
  * need them.
  *
@@ -25,7 +25,7 @@ use Bitrix\Main\ArgumentException;
  * of the fields puts here as legacy does (:2158-2173). A run that carries no deadline at all leaves the
  * repository to fill the column with the max-date sentinel of "no deadline".
  *
- * TWO OF THE COLUMNS REACH NO MODEL AT ALL AND STILL TRAVEL HERE - the group of the provider and the
+ * TWO OF THE COLUMNS NO WRITE OF V2 PRODUCES STILL TRAVEL HERE - the group of the provider and the
  * value of the result - and that is the same reason as the rest: legacy assembles its row out of the
  * field array of the caller, so a column the caller named is written and a column it did not name keeps
  * whatever the row holds. Nothing of V2 interprets either of them; without a carrier the value of the
@@ -38,8 +38,13 @@ use Bitrix\Main\ArgumentException;
  * The raw serialized fields are not here: their carrier is {@see ProviderPayload}.
  *
  * NOTHING HERE IS INTERPRETED. The core moves the values, the provider layer and the repository
- * read them. The values never leave the pipeline: neither the typed model, nor the public API,
- * nor REST expose them.
+ * read them.
+ *
+ * WRITING AND READING ARE DIFFERENT QUESTIONS WITH DIFFERENT ANSWERS. No column of the list is
+ * writable through the typed model - the transit is the one way into the row, which is what keeps
+ * the column from having two writers. Reading is not so: the type, the owner pair, the priority, the
+ * origin and the associated entity reach a read as the read-only projection of the model. The rest of
+ * the list reaches no model at all.
  *
  * @internal
  */

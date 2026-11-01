@@ -10,7 +10,7 @@ use Bitrix\Im\V2\Integration\AI\TaskCreation\AutoTaskQueueManager;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\AutoTaskType;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\MultipleMessagesCreator;
 use Bitrix\Im\V2\Integration\AI\TaskCreation\Status;
-use Bitrix\Im\V2\Message;
+use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Pull\Event\AutoTaskStatus;
 
@@ -31,8 +31,8 @@ class MultipleMessageTaskCreationJob extends QueueJob
 		$userId = (int)($parameters['userId'] ?? 0);
 		$queueManager = AutoTaskQueueManager::getInstance();
 
-		// the collection is needed on every branch (anchor resolution and forwarding) and is
-		// loaded only once here, so the job and the live creator pick the same anchor message
+		// the surviving messages: they carry the task content and get forwarded into its chat.
+		// The identity of the batch stays $messageIds - it keys the record and the anchor
 		$messages = new MessageCollection($messageIds);
 
 		$result = $this->event->getParameter('result');
@@ -46,16 +46,21 @@ class MultipleMessageTaskCreationJob extends QueueJob
 
 		try
 		{
-			if (!MultipleMessagesCreator::isSelectionComplete($messageIds, $messages))
+			if ($messages->isEmpty())
 			{
-				// one of the selected messages was deleted before the AI response returned (ERR-015):
-				// abort instead of building a task from the survivors
+				// every selected message was deleted before the AI response returned: a partly
+				// deleted selection keeps going, but here no chat is left to create the task in
 				$this->sendNotFound($messageIds, $messages, $userId);
 
 				return;
 			}
 
-			$creator = new MultipleMessagesCreator($messages);
+			$row = $queueManager->getRow($messageIds, AutoTaskType::TaskCreationMulti);
+			$creator = new MultipleMessagesCreator(
+				$messages,
+				$messageIds,
+				MultipleMessagesCreator::readExcludedSources($row['params'] ?? null)
+			);
 			// reuse the combined text the live creator already built (m3); fall back to a fresh
 			// build only for records queued by older code without the sourceText parameter
 			$sourceText = isset($parameters['sourceText']) && is_string($parameters['sourceText'])
@@ -63,7 +68,7 @@ class MultipleMessageTaskCreationJob extends QueueJob
 				: $creator->buildCombinedSourceText();
 			$data = $result->getJsonData() ?? [];
 
-			$creator->createTask($data, $sourceText, $userId);
+			$creator->createTask($data, $sourceText, $userId, LaunchType::Manual);
 		}
 		finally
 		{
@@ -99,11 +104,9 @@ class MultipleMessageTaskCreationJob extends QueueJob
 			return;
 		}
 
-		// resolve the anchor from the actually loaded collection (prefers a surviving message),
-		// so the job and the live creator report the terminal status on the same message id
-		$anchorMessage = $messages->isEmpty()
-			? new Message(MultipleMessagesCreator::resolveAnchorMessageId($messageIds))
-			: MultipleMessagesCreator::resolveAnchorMessage($messages);
+		// the anchor comes from the original selection, so the job and the live creator report the
+		// terminal status on the same message id even when that message is gone by now
+		$anchorMessage = MultipleMessagesCreator::resolveAnchorMessage($messageIds, $messages);
 
 		(new AutoTaskStatus($anchorMessage, $userId, Status::NotFound))->send();
 	}

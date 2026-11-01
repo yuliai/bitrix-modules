@@ -31,6 +31,10 @@ final class WorkDays extends Base
 {
 	private const MONTH_LIMIT = 500;
 
+	// A calendar month is never longer than 31 days, and the extra day absorbs any device time zone
+	// shift, so a range the client really built from a month is never capped.
+	private const MAX_PERIOD_SECONDS = 32 * 86400;
+
 	/** @var array<int, bool> */
 	private array $canReadWorktimeCache = [];
 
@@ -74,6 +78,48 @@ final class WorkDays extends Base
 			'absences' => $this->getAbsences($userId, $dateFrom, $dateTo),
 			'user' => $this->getUser($userId),
 		];
+	}
+
+	/**
+	 * @ajaxAction timemanmobile.WorkDays.getMonthRecordCount
+	 */
+	#[CloseSession]
+	public function getMonthRecordCountAction(
+		#[PositiveNumber]
+		int $dateFrom,
+		#[PositiveNumber]
+		int $dateTo,
+	): ?array
+	{
+		if (!Loader::includeModule('timeman'))
+		{
+			$this->addError(new Error('Module timeman is not installed.'));
+
+			return null;
+		}
+
+		$userId = (int)CurrentUser::get()->getId();
+
+		if (!$this->canReadWorktime($userId) || !$this->isWorkTimeToolAvailable())
+		{
+			return ['count' => 0];
+		}
+
+		// an inverted range is not a period at all, same reading as FullReportType::resolveByPeriod()
+		if ($dateTo < $dateFrom)
+		{
+			return ['count' => 0];
+		}
+
+		// month bounds are resolved by the client in the device time zone, same as the work days
+		// screen; the server only caps the length so the cost of the answer stays bounded
+		$recordIds = (new RecordProvider())->getRecordIdsForPeriod(
+			$userId,
+			$dateFrom,
+			min($dateTo, $dateFrom + self::MAX_PERIOD_SECONDS),
+		);
+
+		return ['count' => count($recordIds)];
 	}
 
 	/**

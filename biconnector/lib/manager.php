@@ -4,6 +4,8 @@ namespace Bitrix\BIConnector;
 use Bitrix\BIConnector\Services\ApacheSuperset;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Application;
+use Bitrix\Main\Data\ConnectionPool;
+use Bitrix\Main\DB\Connection;
 use Bitrix\Main\Loader;
 
 class Manager
@@ -19,6 +21,8 @@ class Manager
 	protected $keyId = 0;
 	protected $keyRevision = '';
 	protected $stime = [];
+	/** @var array<string, array{source: Connection, connection: Connection}> */
+	protected $databaseConnectionClones = [];
 
 	/**
 	 * Singleton instance production.
@@ -346,10 +350,12 @@ class Manager
 		}
 		elseif (is_a($conn, '\Bitrix\Main\DB\MysqlCommonConnection'))
 		{
-			$pool->cloneConnection($connectionName, $connectionName . '~', [
-				'className' => '\Bitrix\BIConnector\DB\MysqliConnection',
-			]);
-			$conn = $pool->getConnection($connectionName . '~');
+			$conn = $this->getOrCreateDatabaseConnectionClone(
+				$pool,
+				$conn,
+				$connectionName,
+				DB\MysqliConnection::class,
+			);
 		}
 		elseif (is_a($conn, '\Bitrix\BIConnector\DB\PgsqlConnection'))
 		{
@@ -357,10 +363,12 @@ class Manager
 		}
 		elseif (is_a($conn, '\Bitrix\Main\DB\PgsqlConnection'))
 		{
-			$pool->cloneConnection($connectionName, $connectionName . '~', [
-				'className' => '\Bitrix\BIConnector\DB\PgsqlConnection',
-			]);
-			$conn = $pool->getConnection($connectionName . '~');
+			$conn = $this->getOrCreateDatabaseConnectionClone(
+				$pool,
+				$conn,
+				$connectionName,
+				DB\PgsqlConnection::class,
+			);
 		}
 		else
 		{
@@ -370,6 +378,35 @@ class Manager
 		}
 
 		return $conn;
+	}
+
+	private function getOrCreateDatabaseConnectionClone(
+		ConnectionPool $pool,
+		Connection $sourceConnection,
+		string $sourceConnectionName,
+		string $connectionClass,
+	): Connection
+	{
+		$clone = $this->databaseConnectionClones[$sourceConnectionName] ?? null;
+		if (
+			($clone['source'] ?? null) === $sourceConnection
+			&& ($clone['connection'] ?? null) instanceof $connectionClass
+		)
+		{
+			return $clone['connection'];
+		}
+
+		$connection = $pool->cloneConnection(
+			$sourceConnectionName,
+			$sourceConnectionName . '~',
+			['className' => $connectionClass],
+		);
+		$this->databaseConnectionClones[$sourceConnectionName] = [
+			'source' => $sourceConnection,
+			'connection' => $connection,
+		];
+
+		return $connection;
 	}
 
 	/**

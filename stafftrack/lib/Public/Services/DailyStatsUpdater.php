@@ -11,22 +11,29 @@ use Bitrix\StaffTrack\Internal\Integration\Disk\FileResolver;
 use Bitrix\StaffTrack\Internal\Model\CheckInDailyStatsTable;
 use Bitrix\StaffTrack\Internal\Model\CheckInTable;
 use Bitrix\StaffTrack\Internal\Repository\CheckInRepository;
+use Bitrix\StaffTrack\Internal\Service\CheckIn\AggregatorEventMapper;
+use Bitrix\StaffTrack\Internal\Service\CheckIn\CheckInDayRowsReader;
+use Bitrix\StaffTrack\Internal\Service\CheckIn\CheckInVisitCounter;
 use Bitrix\StaffTrack\Public\Provider\CheckInMarkerNormalizer;
 
 class DailyStatsUpdater
 {
 	private const DESCRIPTION_ENTER = 'ENTER';
 	private const DESCRIPTION_LEAVE = 'LEAVE';
-	private const DAY_LENGTH_SEC = 86399;
-	private const MAX_TIMEZONE_OFFSET = 50400;
 
-	private CheckInRepository $repository;
 	private CheckInMarkerAggregator $aggregator;
+	private CheckInDayRowsReader $dayRowsReader;
+	private CheckInVisitCounter $visitCounter;
 
-	public function __construct()
+	/**
+	 * One aggregator for the whole path: the reader asks it which spans the merge needs, the delta asks it
+	 * for the markers and the counter counts those markers. Two of them would be two answers about one day.
+	 */
+	public function __construct(?CheckInMarkerAggregator $aggregator = null)
 	{
-		$this->repository = new CheckInRepository();
-		$this->aggregator = new CheckInMarkerAggregator();
+		$this->aggregator = $aggregator ?? new CheckInMarkerAggregator();
+		$this->dayRowsReader = new CheckInDayRowsReader(new CheckInRepository(), $this->aggregator);
+		$this->visitCounter = new CheckInVisitCounter($this->dayRowsReader, $this->aggregator);
 	}
 
 	/**
@@ -36,11 +43,32 @@ class DailyStatsUpdater
 	 * write transaction runs them around its commit, so that only the write is held by the
 	 * transaction. This method keeps both for callers without one.
 	 *
-	 * @return array{userId: int, cnt: int, lastMarker: ?array, isTechnical: bool, point: ?array{lat: float, lon: float, time: int}}
+	 * The coordinates are optional: a caller of the six-argument contract has none to pass, and
+	 * {@see buildAddDelta} then reads the point of the delta off the stored row.
+	 *
+	 * @return array{userId: int, cnt?: int, lastMarker: ?array, isTechnical: bool, point: ?array{lat: float, lon: float, time: int}}
 	 */
-	public function update(int $userId, int $checkInId, int $entityType, string $description, int $userTimezone, int $timestamp): array
+	public function update(
+		int $userId,
+		int $checkInId,
+		int $entityType,
+		string $description,
+		int $userTimezone,
+		int $timestamp,
+		?float $latitude = null,
+		?float $longitude = null
+	): array
 	{
-		$addState = $this->applyAdd($userId, $checkInId, $entityType, $description, $userTimezone, $timestamp);
+		$addState = $this->applyAdd(
+			$userId,
+			$checkInId,
+			$entityType,
+			$description,
+			$userTimezone,
+			$timestamp,
+			$latitude,
+			$longitude,
+		);
 
 		if (!Feature::isCheckInRolloutEnabled($userId))
 		{
@@ -56,9 +84,21 @@ class DailyStatsUpdater
 	 * This is the whole write of the add path and the only part that belongs inside the caller's
 	 * transaction; the returned state is the handoff to buildAddDelta().
 	 *
-	 * @return array{userId: int, checkInId: int, entityType: int, description: string, userTimezone: int, localDate: Date, clientCnt: int}
+	 * The coordinates travel through that state and spare the delta any reread of the day; they are
+	 * optional for the same reason as on {@see update()}, and the read phase then reads the stored row.
+	 *
+	 * @return array{userId: int, checkInId: int, userTimezone: int, timestamp: int, latitude: ?float, longitude: ?float, localDate: Date, producesMarker: bool}
 	 */
-	public function applyAdd(int $userId, int $checkInId, int $entityType, string $description, int $userTimezone, int $timestamp): array
+	public function applyAdd(
+		int $userId,
+		int $checkInId,
+		int $entityType,
+		string $description,
+		int $userTimezone,
+		int $timestamp,
+		?float $latitude = null,
+		?float $longitude = null
+	): array
 	{
 		$localDate = $this->getLocalDate($timestamp, $userTimezone);
 		$stats = $this->findStats($userId, $localDate) ?? $this->createStats($userId, $localDate);
@@ -76,7 +116,11 @@ class DailyStatsUpdater
 			&& $description === self::DESCRIPTION_LEAVE
 			&& $hasOpenEnter;
 
-		if (!$isClosingLeave && $this->isNewerThanLast((int)($stats['LAST_CHECK_IN_ID'] ?? 0), $timestamp + $userTimezone))
+		if (
+			!$isClosingLeave
+			&& PointAcceptanceService::isLastCheckInCandidate($entityType, $timestamp)
+			&& $this->isNewerThanLast((int)($stats['LAST_CHECK_IN_ID'] ?? 0), $timestamp + $userTimezone)
+		)
 		{
 			$updateFields['LAST_CHECK_IN_ID'] = $checkInId;
 		}
@@ -86,60 +130,47 @@ class DailyStatsUpdater
 		return [
 			'userId' => $userId,
 			'checkInId' => $checkInId,
-			'entityType' => $entityType,
-			'description' => $description,
 			'userTimezone' => $userTimezone,
+			'timestamp' => $timestamp,
+			'latitude' => $latitude,
+			'longitude' => $longitude,
 			'localDate' => $localDate,
-			// The push delta feeds the same client counter as the read path, so it must use the read
-			// scale (CheckInProvider stats), not the marker count: the two scales do not match.
-			'clientCnt' => $updateFields['CNT'] + (int)$newHasOpenEnter,
+			// Read off the stored HAS_OPEN_ENTER, before this point moves it - the same rule the batch
+			// path applies inside its own walk.
+			'producesMarker' => $this->producesMarker($entityType, $description, $hasOpenEnter),
 		];
 	}
 
 	/**
 	 * Builds the add-push delta for a check-in whose stats write is already committed.
 	 *
-	 * Rereads and reaggregates the whole local day, so it must stay outside the write transaction.
+	 * The technical flag and the point come out of the write phase, so the dominant case - a technical
+	 * movement point - costs no query. Only a point that really produced a marker pays the day reread,
+	 * which must stay outside the write transaction, and that reread is where the counter comes from.
 	 *
-	 * @param array{userId: int, checkInId: int, entityType: int, description: string, userTimezone: int, localDate: Date, clientCnt: int} $addState
-	 * @return array{userId: int, cnt: int, lastMarker: ?array, isTechnical: bool, point: ?array{lat: float, lon: float, time: int}}
+	 * @param array{userId: int, checkInId: int, userTimezone: int, timestamp: int, latitude: ?float, longitude: ?float, localDate: Date, producesMarker: bool} $addState
+	 * @return array{userId: int, cnt?: int, lastMarker: ?array, isTechnical: bool, point: ?array{lat: float, lon: float, time: int}}
 	 */
 	public function buildAddDelta(array $addState): array
 	{
-		$rows = $this->readDayCheckInRows($addState['userId'], $addState['localDate']);
-		$events = $this->normalizeEvents($rows);
-
-		$isTechnical = $this->isTechnicalAddition(
-			$addState['checkInId'],
-			$addState['entityType'],
-			$addState['description'],
-			$events,
-		);
+		$isTechnical = !$addState['producesMarker'];
+		$day = $isTechnical ? null : $this->readDay($addState, (int)$addState['checkInId']);
 
 		return [
 			'userId' => $addState['userId'],
-			'cnt' => $addState['clientCnt'],
-			'lastMarker' => $isTechnical
-				? null
-				: $this->buildLastMarker(
-					$rows,
-					$events,
-					$addState['checkInId'],
-					$addState['userId'],
-					$addState['userTimezone'],
-				),
+			...self::dayCountKey($day),
+			'lastMarker' => $day['lastMarker'] ?? null,
 			'isTechnical' => $isTechnical,
-			'point' => $this->buildDeltaPoint($addState['checkInId'], $events),
+			'point' => $this->buildDeltaPoint($this->withStoredPoint($addState)),
 		];
 	}
 
 	/**
 	 * @param array<int, array> $rows
-	 * @param array<int, array> $events
+	 * @param array<int, array> $markers
 	 */
-	private function buildLastMarker(array $rows, array $events, int $checkInId, int $userId, int $userTimezone): ?array
+	private function buildLastMarker(array $rows, array $markers, int $checkInId, int $userId, int $userTimezone): ?array
 	{
-		$markers = $this->aggregator->buildMarkers($events, null);
 		if (empty($markers))
 		{
 			return null;
@@ -210,58 +241,71 @@ class DailyStatsUpdater
 	}
 
 	/**
-	 * @param array<int, array> $events
+	 * @param array{timestamp: int, latitude: ?float, longitude: ?float} $addState
+	 * @return ?array{lat: float, lon: float, time: int}
 	 */
-	private function isTechnicalAddition(int $checkInId, int $entityType, string $description, array $events): bool
+	private function buildDeltaPoint(array $addState): ?array
 	{
-		if ($entityType === CheckInType::MANUAL->value)
+		if ($addState['latitude'] === null || $addState['longitude'] === null)
 		{
-			return false;
+			return null;
 		}
 
-		if ($description === self::DESCRIPTION_ENTER)
-		{
-			return false;
-		}
-
-		if ($description === self::DESCRIPTION_LEAVE)
-		{
-			$priorEvents = array_values(
-				array_filter($events, static fn (array $event): bool => (int)$event['id'] !== $checkInId),
-			);
-
-			return !$this->hasOpenEnter($priorEvents);
-		}
-
-		return true;
+		return [
+			'lat' => (float)$addState['latitude'],
+			'lon' => (float)$addState['longitude'],
+			'time' => (int)$addState['timestamp'],
+		];
 	}
 
 	/**
-	 * @param array<int, array> $events
-	 * @return ?array{lat: float, lon: float, time: int}
+	 * The state of a caller of the six-argument contract carries no coordinates, so the point is lifted
+	 * off the stored row here, in the read phase: no write transaction holds the read, and a portal
+	 * without the rollout never reaches this phase at all.
+	 *
+	 * @param array{userId: int, checkInId: int, latitude: ?float, longitude: ?float} $addState
+	 * @return array{userId: int, checkInId: int, latitude: ?float, longitude: ?float}
 	 */
-	private function buildDeltaPoint(int $checkInId, array $events): ?array
+	private function withStoredPoint(array $addState): array
 	{
-		foreach ($events as $event)
+		if ($addState['latitude'] !== null && $addState['longitude'] !== null)
 		{
-			if ((int)$event['id'] !== $checkInId)
-			{
-				continue;
-			}
-
-			if ($event['latitude'] === null || $event['longitude'] === null)
-			{
-				return null;
-			}
-
-			return [
-				'lat' => (float)$event['latitude'],
-				'lon' => (float)$event['longitude'],
-				'time' => (int)$event['timestamp'],
-			];
+			return $addState;
 		}
 
-		return null;
+		[$addState['latitude'], $addState['longitude']] = $this->readPointOfCheckIn(
+			(int)$addState['userId'],
+			(int)$addState['checkInId'],
+		);
+
+		return $addState;
+	}
+
+	/**
+	 * Coordinates of a check-in already written, for the caller that has none of its own. The row is
+	 * asked for by its own key and by its owner: an id of another user is no point of this delta.
+	 *
+	 * @return array{0: ?float, 1: ?float}
+	 */
+	private function readPointOfCheckIn(int $userId, int $checkInId): array
+	{
+		$row = CheckInTable::query()
+			->setSelect(['LATITUDE', 'LONGITUDE'])
+			->where('ID', $checkInId)
+			->where('USER_ID', $userId)
+			->setLimit(1)
+			->exec()
+			->fetch();
+
+		if (!$row)
+		{
+			return [null, null];
+		}
+
+		return [
+			$row['LATITUDE'] !== null ? (float)$row['LATITUDE'] : null,
+			$row['LONGITUDE'] !== null ? (float)$row['LONGITUDE'] : null,
+		];
 	}
 
 	/**
@@ -299,28 +343,24 @@ class DailyStatsUpdater
 	 * update/add per group (no per-point SELECT). The HAS_OPEN_ENTER invariant requires
 	 * chronological processing, so points inside each group are sorted by local time first.
 	 *
-	 * This is the write phase of the batch path; the returned state is the handoff to
+	 * This is the write phase of the batch path; the returned states are the handoff to
 	 * {@see buildBatchDelta()}, the same two-phase split the single add path uses.
+	 *
+	 * One state per local day, in date order, because a batch is allowed to cross midnight: the queue of
+	 * the device lives by a sliding day and is cut into batches by size alone, so an offline night is
+	 * drained by batches that carry both dates. Each of those days owes its readers a delta of its own -
+	 * a screen showing the earlier one recognises nothing else.
 	 *
 	 * @param int $userId
 	 * @param array<int, array{id: int, entityType: int, description: string, timestamp: int, latitude?: float, longitude?: float}> $points
 	 * @param int $userTimezone
-	 * @return array{userId: int, userTimezone: int, localDate: ?Date, clientCnt: int, markerCheckInId: int, points: array<int, array{lat: float, lon: float, time: int}>}
+	 * @return array<int, array{userId: int, userTimezone: int, localDate: ?Date, markerCheckInId: int, points: array<int, array{lat: float, lon: float, time: int}>}>
 	 */
 	public function updateBatch(int $userId, array $points, int $userTimezone): array
 	{
-		$batchState = [
-			'userId' => $userId,
-			'userTimezone' => $userTimezone,
-			'localDate' => null,
-			'clientCnt' => 0,
-			'markerCheckInId' => 0,
-			'points' => [],
-		];
-
 		if (empty($points))
 		{
-			return $batchState;
+			return [];
 		}
 
 		$groups = [];
@@ -339,12 +379,13 @@ class DailyStatsUpdater
 			$groups[$key]['points'][] = $point;
 		}
 
-		// The push delta describes one local day, so a batch that crosses midnight reports its latest
-		// one: that is the day the receiving map has on screen.
+		// In date order: the states leave in the order their days did, and a reader taking the last of
+		// them is taking the latest day rather than whichever one the batch happened to start with.
 		ksort($groups);
-		$latestKey = array_key_last($groups);
 
-		foreach ($groups as $key => $group)
+		$batchStates = [];
+
+		foreach ($groups as $group)
 		{
 			$groupPoints = $group['points'];
 			usort(
@@ -363,16 +404,16 @@ class DailyStatsUpdater
 			$hasOpenEnter = (bool)($stats['HAS_OPEN_ENTER'] ?? false);
 			$lastId = (int)($stats['LAST_CHECK_IN_ID'] ?? 0);
 			$lastLocalTimestamp = $lastId > 0 ? ($this->getCheckInLocalTimestamp($lastId) ?? 0) : 0;
-			$isLatestGroup = $key === $latestKey;
+			$markerCheckInId = 0;
 
 			foreach ($groupPoints as $point)
 			{
 				$entityType = (int)($point['entityType'] ?? 0);
 				$description = (string)($point['description'] ?? '');
 
-				if ($isLatestGroup && $this->producesMarker($entityType, $description, $hasOpenEnter))
+				if ($this->producesMarker($entityType, $description, $hasOpenEnter))
 				{
-					$batchState['markerCheckInId'] = (int)($point['id'] ?? 0);
+					$markerCheckInId = (int)($point['id'] ?? 0);
 				}
 
 				[$cntDelta, $newHasOpenEnter] = $this->calculateDelta($entityType, $description, $hasOpenEnter);
@@ -383,8 +424,13 @@ class DailyStatsUpdater
 					&& $description === self::DESCRIPTION_LEAVE
 					&& $hasOpenEnter;
 
-				$pointLocalTimestamp = (int)($point['timestamp'] ?? 0) + $userTimezone;
-				if (!$isClosingLeave && $pointLocalTimestamp > $lastLocalTimestamp)
+				$pointTimestamp = (int)($point['timestamp'] ?? 0);
+				$pointLocalTimestamp = $pointTimestamp + $userTimezone;
+				if (
+					!$isClosingLeave
+					&& PointAcceptanceService::isLastCheckInCandidate($entityType, $pointTimestamp)
+					&& $pointLocalTimestamp > $lastLocalTimestamp
+				)
 				{
 					$lastId = (int)($point['id'] ?? 0);
 					$lastLocalTimestamp = $pointLocalTimestamp;
@@ -399,38 +445,39 @@ class DailyStatsUpdater
 				'LAST_CHECK_IN_ID' => $lastId,
 			]);
 
-			if ($isLatestGroup)
-			{
-				$batchState['localDate'] = $group['localDate'];
-				// Same read scale as applyAdd(): CNT + HAS_OPEN_ENTER is the number every client shows.
-				$batchState['clientCnt'] = $cnt + (int)$hasOpenEnter;
-				$batchState['points'] = $this->extractDeltaPoints($groupPoints);
-			}
+			$batchStates[] = [
+				'userId' => $userId,
+				'userTimezone' => $userTimezone,
+				'localDate' => $group['localDate'],
+				'markerCheckInId' => $markerCheckInId,
+				'points' => $this->extractDeltaPoints($groupPoints),
+			];
 		}
 
-		return $batchState;
+		return $batchStates;
 	}
 
 	/**
 	 * Builds the batch-push delta for points whose stats write is already committed.
 	 *
-	 * The counter, the technical flag and the track points all come out of the write walk, so the
-	 * common batch - movement points only - costs no query at all. Only a batch that really produced
-	 * a marker (an ENTER, or a LEAVE that closed a stay) pays the day reread, the same rule the single
-	 * add path follows for a technical point.
+	 * The technical flag and the track points come out of the write walk, so the common batch - movement
+	 * points only - costs no query at all. Only a batch that really produced a marker (an ENTER, or a
+	 * LEAVE that closed a stay) pays the day reread, the same rule the single add path follows for a
+	 * technical point, and the counter comes out of that reread.
 	 *
-	 * @param array{userId: int, userTimezone: int, localDate: ?Date, clientCnt: int, markerCheckInId: int, points: array<int, array{lat: float, lon: float, time: int}>} $batchState
-	 * @return array{userId: int, cnt: int, lastMarker: ?array, isTechnical: bool, points: array<int, array{lat: float, lon: float, time: int}>, localDate: ?string}
+	 * @param array{userId: int, userTimezone: int, localDate: ?Date, markerCheckInId: int, points: array<int, array{lat: float, lon: float, time: int}>} $batchState
+	 * @return array{userId: int, cnt?: int, lastMarker: ?array, isTechnical: bool, points: array<int, array{lat: float, lon: float, time: int}>, localDate: ?string}
 	 */
 	public function buildBatchDelta(array $batchState): array
 	{
 		$markerCheckInId = (int)$batchState['markerCheckInId'];
 		$isTechnical = $markerCheckInId === 0;
+		$day = $isTechnical ? null : $this->readDay($batchState, $markerCheckInId);
 
 		return [
 			'userId' => $batchState['userId'],
-			'cnt' => $batchState['clientCnt'],
-			'lastMarker' => $isTechnical ? null : $this->readDayAndBuildLastMarker($batchState, $markerCheckInId),
+			...self::dayCountKey($day),
+			'lastMarker' => $day['lastMarker'] ?? null,
 			'isTechnical' => $isTechnical,
 			'points' => $batchState['points'],
 			// The queue of auto points lives on the device and survives an offline night, so a batch sent
@@ -443,30 +490,60 @@ class DailyStatsUpdater
 	}
 
 	/**
-	 * @param array{userId: int, userTimezone: int, localDate: ?Date} $batchState
+	 * The count of the day as a key the push either carries or leaves out entirely.
+	 *
+	 * An absent key and an empty one are not the same thing on the wire. A client that meets no cnt keeps
+	 * the number it already has, but Number(null) is 0 in JavaScript, so a cnt sent empty reads as a day
+	 * holding nothing and blanks the badge of the employee on every movement point of his track. A push
+	 * with nothing to say about the count therefore says nothing at all.
+	 *
+	 * @param ?array{lastMarker: ?array, cnt: int} $day
+	 * @return array{cnt?: int}
 	 */
-	private function readDayAndBuildLastMarker(array $batchState, int $markerCheckInId): ?array
+	private static function dayCountKey(?array $day): array
 	{
-		if (!($batchState['localDate'] instanceof Date))
+		return $day === null ? [] : ['cnt' => $day['cnt']];
+	}
+
+	/**
+	 * The day reread both delta paths share: the single add and the batch pay it on the same terms, and
+	 * only for a point that really produced a marker.
+	 *
+	 * The markers it builds answer both halves of the push at once - the card that has just appeared and
+	 * how many visits the day now holds. The counter is not derived from the stored CNT beside them: a
+	 * push feeds the very number the read path serves, and that number is the visits
+	 * ({@see CheckInVisitCounter}), which a per-point delta cannot see the merges of.
+	 *
+	 * @param array{userId: int, userTimezone: int, localDate: ?Date} $state
+	 * @return ?array{lastMarker: ?array, cnt: int}
+	 */
+	private function readDay(array $state, int $markerCheckInId): ?array
+	{
+		if (!($state['localDate'] instanceof Date))
 		{
 			return null;
 		}
 
-		$rows = $this->readDayCheckInRows($batchState['userId'], $batchState['localDate']);
+		$rows = $this->dayRowsReader->readMarkerRowsByUsers([$state['userId']], $state['localDate'])[$state['userId']]
+			?? [];
+		$markers = $this->aggregator->buildMarkers(AggregatorEventMapper::fromRows($rows));
 
-		return $this->buildLastMarker(
-			$rows,
-			$this->normalizeEvents($rows),
-			$markerCheckInId,
-			$batchState['userId'],
-			$batchState['userTimezone'],
-		);
+		return [
+			'lastMarker' => $this->buildLastMarker(
+				$rows,
+				$markers,
+				$markerCheckInId,
+				$state['userId'],
+				$state['userTimezone'],
+			),
+			'cnt' => $this->visitCounter->countMarkers($markers),
+		];
 	}
 
 	/**
-	 * Whether a point becomes a marker of {@see CheckInMarkerAggregator} - the same rule
-	 * {@see isTechnicalAddition()} states for the single add path, but read off the running
-	 * HAS_OPEN_ENTER instead of a reread of the day.
+	 * Whether a point becomes a marker of {@see CheckInMarkerAggregator}, read off the HAS_OPEN_ENTER
+	 * the day carries before the point is applied. This is the whole technical/marker decision of both
+	 * write paths: neither of them reads the day to take it.
 	 */
 	private function producesMarker(int $entityType, string $description, bool $hasOpenEnter): bool
 	{
@@ -513,18 +590,16 @@ class DailyStatsUpdater
 	}
 
 	/**
-	 * Shifts the stored CNT by one check-in without rereading the day.
+	 * Shifts the stored CNT by one check-in without rereading the day, and carries HAS_OPEN_ENTER with it.
 	 *
-	 * CNT + HAS_OPEN_ENTER is the number every client shows, so the delta follows the scale the map
-	 * and the timeline read: one event per marker of {@see CheckInMarkerAggregator} - manual, auto
-	 * stay, merged. Technical auto points (MOVING_POINT, a LEAVE with no open stay) produce no marker
-	 * and must not move the counter. A stay is counted once, when its ENTER is closed; while it is
-	 * open it is carried by HAS_OPEN_ENTER instead.
+	 * CNT counts the RECORDS of the day - manual check-ins and closed stays - and nothing reads it as a
+	 * number for a screen: what every client shows is the visits ({@see CheckInVisitCounter}), and the two
+	 * part company wherever a manual check-in stands on the stay the tracker recorded at the same place.
+	 * A per-point delta cannot see that merge - it needs the whole day and the distances inside it - which
+	 * is exactly why the counter of the screens is not kept here.
 	 *
-	 * The one thing a per-point delta cannot see is the manual-with-stay merge: it needs the whole day
-	 * and distances between its points. A manual check-in that the aggregator later merges into a
-	 * nearby stay is counted twice here - the accepted price for keeping the write O(1) (the client
-	 * posts every auto point separately).
+	 * HAS_OPEN_ENTER is the half that is read: both write paths take the technical/marker decision off it
+	 * ({@see producesMarker()}) without going to the day, and that is what keeps a movement point O(1).
 	 *
 	 * @return array{0: int, 1: bool}
 	 */
@@ -606,7 +681,15 @@ class DailyStatsUpdater
 				&& $description === self::DESCRIPTION_LEAVE
 				&& $hasOpenEnter;
 
-			if (!$isClosingLeave)
+			// Lazy backfill runs over historical rows, where a point from the future is the most likely
+			// to be met, so the marker is protected here as well as on the write paths.
+			if (
+				!$isClosingLeave
+				&& PointAcceptanceService::isLastCheckInCandidate(
+					$entityType,
+					$this->extractTimestamp($row['DATE_CREATE'] ?? null),
+				)
+			)
 			{
 				$lastCheckInId = (int)($row['ID'] ?? 0);
 			}
@@ -668,70 +751,6 @@ class DailyStatsUpdater
 		return new Date($localDateString, 'Y-m-d');
 	}
 
-	/**
-	 * @return array<int, array>
-	 */
-	private function readDayCheckInRows(int $userId, Date $localDate): array
-	{
-		[$dateStart, $dateEnd] = $this->getWideDayBoundaries($localDate);
-
-		$hotRows = $this->repository->getAllUsersCheckInByPeriod([$userId], $dateStart, $dateEnd);
-		$archivedRows = $this->repository->getAllUsersAggregatedPointsByPeriod([$userId], $dateStart, $dateEnd);
-
-		$localDateString = (string)$localDate->format('Y-m-d');
-
-		return array_values(array_filter(
-			array_merge($hotRows, $archivedRows),
-			fn (array $row): bool => $this->isCheckInOnLocalDate($row, $localDateString),
-		));
-	}
-
-	/**
-	 * @return array{0: DateTime, 1: DateTime}
-	 */
-	private function getWideDayBoundaries(Date $localDate): array
-	{
-		$midnightUtc = strtotime($localDate->format('Y-m-d') . ' 00:00:00 UTC');
-
-		return [
-			DateTime::createFromTimestamp($midnightUtc - self::MAX_TIMEZONE_OFFSET),
-			DateTime::createFromTimestamp($midnightUtc + self::DAY_LENGTH_SEC + self::MAX_TIMEZONE_OFFSET),
-		];
-	}
-
-	private function isCheckInOnLocalDate(array $row, string $localDateString): bool
-	{
-		$timestamp = $this->extractTimestamp($row['DATE_CREATE'] ?? null);
-		$userTimezone = (int)($row['USER_TIMEZONE'] ?? 0);
-
-		return date('Y-m-d', $timestamp + $userTimezone) === $localDateString;
-	}
-
-	/**
-	 * @return array<int, array{id: int, entityType: int, description: string, latitude: float, longitude: float, address: string, timestamp: int, userTimezone: int}>
-	 */
-	private function normalizeEvents(array $rows): array
-	{
-		$events = [];
-		foreach ($rows as $row)
-		{
-			$events[] = [
-				'id' => (int)($row['ID'] ?? 0),
-				'entityType' => (int)($row['ENTITY_TYPE'] ?? 0),
-				'description' => (string)($row['DESCRIPTION'] ?? ''),
-				'latitude' => $row['LATITUDE'] !== null ? (float)$row['LATITUDE'] : null,
-				'longitude' => $row['LONGITUDE'] !== null ? (float)$row['LONGITUDE'] : null,
-				'address' => (string)($row['ADDRESS'] ?? ''),
-				'timestamp' => $this->extractTimestamp($row['DATE_CREATE'] ?? null),
-				'userTimezone' => (int)($row['USER_TIMEZONE'] ?? 0),
-			];
-		}
-
-		usort($events, static fn (array $a, array $b): int => $a['timestamp'] <=> $b['timestamp'] ?: $a['id'] <=> $b['id']);
-
-		return $events;
-	}
-
 	private function extractTimestamp(mixed $value): int
 	{
 		if ($value instanceof DateTime)
@@ -745,32 +764,5 @@ class DailyStatsUpdater
 		}
 
 		return 0;
-	}
-
-	/**
-	 * Only a real LEAVE closes a stay: manual check-ins and technical auto points (MOVING_POINT and
-	 * the like) leave it open, the same model as CheckInMarkerAggregator::collapseAutoCheckIns().
-	 */
-	private function hasOpenEnter(array $events): bool
-	{
-		$openEnter = false;
-		foreach ($events as $event)
-		{
-			if ($event['entityType'] === CheckInType::MANUAL->value)
-			{
-				continue;
-			}
-
-			if ($event['description'] === self::DESCRIPTION_ENTER)
-			{
-				$openEnter = true;
-			}
-			elseif ($event['description'] === self::DESCRIPTION_LEAVE)
-			{
-				$openEnter = false;
-			}
-		}
-
-		return $openEnter;
 	}
 }

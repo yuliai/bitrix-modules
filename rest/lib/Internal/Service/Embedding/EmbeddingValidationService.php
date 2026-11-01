@@ -21,6 +21,7 @@ final class EmbeddingValidationService
 	public function __construct(
 		private EmbeddingRepository $repository = new EmbeddingRepository(),
 		private PlacementProvider $placementProvider = new PlacementProvider(),
+		private ApplicationOnlyPlacements $applicationOnlyPlacements = new ApplicationOnlyPlacements(),
 	)
 	{
 	}
@@ -39,7 +40,6 @@ final class EmbeddingValidationService
 	public function prepare(
 		string $moduleId,
 		string $entityType,
-		string $entityId,
 		string $placement,
 		string $handler,
 		int $targetUserId,
@@ -54,6 +54,14 @@ final class EmbeddingValidationService
 		}
 
 		$placementInfo = $this->resolvePlacement($placement);
+
+		if (
+			!EmbeddingOwnerResolver::isAppOwnerType($moduleId, $entityType)
+			&& $this->applicationOnlyPlacements->contains($placement)
+		)
+		{
+			throw new ArgumentException('The placement does not support module embeddings', 'placement');
+		}
 
 		if ($handler === '')
 		{

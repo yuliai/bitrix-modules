@@ -29,7 +29,7 @@ final class ClickEventWrapper
 			. "});";
 
 		return new JsCode(
-			'return (function(){'
+			'(function(){'
 			. 'const result=(function(){'
 			. $originalCode
 			. "\n"

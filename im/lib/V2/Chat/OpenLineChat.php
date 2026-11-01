@@ -23,6 +23,7 @@ use Bitrix\Pull\Event;
 class OpenLineChat extends EntityChat
 {
 	protected const EXTRANET_CAN_SEE_HISTORY = true;
+	protected const EXTRANET_CAN_SEE_HISTORY_ON_EXPLICIT_ADD = true;
 
 	protected $entityMap = [
 		'entityId' => [

@@ -21,13 +21,23 @@ class NativeFilterBuilder
 
 		foreach ($config as $filterConfig)
 		{
-			if (isset($filterConfig['filterType']))
+			if (!isset($filterConfig['filterType']))
 			{
-				$filter = $this->getFilterByType($filterConfig['filterType'], $filterConfig['id']);
-				if ($filter && $filter->isAvailable())
-				{
-					$this->filters[$filter::getFilterType()][] = $filter;
-				}
+				continue;
+			}
+
+			if (
+				$filterConfig['filterType'] === DateTime::getFilterType()
+				&& DateTime::hasConfiguredDefault($filterConfig)
+			)
+			{
+				continue;
+			}
+
+			$filter = $this->getFilterByType($filterConfig['filterType'], $filterConfig['id']);
+			if ($filter && $filter->isAvailable())
+			{
+				$this->filters[$filter::getFilterType()][] = $filter;
 			}
 		}
 	}

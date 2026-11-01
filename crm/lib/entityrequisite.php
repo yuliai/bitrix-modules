@@ -6829,6 +6829,42 @@ class EntityRequisite
 		}
 	}
 
+	public static function prepareEntityListHeaderSections(array &$headers, string $prefix = 'RQ_'): array
+	{
+		$countryIds = [];
+		$countryMap = [];
+		$pattern = '/^' . preg_quote($prefix, '/') . '(?:RQ_|UF_)\w+\|(\d+)$/u';
+
+		foreach ($headers as &$header)
+		{
+			if (
+				!isset($header['id'])
+				|| !is_string($header['id'])
+				|| !preg_match($pattern, $header['id'], $matches)
+			)
+			{
+				continue;
+			}
+
+			$countryId = (int)$matches[1];
+			$header['section_id'] = self::getEntityListHeaderSectionId($countryId);
+
+			if (!isset($countryMap[$countryId]))
+			{
+				$countryMap[$countryId] = true;
+				$countryIds[] = $countryId;
+			}
+		}
+		unset($header);
+
+		return $countryIds;
+	}
+
+	public static function getEntityListHeaderSectionId(int $countryId): string
+	{
+		return \CCrmOwnerType::RequisiteName . '_' . $countryId;
+	}
+
 	public function normalizeEntityListFields(&$entityFields, $headers, $options = array())
 	{
 		$result = false;

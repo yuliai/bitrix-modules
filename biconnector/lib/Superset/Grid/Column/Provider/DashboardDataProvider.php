@@ -94,14 +94,6 @@ class DashboardDataProvider extends DataProvider
 		;
 
 		$result[] =
-			$this->createColumn('FILTER_PERIOD')
-				->setType(Type::TEXT)
-				->setName(Loc::getMessage('BICONNECTOR_SUPERSET_GRID_COLUMN_TITLE_DATE_PERIOD'))
-				->setAlign('left')
-				->setDefault(true)
-		;
-
-		$result[] =
 			$this->createColumn('ID')
 				->setType(Type::TEXT)
 				->setName(Loc::getMessage('BICONNECTOR_SUPERSET_GRID_COLUMN_TITLE_ID'))

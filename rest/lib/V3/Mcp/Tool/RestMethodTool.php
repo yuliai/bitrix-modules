@@ -9,6 +9,7 @@ use Bitrix\AiAssistant\Request\Dto\RequestSubjectDto;
 use Bitrix\Rest\V3\Mcp\Access\DefaultMethodAccessChecker;
 use Bitrix\Rest\V3\Mcp\Access\MethodAccessCheckerInterface;
 use Bitrix\Rest\V3\Mcp\Execution\RestMethodInvoker;
+use Bitrix\Rest\V3\Mcp\Schema\ToolInputSchema;
 use Bitrix\Rest\V3\Schema\MethodDescription;
 
 final class RestMethodTool extends SubjectAwareToolContract
@@ -34,8 +35,18 @@ final class RestMethodTool extends SubjectAwareToolContract
 		return $this->toolDescription->description;
 	}
 
+	public function getFullDescription(): ToolDescriptionDto
+	{
+		return $this->toolDescription;
+	}
+
 	public function getInputSchema(): array
 	{
+		if ($this->toolDescription->inputSchema instanceof ToolInputSchema)
+		{
+			return $this->toolDescription->inputSchema->toArray();
+		}
+
 		return (array)$this->toolDescription->inputSchema;
 	}
 

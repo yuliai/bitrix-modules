@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Public\Services;
 
 use Bitrix\Rest\Internal\Repository\EmbeddingAccessRepository;
+use Bitrix\Rest\Internal\Service\Application\AccessCacheInvalidator;
 use Bitrix\Rest\Internal\Service\Embedding\EmbeddingAccessCodeNormalizer;
+use Bitrix\Rest\Internal\Service\Embedding\EmbeddingOwnerResolver;
 
 class EmbeddingAccessService
 {
@@ -31,10 +33,20 @@ class EmbeddingAccessService
 			return;
 		}
 
-		$this->repository->replaceForEmbeddings(
-			$moduleId,
-			$entityType,
-			EmbeddingAccessCodeNormalizer::normalizeMap($accessCodesByEmbeddingId),
-		);
+		try
+		{
+			$this->repository->replaceForEmbeddings(
+				$moduleId,
+				$entityType,
+				EmbeddingAccessCodeNormalizer::normalizeMap($accessCodesByEmbeddingId),
+			);
+		}
+		finally
+		{
+			if (!EmbeddingOwnerResolver::isAppOwnerType($moduleId, $entityType))
+			{
+				AccessCacheInvalidator::clear();
+			}
+		}
 	}
 }

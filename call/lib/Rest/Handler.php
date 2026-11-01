@@ -156,15 +156,26 @@ class Handler extends \IRestService
 		$chatOwnerId = $chatData['chat'][$aliasData['ENTITY_ID']]['owner'];
 
 		$publicLink = $aliasData['LINK'];
+
+		$message = fn (?string $languageId = null) => Loc::getMessage(
+				"IM_VIDEOCONF_NEW_GUEST",
+				['#CHAT_TITLE#' => $chatTitle],
+				$languageId
+			) . "[br]" . "<a href='{$publicLink}'>" . Loc::getMessage("IM_VIDEOCONF_JOIN_LINK", null, $languageId) . "</a>";
+		$title = fn (?string $languageId = null) => Loc::getMessage('IM_VIDEOCONF_NEW_GUEST_TITLE', null, $languageId);
+
 		\CIMNotify::Add([
 			'TO_USER_ID' => $chatOwnerId,
 			'NOTIFY_MODULE' => 'im',
 			'NOTIFY_EVENT' => 'videconf_new_guest',
-			'MESSAGE' => fn (?string $languageId = null) => Loc::getMessage(
-					"IM_VIDEOCONF_NEW_GUEST",
-					['#CHAT_TITLE#' => $chatTitle],
-					$languageId
-				) . "[br]" . "<a href='{$publicLink}'>" . Loc::getMessage("IM_VIDEOCONF_JOIN_LINK", null, $languageId) . "</a>",
+			'NOTIFY_TITLE' => $title,
+			'NOTIFY_MESSAGE' => $message,
+			"PARAMS" => [
+				'COMPONENT_PARAMS' => [
+					'SUBJECT' => $title,
+					'SYSTEM_ICON' => 'videoConf'
+				],
+			],
 		]);
 
 		return $result;
@@ -223,16 +234,17 @@ class Handler extends \IRestService
 
 		/** @var \CUser $USER */
 		global $USER;
+		$currentUserId = (int)$USER->GetID();
+
+		Loader::includeModule('im');
+		$relations = self::resolveChatRelationsForNotification((int)($params['CHAT_ID'] ?? 0), $currentUserId);
+
 		if ($USER->GetParam("NAME") != $params['NAME'])
 		{
 			$userManager = new \CUser;
-			$userManager->Update($USER->GetID(), [
+			$userManager->Update($currentUserId, [
 				'NAME' => $params['NAME']
 			]);
-
-			Loader::includeModule('im');
-
-			$relations = \Bitrix\Im\Chat::getRelation($params['CHAT_ID'], ['WITHOUT_COUNTERS' => 'Y']);
 
 			if (Loader::includeModule('pull'))
 			{
@@ -240,7 +252,7 @@ class Handler extends \IRestService
 					'module_id' => 'im',
 					'command' => 'callUserNameUpdate',
 					'params' => [
-						'userId' => $USER->GetID(),
+						'userId' => $currentUserId,
 						'name' => $params['NAME']
 					],
 					'extra' => \Bitrix\Im\Common::getPullExtra()
@@ -253,6 +265,34 @@ class Handler extends \IRestService
 			'hash' => mb_substr($USER->GetParam('XML_ID'), mb_strlen(Auth::AUTH_TYPE) + 1),
 			'userToken' => \Bitrix\Call\JwtCall::getUserJwt($USER->GetID()),
 		];
+	}
+
+	/**
+	 * Resolves the chat relations a guest rename notification may be broadcast to. CHAT_ID comes from
+	 * user input, so membership is verified before any side effect: the relations are both the
+	 * permission check and the recipient list. A foreign chat and a missing one share a single error
+	 * code, so the response cannot be used to probe which chats exist.
+	 *
+	 * @return array<int, array> relations keyed by user id
+	 */
+	private static function resolveChatRelationsForNotification(int $chatId, int $userId): array
+	{
+		if ($chatId <= 0)
+		{
+			throw new RestException("Chat ID can't be empty", "CHAT_ID_EMPTY", \CRestServer::STATUS_WRONG_REQUEST);
+		}
+
+		$relations = \Bitrix\Im\Chat::getRelation($chatId, ['WITHOUT_COUNTERS' => 'Y']);
+		if (!isset($relations[$userId]))
+		{
+			throw new RestException(
+				"You don't have access to this chat",
+				"NO_ACCESS",
+				\CRestServer::STATUS_WRONG_REQUEST
+			);
+		}
+
+		return $relations;
 	}
 
 	/**

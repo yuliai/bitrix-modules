@@ -144,6 +144,7 @@ class OpenLineTrigger extends BaseTrigger
 		}
 		$configs = [];
 		$orm = \Bitrix\ImOpenLines\Model\ConfigTable::getList(Array(
+			'select' => ['ID', 'LINE_NAME'],
 			'filter' => Array(
 				'=TEMPORARY' => 'N'
 			)

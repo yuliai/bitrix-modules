@@ -27,4 +27,9 @@ class SettingsProvider
 	{
 		return $this->provider->hasAiReportAccess();
 	}
+
+	public function isReportsEnabledWithAi(): bool
+	{
+		return $this->provider->isReportsEnabledWithAi();
+	}
 }

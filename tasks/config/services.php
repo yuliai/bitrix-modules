@@ -38,6 +38,7 @@ use Bitrix\Tasks\V2\Internal\Integration\Im\MessageSender;
 use Bitrix\Tasks\V2\Internal\Integration\Im\MessageSenderInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Im\Repository\MessageRepository;
 use Bitrix\Tasks\V2\Internal\Integration\Im\Repository\MessageRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Integration\Legacy\Repository\DuplicateCandidateRepository;
 use Bitrix\Tasks\V2\Internal\Integration\Rest\Repository\InMemoryPlacementRepository;
 use Bitrix\Tasks\V2\Internal\Integration\Rest\Repository\PlacementRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Mail\Repository\EmailRepository;
@@ -55,6 +56,7 @@ use Bitrix\Tasks\V2\Internal\Repository\CounterRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CounterRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\DeadlineChangeLogRepository;
 use Bitrix\Tasks\V2\Internal\Repository\DeadlineChangeLogRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\DuplicateCandidateRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ElapsedTimeReadRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ElapsedTimeReadRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ElapsedTimeRepository;
@@ -158,6 +160,7 @@ use Bitrix\Tasks\V2\Internal\Repository\ViewRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ViewRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Service\Consistency\ConfigConsistencyResolver;
 use Bitrix\Tasks\V2\Internal\Service\Consistency\ConsistencyResolverInterface;
+use Bitrix\Tasks\V2\Internal\Service\Task\Mutation\TaskMutationRegistry;
 use Bitrix\Tasks\V2\Internal\Service\Esg\EgressController;
 use Bitrix\Tasks\V2\Internal\Service\Esg\EgressInterface;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Ping\ChatMessagePing;
@@ -214,6 +217,9 @@ return [
 		],
 		// endregion
 		// region DI
+		TaskMutationRegistry::class => [
+			'className' => TaskMutationRegistry::class,
+		],
 		ControllerFactoryInterface::class => [
 			'constructor' => static fn(): ControllerFactoryInterface => ControllerFactory::getInstance(),
 		],
@@ -363,6 +369,9 @@ return [
 		],
 		MessageRepositoryInterface::class => [
 			'className' => MessageRepository::class,
+		],
+		DuplicateCandidateRepositoryInterface::class => [
+			'className' => DuplicateCandidateRepository::class,
 		],
 		CounterRepositoryInterface::class => [
 			'className' => CounterRepository::class,

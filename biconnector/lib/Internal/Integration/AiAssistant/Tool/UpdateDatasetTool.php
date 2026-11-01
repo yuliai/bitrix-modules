@@ -6,15 +6,32 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dataset\WriteDatasetOperations;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class UpdateDatasetTool extends BaseBiTool
 {
 	private const ALLOWED_COLUMN_TYPES = ['INT', 'STRING', 'DOUBLE', 'DATE', 'DATETIME'];
+	private const UPDATE_IMPACT = 'The dataset column set will be fully replaced with the columns above. '
+		. 'Columns not listed will be dropped. Charts relying on dropped columns may break.'
+	;
+	private const CONFIRM_HINT = 'Show this preview to the user; only AFTER they explicitly approve, '
+		. 'call update_dataset again with the same datasetId, the same columns and confirm=true.'
+	;
 
 	public function getName(): string
 	{
 		return 'update_dataset';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -81,6 +98,53 @@ final class UpdateDatasetTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$datasetId = (int)($args['datasetId'] ?? 0);
+		$columns = $args['columns'] ?? [];
+		$columns = is_array($columns) ? $columns : [];
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$operation = ServiceLocator::getInstance()->get(WriteDatasetOperations::class);
+		$actor = new Actor($userId, Channel::Mcp);
+
+		$confirm = ($args['confirm'] ?? false) === true;
+		if (!$confirm)
+		{
+			$preview = $operation->previewUpdate($datasetId, $columns, $actor);
+			if (!$preview->isSuccess())
+			{
+				throw self::toMcpException($preview);
+			}
+			$data = $preview->getData();
+
+			return [
+				'requiresConfirmation' => true,
+				'action' => 'update_dataset',
+				'id' => $data['id'],
+				'name' => $data['name'],
+				'columns' => $data['columns'],
+				'impact' => self::UPDATE_IMPACT,
+				'confirmHint' => self::CONFIRM_HINT,
+			];
+		}
+
+		$result = $operation->update($datasetId, $columns, $actor);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

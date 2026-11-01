@@ -118,7 +118,6 @@ class ApplicationInstaller
 		AppInstallCompletionMode $installCompletionMode,
 		?string $applicationToken = null,
 		?int $initiatorUserId = null,
-		bool $skipTariffCheck = false,
 	): App
 	{
 		$installerUserId = $initiatorUserId ?? $userId;
@@ -149,7 +148,6 @@ class ApplicationInstaller
 			ElementCodeType::APPLICATION->value,
 			$existingIntegration?->getId(),
 			$installerUserId,
-			$skipTariffCheck,
 		);
 		// endregion
 
@@ -179,14 +177,6 @@ class ApplicationInstaller
 
 		$savedApp->setAccess('U' . $userId);
 		$savedApp->setAttribute(AppAttributeCode::OwnerUserId->value, (string)$userId);
-		if ($skipTariffCheck)
-		{
-			$savedApp->setAttribute(AppAttributeCode::ForceInstalled->value, 'Y');
-		}
-		else
-		{
-			$savedApp->removeAttribute(AppAttributeCode::ForceInstalled->value);
-		}
 		if ($applicationToken !== null)
 		{
 			$savedApp->setApplicationToken($applicationToken);

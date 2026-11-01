@@ -6,6 +6,7 @@ namespace Bitrix\Im\V2\Message\BlocksBuilder\Pull;
 
 use Bitrix\Im\V2\Entity\File\FileCollection;
 use Bitrix\Im\V2\Message;
+use Bitrix\Im\V2\Message\BlocksBuilder\Entity\BlockCollection;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\Blocks\AbstractBlock;
 use Bitrix\Im\V2\Pull\Event\BaseMessageEvent;
 use Bitrix\Im\V2\Pull\EventType;
@@ -36,7 +37,7 @@ class MessageBlockElementAppend extends BaseMessageEvent
 			'messageId' => $this->message->getId(),
 			'chatId' => $this->message->getChatId(),
 			'text' => $this->message->getParsedMessage(),
-			'element' => $this->block?->jsonSerialize(),
+			'element' => BlockCollection::serializeBlock($this->block),
 			'files' => FileCollection::initByDiskFilesIds(
 				$this->block?->getFiles() ?? [],
 				$this->message->getChatId(),

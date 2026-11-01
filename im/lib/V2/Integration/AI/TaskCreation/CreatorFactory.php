@@ -10,23 +10,31 @@ use Bitrix\Main\ArgumentException;
 class CreatorFactory
 {
 	/**
+	 * @param int $requestedMessagesCount how many ids the request carried, which the collection
+	 *        no longer tells: deleted and foreign-chat messages drop out before the factory.
+	 *
 	 * @throws ArgumentException when the selection is empty: the public entry point
 	 *         (Task::createByAiAction) already rejects an empty collection, so this guards
 	 *         the contract and fails fast instead of building a creator with a null anchor.
 	 */
-	public function createByMessages(MessageCollection $messageCollection): AbstractCreator
+	public function createByMessages(
+		MessageCollection $messageCollection,
+		int $requestedMessagesCount
+	): AbstractCreator
 	{
 		if ($messageCollection->isEmpty())
 		{
 			throw new ArgumentException('Message collection is empty');
 		}
 
-		return match (true)
+		$creator = match (true)
 		{
 			$this->isTranscriptMessage($messageCollection) => $this->createTranscriptionCreator($messageCollection),
 			$messageCollection->count() === 1 => new SingleMessageCreator($messageCollection->getAny()),
 			default => new MultipleMessagesCreator($messageCollection),
 		};
+
+		return $creator->setRequestedMessagesCount($requestedMessagesCount);
 	}
 
 	protected function isTranscriptMessage(MessageCollection $messageCollection): bool

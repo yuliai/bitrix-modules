@@ -12,15 +12,10 @@ use Bitrix\Crm\Integration\UI\EntitySelector\MultiplePlaceholderProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\PlaceholderProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\TimelinePingProvider;
 use Bitrix\Crm\Security\Notification\Queue\ReadPermissionAddReceiver;
-use Bitrix\Crm\V2\Internal\Service\Settings\Handler\UpdateSettingCommandHandler;
-use Bitrix\Crm\V2\Internal\Service\Settings\Mutation\TransportValueMapper;
-use Bitrix\Crm\V2\Internal\Service\Settings\Presentation\SettingPresentationMapper;
-use Bitrix\Crm\V2\Internal\Service\Settings\Presentation\SettingSchemaMapper;
-use Bitrix\Crm\V2\Internal\Service\Settings\Presentation\SettingsHubDataProvider;
 use Bitrix\Crm\V2\Internal\Service\Settings\SettingFactory;
 use Bitrix\Crm\V2\Internal\Service\Settings\SettingFactoryInterface;
 use Bitrix\Crm\V2\Internal\Service\Settings\SettingRegistry;
-use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Crm\V2\Internal\Service\Settings\SettingRegistryInterface;
 
 $uiEntitySelectorConfig = [
 	'value' => [
@@ -177,6 +172,13 @@ $uiEntitySelectorConfig = [
 				'provider' => [
 					'moduleId' => 'crm',
 					'className' => '\\Bitrix\\Crm\\Integration\\UI\\EntitySelector\\WebFormProvider',
+				],
+			],
+			[
+				'entityId' => 'crm_catalog_product',
+				'provider' => [
+					'moduleId' => 'crm',
+					'className' => '\\Bitrix\\Crm\\Integration\\UI\\EntitySelector\\CatalogProductProvider',
 				],
 			],
 		],
@@ -383,6 +385,9 @@ return [
 			],
 			'crm.service.sign.member' => [
 				'className' => \Bitrix\Crm\Service\Sign\MemberService::class,
+			],
+			'crm.automation.designerAvailability' => [
+				'className' => \Bitrix\Crm\Automation\DesignerAvailability::class,
 			],
 			'crm.service.director' => [
 				'className' => '\\Bitrix\\Crm\\Service\\Director',
@@ -634,46 +639,8 @@ return [
 			SettingFactoryInterface::class => [
 				'className' => SettingFactory::class,
 			],
-			'crm.service.setting.registry' => [
+			SettingRegistryInterface::class => [
 				'className' => SettingRegistry::class,
-				'constructorParams' => static function(): array {
-					return [
-						ServiceLocator::getInstance()->get(SettingFactoryInterface::class),
-					];
-				},
-			],
-			SettingSchemaMapper::class => [
-				'className' => SettingSchemaMapper::class,
-			],
-			SettingPresentationMapper::class => [
-				'className' => SettingPresentationMapper::class,
-				'constructorParams' => static function(): array {
-					return [
-						ServiceLocator::getInstance()->get(SettingSchemaMapper::class),
-					];
-				},
-			],
-			SettingsHubDataProvider::class => [
-				'className' => SettingsHubDataProvider::class,
-				'constructorParams' => static function(): array {
-					return [
-						ServiceLocator::getInstance()->get(SettingRegistry::SERVICE_CODE),
-						ServiceLocator::getInstance()->get(SettingPresentationMapper::class),
-					];
-				},
-			],
-			TransportValueMapper::class => [
-				'className' => TransportValueMapper::class,
-			],
-			UpdateSettingCommandHandler::class => [
-				'className' => UpdateSettingCommandHandler::class,
-				'constructorParams' => static function(): array {
-					return [
-						ServiceLocator::getInstance()->get(SettingRegistry::SERVICE_CODE),
-						ServiceLocator::getInstance()->get(TransportValueMapper::class),
-						ServiceLocator::getInstance()->get(SettingsHubDataProvider::class),
-					];
-				},
 			],
 			'crm.filter.fieldsTransform.userBasedField' => [
 				'className' => \Bitrix\Crm\Filter\FieldsTransform\UserBasedField::class,
@@ -987,20 +954,24 @@ return [
 				OpenLineToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\Mail\MailToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DealRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\LeadRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ContactRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\CompanyRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\QuoteRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartInvoiceRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\MyCompanyRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\CategoryRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\RequisiteAddressRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ProductRowRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ProductRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DictionaryRestToolSet::class,
-				//Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\FormRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DealRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\LeadRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ContactRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\CompanyRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\QuoteRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartInvoiceRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\MyCompanyRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\CategoryRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\RequisiteAddressRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ProductRowRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ProductRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DictionaryRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\FieldRequirementRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\FormRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DetailPageLayoutRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ActivityRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\TrackingRestToolSet::class,
 			],
 			'profileDataProviders' => [
 				Bitrix\Crm\Integration\AiAssistant\DataProviders\CrmProvider::class,

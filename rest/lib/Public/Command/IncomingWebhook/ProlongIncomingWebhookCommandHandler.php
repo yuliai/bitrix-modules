@@ -27,10 +27,6 @@ class ProlongIncomingWebhookCommandHandler
 	}
 
 	/**
-	 * Prolongation is intentionally left out of the tariff gate: TariffAccessService::ensurePresetAvailable()
-	 * guards integration creation, and a call to a webhook on a tariff without REST access is rejected by
-	 * ensureAPAuthAvailable() in APAuth anyway.
-	 *
 	 * @throws AccessDeniedException
 	 * @throws ObjectNotFoundException
 	 * @throws CannotProlongIncomingWebhookException

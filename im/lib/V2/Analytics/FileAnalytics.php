@@ -14,6 +14,7 @@ use Bitrix\Im\V2\Entity\File\ParamCollection;
 use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\Integration\AI\Transcription\Result\TranscribeResult;
 use Bitrix\Im\V2\Message;
+use Bitrix\Main\Loader;
 
 class FileAnalytics extends AbstractAnalytics
 {
@@ -41,7 +42,7 @@ class FileAnalytics extends AbstractAnalytics
 		});
 	}
 
-	public function addAttachFilesEvent(Message $message): void
+	public function addAttachFilesEvent(Message $message, ?string $fileType = null): void
 	{
 		$files = $message->getFiles();
 		$fileCount = $files->count();
@@ -50,9 +51,14 @@ class FileAnalytics extends AbstractAnalytics
 			return;
 		}
 
+		// Legacy contract: without the disk module the im-label goes out with no type at all.
 		$this
 			->createFileMessageEvent(self::ATTACH_FILE)
-			?->setFilesType($files)
+			?->setType(
+				Loader::includeModule('disk')
+					? ($fileType ?? FileMessageEvent::resolveFileType($files))
+					: null
+			)
 			?->setFileP3($fileCount)
 			?->send()
 		;

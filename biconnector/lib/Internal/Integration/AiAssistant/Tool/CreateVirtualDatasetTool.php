@@ -6,6 +6,12 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Configuration\Feature;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
+use Bitrix\BIConnector\Internal\Feature\FlagGate;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\Operation\OperationImpact;
+use Bitrix\BIConnector\Internal\Operation\Builder\Actor;
+use Bitrix\BIConnector\Internal\Operation\Builder\Channel;
+use Bitrix\BIConnector\Internal\Operation\Builder\Dataset\WriteDatasetOperations;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 
 final class CreateVirtualDatasetTool extends BaseBiTool
@@ -13,6 +19,11 @@ final class CreateVirtualDatasetTool extends BaseBiTool
 	public function getName(): string
 	{
 		return 'create_virtual_dataset';
+	}
+
+	public function getImpact(): OperationImpact
+	{
+		return OperationImpact::Modify;
 	}
 
 	public function getDescription(): string
@@ -64,6 +75,37 @@ final class CreateVirtualDatasetTool extends BaseBiTool
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
+	{
+		if (!(new FlagGate())->isEnabled(FlagGate::BUILDER_MCP_OPERATIONS, $userId))
+		{
+			return $this->legacyExecuteStructured($userId, ...$args);
+		}
+
+		self::requireBiconnectorModule();
+
+		$columns = $args['columns'] ?? [];
+		$sourceSchema = isset($args['sourceSchema']) && is_string($args['sourceSchema']) && $args['sourceSchema'] !== ''
+			? $args['sourceSchema']
+			: null
+		;
+
+		// Resolved per call: aiassistant keeps a tool as a process-wide singleton.
+		$result = ServiceLocator::getInstance()->get(WriteDatasetOperations::class)->createFromTable(
+			(string)($args['datasetName'] ?? ''),
+			(string)($args['sourceTable'] ?? ''),
+			is_array($columns) ? $columns : [],
+			$sourceSchema,
+			new Actor($userId, Channel::Mcp),
+		);
+		if (!$result->isSuccess())
+		{
+			throw self::toMcpException($result);
+		}
+
+		return $result->getData();
+	}
+
+	private function legacyExecuteStructured(int $userId, ...$args): array
 	{
 		Loader::includeModule('biconnector');
 

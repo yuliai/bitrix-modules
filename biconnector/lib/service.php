@@ -300,13 +300,31 @@ abstract class Service
 		$result = [];
 		foreach ($this->getDataSourceConnectors() as $connector)
 		{
-			$result[] = [
-				$connector->getName(),
-				$connector->rawInfo['TABLE_DESCRIPTION'] ?? [],
-			];
+			$result[] = $this->buildTableListRow($connector);
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Builds one row of the table list: the technical name first, the human-readable one next.
+	 *
+	 * The row shape is part of the contract with every consumer of "show_tables", and the external
+	 * services read it by index, so a service that carries more than these two publishes the extra
+	 * elements by overriding this method rather than by widening the row for everybody.
+	 *
+	 * @param Connector\Base $connector
+	 *
+	 * @return array
+	 */
+	protected function buildTableListRow(Connector\Base $connector): array
+	{
+		$verboseName = (string)($connector->rawInfo['VERBOSE_NAME'] ?? '');
+
+		return [
+			$connector->getName(),
+			$verboseName !== '' ? $verboseName : ($connector->rawInfo['TABLE_DESCRIPTION'] ?? []),
+		];
 	}
 
 	/**

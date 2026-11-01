@@ -7,6 +7,9 @@ namespace Bitrix\Crm\V2\Infrastructure\Rest\CustomController;
 use Bitrix\Crm\Restriction\RestrictionManager;
 use Bitrix\Crm\Settings\LeadSettings;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Internal\Service\Rest\CategoryOwnerAccess;
+use Bitrix\Crm\V2\Internal\Service\Rest\CategoryOwnerAccessException;
+use Bitrix\Crm\V2\Public\ItemId;
 use Bitrix\Crm\V2\Public\OwnerType;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Engine\Action;
@@ -109,6 +112,31 @@ abstract class AbstractController extends RestController
 		catch (ArgumentException)
 		{
 			throw new EntityNotFoundException($bodyEntityTypeId);
+		}
+	}
+
+	protected function getRouteCategoryId(): ?int
+	{
+		$categoryId = $this->getSourceParametersList()[0]['categoryId'] ?? null;
+
+		return is_int($categoryId) ? $categoryId : null;
+	}
+
+	protected function assertCategoryOwnerAllowed(ItemId $owner): void
+	{
+		$categoryId = $this->getRouteCategoryId();
+		if ($categoryId === null)
+		{
+			return;
+		}
+
+		try
+		{
+			(new CategoryOwnerAccess())->assertAllowed($owner, $categoryId, $this->userId);
+		}
+		catch (CategoryOwnerAccessException)
+		{
+			throw new EntityNotFoundException($owner->getId());
 		}
 	}
 

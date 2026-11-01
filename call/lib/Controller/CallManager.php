@@ -13,10 +13,12 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Call\Recent;
+use Bitrix\Call\Service\GuestCallPolicy;
 use Bitrix\Call\Settings;
 use Bitrix\Call\CallFactory;
 use Bitrix\Call\NotifyService;
 use Bitrix\Call\Call\Registry;
+use Bitrix\Call\RingingDeviceRegistry;
 use Bitrix\Call\Integration\AI\CallAISettings;
 use Bitrix\Call\Idempotence;
 use Bitrix\Call\ControllerClient;
@@ -42,7 +44,24 @@ class CallManager extends Engine\Controller
 	 */
 	public function createAction(int $type, string $provider, string $entityType, string $entityId, bool $joinExisting = false): ?array
 	{
+		// Checked before the lock and any lookup: an unsupported provider would be stored
+		// with the call and broadcast to clients that do not know the value.
+		if (!\Bitrix\Call\Call::isProviderSupported($provider))
+		{
+			$this->addInvalidProviderError();
+			return null;
+		}
+
 		$currentUserId = $this->getCurrentUser()->getId();
+
+		// Ahead of every lookup below: resolving a bare user id into a call entity creates the private
+		// chat of the two, so a refusal issued any later would already have left that chat behind.
+		if (!(new GuestCallPolicy())->canStartCallInEntity((int)$currentUserId, $entityType, $entityId))
+		{
+			$this->addError(new Error('Guests can only start a call in a chat of their own', 'guest_access_denied'));
+
+			return null;
+		}
 
 		$call = null;
 
@@ -133,6 +152,18 @@ class CallManager extends Engine\Controller
 			{
 				$isNew = true;
 
+				// Only starting a call follows the portal switch: the same action also joins a call already
+				// running in the chat ($joinExisting), which is why the check sits here and not in a prefilter.
+				if (!(new GuestCallPolicy())->canStartCall((int)$currentUserId))
+				{
+					$this->addError(
+						new Error('Starting a call is not available for guest users on this portal', 'guest_access_denied')
+					);
+					Application::getConnection()->unlock($lockName);
+
+					return null;
+				}
+
 				// Terminate any stuck 1-1 calls of the initiator before creating a new one.
 				// Skipped when the target is already known to be busy: in that case we only
 				// create a technical "busy" call and return user_is_busy, so cleaning up the
@@ -221,6 +252,16 @@ class CallManager extends Engine\Controller
 	}
 
 	/**
+	 * The provider travels from the request into the stored call and into the pull event,
+	 * so an unknown one is refused before anything is written. All three actions that take
+	 * a provider answer with the same code and message.
+	 */
+	private function addInvalidProviderError(): void
+	{
+		$this->addError(new Error("Invalid provider", "invalid_provider"));
+	}
+
+	/**
 	 * @param \Bitrix\Call\Call $call
 	 * @param bool $isNew
 	 * @return array{call: array, connectionData: array, users: array, userData: array, publicChannels: array, logToken: string, isNew: bool}
@@ -275,6 +316,14 @@ class CallManager extends Engine\Controller
 	 */
 	public function createChildCallAction(int $parentId, string $newProvider, array $newUsers): ?array
 	{
+		// makeClone() keeps the inherited provider only for null, so any other value from
+		// the request is written to the child call as is.
+		if (!\Bitrix\Call\Call::isProviderSupported($newProvider))
+		{
+			$this->addInvalidProviderError();
+			return null;
+		}
+
 		$parentCall = Registry::getCallWithId($parentId);
 		if (!$parentCall)
 		{
@@ -329,6 +378,15 @@ class CallManager extends Engine\Controller
 	 */
 	public function tryJoinCallAction(int $type, string $provider, string $entityType, string $entityId): ?array
 	{
+		// An empty provider is rejected here, unlike Controller\Call::tryJoinCallAction: there the
+		// provider arrives in a hydrated DTO defaulting to '', so '' means the field never arrived.
+		// Here $provider is a required parameter with no default, so '' is a value the caller sent.
+		if (!\Bitrix\Call\Call::isProviderSupported($provider))
+		{
+			$this->addInvalidProviderError();
+			return null;
+		}
+
 		$call = CallFactory::searchActive($type, $provider, $entityType, $entityId);
 		if (!$call)
 		{
@@ -465,6 +523,14 @@ class CallManager extends Engine\Controller
 		if (!$this->checkCallAccess($call, $currentUserId))
 		{
 			Application::getConnection()->unlock($lockName);
+			return null;
+		}
+
+		if (!(new GuestCallPolicy())->canInviteUsersNow((int)$currentUserId, $call->getChatId(), $userIds))
+		{
+			Application::getConnection()->unlock($lockName);
+			$this->addError(new Error('Guests can only call members of their own chat', 'guest_access_denied'));
+
 			return null;
 		}
 
@@ -666,6 +732,17 @@ class CallManager extends Engine\Controller
 	}
 
 	/**
+	 * Device-scoped ringing is a private 1-1 concern only. Group calls are created
+	 * with TYPE_INSTANT too, so the call type is not a reliable 1-1 signal — the
+	 * scope is the privacy of the associated chat. Mirrors Controller\Call.
+	 */
+	protected function isDeviceScopedCall(\Bitrix\Call\Call $call): bool
+	{
+		// Thin wrapper over the canonical domain predicate (kept as a test seam).
+		return $call->isDeviceScopedRinging();
+	}
+
+	/**
 	 * @restMethod call.CallManager.decline
 	 * @param int $callId
 	 * @param int $callInstanceId
@@ -736,6 +813,35 @@ class CallManager extends Engine\Controller
 			Application::getConnection()->unlock($lockName);
 			$this->addError(new Error("Can not decline in {$callUser->getState()} user state", "wrong_user_state"));
 			return null;
+		}
+
+		// Device-aware decline for private 1-1 calls (parity with the JWT
+		// transport): drop the declining device from the ringing registry and,
+		// while the user still has other fresh ringing devices, stop here — the
+		// CallUser stays CALLING, no hangup broadcast and no finish. Empty/unknown
+		// registry (older clients) is a no-op -> legacy decline -> finish. Group
+		// calls (TYPE_INSTANT is not a 1-1 signal) are decided by chat privacy.
+		$callInstanceIdStr = (string)$callInstanceId;
+		if ($this->isDeviceScopedCall($call) && $callInstanceIdStr !== '')
+		{
+			// The legacy transport releases $lockName manually at each return, so a
+			// storage exception inside remove() must not leave the named lock held
+			// until the DB session ends (blocking parallel decline/register).
+			try
+			{
+				$hasFreshDevices = (new RingingDeviceRegistry())->remove($callId, $currentUserId, $callInstanceIdStr);
+			}
+			catch (\Throwable $exception)
+			{
+				Application::getConnection()->unlock($lockName);
+				throw $exception;
+			}
+
+			if ($hasFreshDevices)
+			{
+				Application::getConnection()->unlock($lockName);
+				return null;
+			}
 		}
 
 		if ($code === 486)
@@ -1125,6 +1231,7 @@ class CallManager extends Engine\Controller
 
 		$committedHere = false;
 		$sendRecoveryFinish = false;
+		$returnLiveState = false;
 		try
 		{
 			Registry::clearCache($call->getId());
@@ -1144,6 +1251,15 @@ class CallManager extends Engine\Controller
 				$call->setActionUserId($currentUserId);
 				$sendRecoveryFinish = true;
 			}
+			elseif ($silent && $this->hasActiveUsers($call))
+			{
+				// Advisory silent finish (stuck-call recovery): the call is still live,
+				// so one stuck client must not tear it down for everyone. Skip the
+				// FINISHED commit and its broadcast; the live call state is returned
+				// after unlock (see below), so this hot, repeatable path holds the lock
+				// only for the state read and the gate decision.
+				$returnLiveState = true;
+			}
 			else
 			{
 				$call
@@ -1157,6 +1273,20 @@ class CallManager extends Engine\Controller
 		finally
 		{
 			Application::getConnection()->unlock($lockName);
+		}
+
+		if ($returnLiveState)
+		{
+			// Advisory silent finish on a live call: build the response off-lock (the
+			// live state was already read under the lock) and return without side
+			// effects or Recent cache churn, since nothing changed. Building the
+			// payload outside the critical section keeps this repeatable path from
+			// holding the shared call_state lock while it renders connection data.
+			return [
+				'call' => $call->toArray($currentUserId),
+				'connectionData' => $call->getConnectionData($currentUserId),
+				'logToken' => $call->getLogToken($currentUserId),
+			];
 		}
 
 		// Side effects run after unlock and only when this request performed the
@@ -1470,6 +1600,31 @@ class CallManager extends Engine\Controller
 			],
 			'reportConnectionStatus' => [
 				'+prefilters' => [new Engine\ActionFilter\CloseSession()],
+			],
+			// Open to a guest over REST, where the Csrf filter of the core does not run and the guest session
+			// is recognised by its cookie alone (@see ActionFilter\SameOrigin). POST takes away the GET
+			// navigation, Origin takes away the cross-site form; native clients send no Origin and pass.
+			// The guest checks of this action are inside createAction: it also joins a running call, which
+			// the portal switch does not govern.
+			'create' => [
+				'+prefilters' => [
+					new Engine\ActionFilter\HttpMethod([Engine\ActionFilter\HttpMethod::METHOD_POST]),
+					new ActionFilter\SameOrigin(),
+				],
+			],
+			// Open to a guest over REST on the same terms as create above. POST is what takes away the
+			// top-level GET navigation: a browser sends no Origin on one, so SameOrigin alone would let it
+			// through (@see ActionFilter\SameOrigin).
+			'invite' => [
+				'+prefilters' => [
+					new Engine\ActionFilter\HttpMethod([Engine\ActionFilter\HttpMethod::METHOD_POST]),
+					new ActionFilter\SameOrigin(),
+				],
+			],
+			// A guest never pulls anyone else into a call: stated at the action, because the guest allow-list
+			// of the REST API does not cover ajax.php (@see ActionFilter\DenyGuest).
+			'createChildCall' => [
+				'+prefilters' => [new ActionFilter\DenyGuest()],
 			],
 		];
 	}

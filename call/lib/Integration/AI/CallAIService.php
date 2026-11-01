@@ -437,6 +437,27 @@ final class CallAIService
 	}
 
 	/**
+	 * Latest AI task id for the call (any sense type) as a claim discriminator that tells
+	 * one analysis attempt from the next. Every restart adds a fresh task: a full restart a
+	 * new TRANSCRIBE task, a dependent-only restart (transcription already done) new
+	 * OVERVIEW/SUMMARY tasks. Keying on the newest id — not the TRANSCRIBE one, which is
+	 * reused on a dependent-only restart — makes the discriminator advance on every attempt,
+	 * so a new attempt's AI_START wins its own send-guard claim instead of being muted by the
+	 * previous attempt's live claim.
+	 */
+	public function getCurrentAnalysisAttemptId(int $callId): ?string
+	{
+		$row = CallAITaskTable::getList([
+			'select' => ['ID'],
+			'filter' => ['=CALL_ID' => $callId],
+			'order' => ['ID' => 'DESC'],
+			'limit' => 1,
+		])?->fetch();
+
+		return $row ? (string)$row['ID'] : null;
+	}
+
+	/**
 	 * Success AI callback handler.
 	 * @see \Bitrix\AI\QueueJob::execute
 	 * @event ai:onQueueJobExecute

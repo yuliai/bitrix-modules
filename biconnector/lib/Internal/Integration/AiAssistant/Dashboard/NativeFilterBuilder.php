@@ -29,39 +29,43 @@ final class NativeFilterBuilder
 	 * @param array $filters DSL filter list.
 	 * @param int[] $defaultChartsInScope Fallback chart IDs to apply each filter to
 	 *                                    when the filter itself doesn't specify chartIds.
+	 * @param (\Closure(string): \Throwable)|null $refusal What a malformed filter is thrown as, given its
+	 *     description; McpException by default.
 	 *
 	 * @return array native_filter_configuration[] for json_metadata.
 	 *
-	 * @throws McpException on invalid input.
+	 * @throws McpException on invalid input, unless another refusal is given.
 	 */
-	public static function build(array $filters, array $defaultChartsInScope = []): array
+	public static function build(array $filters, array $defaultChartsInScope = [], ?\Closure $refusal = null): array
 	{
+		$refusal ??= static fn(string $message): \Throwable => new McpException($message);
+
 		$result = [];
 		foreach ($filters as $idx => $filter)
 		{
-			$result[] = self::buildOne($filter, $idx, $defaultChartsInScope);
+			$result[] = self::buildOne($filter, $idx, $defaultChartsInScope, $refusal);
 		}
 
 		return $result;
 	}
 
-	private static function buildOne(mixed $filter, int $idx, array $defaultChartsInScope): array
+	private static function buildOne(mixed $filter, int $idx, array $defaultChartsInScope, \Closure $refusal): array
 	{
 		if (!is_array($filter))
 		{
-			throw new McpException('filters[' . $idx . '] must be an object.');
+			throw $refusal('filters[' . $idx . '] must be an object.');
 		}
 
 		$name = trim((string)($filter['name'] ?? ''));
 		if ($name === '')
 		{
-			throw new McpException('filters[' . $idx . '].name is required.');
+			throw $refusal('filters[' . $idx . '].name is required.');
 		}
 
 		$alias = (string)($filter['filterType'] ?? '');
 		if (!isset(self::FILTER_TYPE_MAP[$alias]))
 		{
-			throw new McpException(
+			throw $refusal(
 				'filters[' . $idx . '].filterType must be one of: '
 				. implode(', ', self::FILTER_TYPES) . '.'
 			);
@@ -72,6 +76,7 @@ final class NativeFilterBuilder
 			$filter['chartIds'] ?? null,
 			$idx,
 			$defaultChartsInScope,
+			$refusal,
 		);
 
 		// Stable id derived from filter identity so re-running set_dashboard_content
@@ -139,13 +144,13 @@ final class NativeFilterBuilder
 		$column = trim((string)($filter['column'] ?? ''));
 		if ($datasetId <= 0)
 		{
-			throw new McpException(
+			throw $refusal(
 				'filters[' . $idx . '].datasetId is required for filterType=' . $alias . '.'
 			);
 		}
 		if ($column === '')
 		{
-			throw new McpException(
+			throw $refusal(
 				'filters[' . $idx . '].column is required for filterType=' . $alias . '.'
 			);
 		}
@@ -176,7 +181,7 @@ final class NativeFilterBuilder
 	/**
 	 * @return int[]
 	 */
-	private static function normalizeChartIds(mixed $raw, int $idx, array $fallback): array
+	private static function normalizeChartIds(mixed $raw, int $idx, array $fallback, \Closure $refusal): array
 	{
 		if ($raw === null)
 		{
@@ -185,7 +190,7 @@ final class NativeFilterBuilder
 
 		if (!is_array($raw))
 		{
-			throw new McpException('filters[' . $idx . '].chartIds must be an array of integers.');
+			throw $refusal('filters[' . $idx . '].chartIds must be an array of integers.');
 		}
 
 		$result = [];
@@ -194,7 +199,7 @@ final class NativeFilterBuilder
 			$id = (int)$value;
 			if ($id <= 0)
 			{
-				throw new McpException(
+				throw $refusal(
 					'filters[' . $idx . '].chartIds[' . $subIdx . '] must be a positive integer.'
 				);
 			}

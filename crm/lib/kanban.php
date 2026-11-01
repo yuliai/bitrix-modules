@@ -492,6 +492,7 @@ abstract class Kanban
 					'id' => $status['STATUS_ID'] ?? null,
 					'name' => $status['NAME'] ?? null,
 					'color' => $this->getColumnColor($status),
+					'description' => (string)($status['DESCRIPTION'] ?? ''),
 					'type' => $status['PROGRESS_TYPE'] ?? null,
 					'sort' => $sort,
 					'count' => 0,
@@ -542,13 +543,16 @@ abstract class Kanban
 			// a separate ORM/legacy query for column sums and counts; without applying the
 			// filter here, Dynamic getList() crashes with "Unknown field definition
 			// RELATED_ENTITIES" and legacy entities lose the EXISTS predicate from totals.
-			$totalsParameters = ['filter' => $filter, 'runtime' => $runtime];
-			$this->applyRelatedEntitiesFilter($totalsParameters);
-			$filter = $totalsParameters['filter'];
-			$runtime = $totalsParameters['runtime'] ?? $runtime;
+			if (!($params['skipTotalSums'] ?? false))
+			{
+				$totalsParameters = ['filter' => $filter, 'runtime' => $runtime];
+				$this->applyRelatedEntitiesFilter($totalsParameters);
+				$filter = $totalsParameters['filter'];
+				$runtime = $totalsParameters['runtime'] ?? $runtime;
 
-			//get sums and counts
-			$this->entity->fillStageTotalSums($filter, $runtime, $columns);
+				//get sums and counts
+				$this->entity->fillStageTotalSums($filter, $runtime, $columns);
+			}
 		}
 
 		if ($withoutCache)

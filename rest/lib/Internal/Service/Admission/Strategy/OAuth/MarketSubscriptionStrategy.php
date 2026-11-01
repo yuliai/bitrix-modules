@@ -9,9 +9,9 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Infrastructure\Market\MarketSubscription;
 use Bitrix\Rest\Internal\Exception\Payment\MarketSubscriptionRequiredException;
 use Bitrix\Rest\Internal\Exception\Payment\RestUnavailableException;
+use Bitrix\Rest\Internal\Integration\Bitrix24\TariffAccessService;
 use Bitrix\Rest\Internal\Service\Admission\DenialStrategyInterface;
 use Bitrix\Rest\Internal\Service\Admission\Verdict;
-use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
 use Bitrix\Rest\Marketplace\Client;
 use Bitrix\Rest\Marketplace\Immune;
 

@@ -7,11 +7,15 @@ namespace Bitrix\BIConnectorMobile\Controller;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Public\Provider\SupersetDashboardListProvider;
 use Bitrix\BIConnector\Superset\ActionFilter\BIConstructorAccess;
+use Bitrix\BIConnector\Superset\Filter\DashboardFilterBuilder;
 use Bitrix\BIConnectorMobile\ActionFilter\MobileBIFeatureAccess;
 use Bitrix\BIConnectorMobile\Dto\DashboardListFilter;
+use Bitrix\BIConnectorMobile\Filter\BiDashboardListContext;
+use Bitrix\BIConnectorMobile\Public\Feature\UnifiedFiltersFlag;
 use Bitrix\BIConnectorMobile\Service\DashboardDescriptionService;
 use Bitrix\BIConnectorMobile\Service\DashboardPreparationService;
 use Bitrix\BIConnectorMobile\Service\DashboardViewStateService;
+use Bitrix\Main\Config;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\CurrentUser;
@@ -19,8 +23,13 @@ use Bitrix\Main\File\Internal\FileVersionTable;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\UI\PageNavigation;
+use Bitrix\Mobile\Filter\AppliedFilterPointer;
+use Bitrix\Mobile\Filter\FilterRequest;
 use Bitrix\Mobile\UI\StatefulList\BaseController;
 use Bitrix\MobileApp\Janative\Manager;
+use Bitrix\BIConnector\Public\Services\Dashboard\MobileDashboardPinService;
+use Bitrix\BIConnector\Superset\UI\DashboardManager;
+use Bitrix\BIConnector\Configuration\Feature;
 
 Loader::requireModule('mobile');
 Loader::requireModule('mobileapp');
@@ -50,7 +59,7 @@ class Dashboard extends BaseController
 
 		// Every action of the controller answers a screen and writes nothing into the session. Holding the
 		// session lock while the report is prepared would freeze the whole application for the user.
-		foreach (['getList', 'getViewState', 'getDescription', 'prepareView', 'subscribeToUpdates'] as $action)
+		foreach (['getList', 'getViewState', 'getDescription', 'prepareView', 'subscribeToUpdates', 'pin', 'unpin'] as $action)
 		{
 			$actions[$action] = [
 				'+prefilters' => [
@@ -60,6 +69,85 @@ class Dashboard extends BaseController
 		}
 
 		return $actions;
+	}
+
+	public function pinAction(
+		int $dashboardId,
+		DashboardListFilter $filter,
+		CurrentUser $user
+	): array
+	{
+		return $this->changePinState(
+			$dashboardId,
+			$filter,
+			$user,
+			pin: true,
+		);
+	}
+
+	public function unpinAction(
+		int $dashboardId,
+		DashboardListFilter $filter,
+		CurrentUser $user
+	): array
+	{
+		return $this->changePinState(
+			$dashboardId,
+			$filter,
+			$user,
+			pin: false,
+		);
+	}
+
+	private function changePinState(
+		int $dashboardId,
+		DashboardListFilter $filter,
+		CurrentUser $user,
+		bool $pin
+	): array
+	{
+		$userId = (int)$user->getId();
+		$service = new MobileDashboardPinService();
+
+		$result = $pin
+			? $service->pin($dashboardId, $userId)
+			: $service->unpin($dashboardId, $userId)
+		;
+
+		$data = $result->getData();
+
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return [
+				'item' => null,
+				'pinnedDashboardIds' => $data['pinnedDashboardIds'] ?? [],
+			];
+		}
+
+		if (!empty($data['changed']))
+		{
+			DashboardManager::notifyDashboardListChanged();
+		}
+
+		$item = (new SupersetDashboardListProvider())->getMobileDashboardItem(
+			$dashboardId,
+			$userId,
+			$filter->searchString,
+			$filter->groupId > 0 ? $filter->groupId : null,
+			$filter->scopeCode !== '' ? $filter->scopeCode : null,
+		);
+
+		if ($item !== null)
+		{
+			$item = $this->fillAuthorNames([$item])[0] ?? null;
+		}
+
+		return [
+			'item' => $item,
+			'pinnedDashboardIds' => $data['pinnedDashboardIds'] ?? [],
+		];
 	}
 
 	protected function getDefaultPreFilters(): array
@@ -98,13 +186,68 @@ class Dashboard extends BaseController
 
 	public function getListAction(DashboardListFilter $filter, PageNavigation $pageNavigation): array
 	{
-		$result = (new SupersetDashboardListProvider())->getList(
+		$userId = (int)CurrentUser::get()->getId();
+		$presetsEnabled = Loader::includeModule('biconnector')
+			&& Feature::isDashboardFilterPresetsEnabled();
+
+		$presetFilter = [];
+		$staleConditions = [];
+
+		// The filter belongs to the root list alone. A zone host shows the section it was opened for,
+		// and a folder shows what it holds: the pointer of the applied filter is shared with the root
+		// list, so reading it here would narrow a folder by conditions the user never applied in it.
+		if ($presetsEnabled && $filter->scopeCode === '' && $filter->groupId === 0)
+		{
+			$listContext = new BiDashboardListContext();
+			$options = $listContext->getOptions();
+
+			$presetId = $filter->presetId;
+			$requestNamesForm = false;
+
+			if (FilterRequest::usesStoredFilter($presetId, Config\Feature::isEnabled(UnifiedFiltersFlag::class)))
+			{
+				// A screen that has not read its filter state yet names no preset, so the list is
+				// opened under the filter the session already holds - the last one applied here, or
+				// the default preset while the session holds none - instead of showing everything.
+				// The pointer belongs to the session, while the presets it names are shared with the
+				// web. It is read as it stands: `default_filter` names the form and no conditions,
+				// while resolving it into the form would revive whatever the shared temporary preset
+				// still keeps - conditions the user has already dropped elsewhere.
+				$presetId = (string)$options->getCurrentFilterId();
+			}
+			else
+			{
+				$presetId = FilterRequest::resolvePresetId($presetId);
+				$requestNamesForm = ($presetId === FilterRequest::TMP_PRESET_ID);
+			}
+
+			// A request naming the form is answered by the values it carries, and a form with none of
+			// them is a form the user has cleared: reading the stored ones instead brings back the
+			// conditions the phone has just dropped.
+			$settings = $requestNamesForm
+				? FilterRequest::buildTmpPresetSettings(['tmpFields' => $filter->tmpFields])
+				: FilterRequest::buildSavedPresetSettings($presetId, $options->getFilterSettings($presetId) ?: [])
+			;
+
+			AppliedFilterPointer::forList($options)->rememberSettings($presetId, $settings);
+
+			$built = (new DashboardFilterBuilder($userId))->build(
+				$settings['fields'] ?? [],
+				$filter->searchString,
+			);
+			$presetFilter = $built->ormFilter;
+			$staleConditions = $this->describeStaleConditions($built->stale, $listContext);
+		}
+
+		$result = (new SupersetDashboardListProvider())->getMobileList(
+			$userId,
 			$filter->searchString,
 			$filter->groupId > 0 ? $filter->groupId : null,
 			$pageNavigation->getLimit(),
 			$pageNavigation->getOffset(),
 			withTotal: false,
 			scopeCode: $filter->scopeCode !== '' ? $filter->scopeCode : null,
+			presetFilter: $presetFilter,
 		);
 
 		return [
@@ -115,7 +258,29 @@ class Dashboard extends BaseController
 			// never reaches the map, and the device keeps opening the report by the previous script. The list
 			// asks for its data on every entry, so the version stays current.
 			'detailComponentVersion' => Manager::getComponentVersion(self::DETAIL_COMPONENT),
+			'isPinningEnabled' => Feature::isMobileDashboardPinningEnabled(),
+			'isFilterPresetsEnabled' => $presetsEnabled,
+			'staleConditions' => $staleConditions,
 		];
+	}
+
+	private function describeStaleConditions(array $stale, BiDashboardListContext $listContext): array
+	{
+		if (empty($stale))
+		{
+			return [];
+		}
+
+		$fields = [];
+		foreach ($listContext->getFieldArrays() as $field)
+		{
+			$fields[$field['id']] = $field['name'] ?? $field['id'];
+		}
+
+		return array_map(
+			static fn(array $condition): array => $condition + ['fieldName' => $fields[$condition['fieldId']] ?? ''],
+			$stale,
+		);
 	}
 
 	/**
@@ -125,7 +290,10 @@ class Dashboard extends BaseController
 	 */
 	public function getViewStateAction(int $dashboardId): array
 	{
-		return (new DashboardViewStateService())->resolve($dashboardId)->toArray();
+		$state = (new DashboardViewStateService())->resolve($dashboardId)->toArray();
+		$state['isPinningEnabled'] = Feature::isMobileDashboardPinningEnabled();
+
+		return $state;
 	}
 
 	/**

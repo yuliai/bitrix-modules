@@ -2,6 +2,7 @@
 
 namespace Bitrix\StaffTrackMobile\Internal;
 
+use Bitrix\Main\Config\Feature as CoreFeature;
 use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\Localization\Loc;
@@ -13,8 +14,9 @@ use Bitrix\MobileApp\Janative\Manager;
 use Bitrix\StaffTrack\Feature as StaffTrackFeature;
 use Bitrix\StaffTrack\Public\Provider\CheckInSettingsProvider;
 use Bitrix\StaffTrackMobile\Public\Features\CheckInFeature;
-use Bitrix\Timeman\V2\Public\Provider\FullReportProvider;
+use Bitrix\StaffTrackMobile\Public\Features\OfficesTabFlag;
 use Bitrix\TimemanMobile\Public\Features\WorkReportsFeature;
+use Bitrix\TimemanMobile\Public\Features\WorkReportsWithAiFeature;
 use Bitrix\Main\Config\Option;
 
 class CheckInTab implements Tabable
@@ -23,6 +25,8 @@ class CheckInTab implements Tabable
 	private ?array $tabItems = null;
 	private ?array $timemanDependentTabs = null;
 	private ?bool $isTimemanAvailable = null;
+	private ?bool $isNewCheckInGeneration = null;
+	private ?bool $isGeoFeaturesAvailableByRegion = null;
 	private ?CheckInSettingsProvider $settingsProvider = null;
 
 	public static function onBeforeTabsGet(): array
@@ -63,6 +67,13 @@ class CheckInTab implements Tabable
 			'params' => [
 				'id' => 'stafftrack_check_in',
 				'onclick' => Utils::getComponentJSCode($this->getDataInternal()['component']),
+				'analytics' => [
+					'tool' => 'checkin',
+					'category' => 'shift',
+					'event' => 'open_section',
+					'c_section' => 'ava_menu',
+					'c_element' => 'tools_block',
+				],
 			],
 			'tag' => 'new',
 		];
@@ -131,6 +142,8 @@ class CheckInTab implements Tabable
 		$this->tabItems = null;
 		$this->timemanDependentTabs = null;
 		$this->isTimemanAvailable = null;
+		$this->isNewCheckInGeneration = null;
+		$this->isGeoFeaturesAvailableByRegion = null;
 		$this->settingsProvider = null;
 	}
 
@@ -158,7 +171,7 @@ class CheckInTab implements Tabable
 			? []
 			: array_column($this->getTimemanDependentTabs(), 'id');
 
-		$componentCode = StaffTrackFeature::isCheckInRolloutEnabled((int)$this->context->userId)
+		$componentCode = $this->isNewCheckInGeneration()
 			? 'stafftrack.check-in-v3.tabs'
 			: 'stafftrack.check-in-v2.tabs';
 
@@ -194,7 +207,7 @@ class CheckInTab implements Tabable
 		if ($this->tabItems === null)
 		{
 			$this->tabItems = array_merge(
-				array_filter([$this->getShiftsTab()]),
+				array_filter([$this->getShiftsTab(), $this->getOfficesTab()]),
 				$this->getTimemanDependentTabs()
 			);
 		}
@@ -204,7 +217,7 @@ class CheckInTab implements Tabable
 
 	private function hasVisibleTabs(): bool
 	{
-		return StaffTrackFeature::isGeoFeaturesAvailableByRegion()
+		return $this->isGeoFeaturesAvailableByRegion()
 			|| $this->hasTimemanDependentTabs();
 	}
 
@@ -252,27 +265,18 @@ class CheckInTab implements Tabable
 	{
 		if (
 			!Feature::isEnabled(WorkReportsFeature::class)
-			|| !Loader::includeModule('timeman')
+			|| !Feature::isEnabled(WorkReportsWithAiFeature::class)
 		)
 		{
 			return false;
 		}
 
-		$provider = new FullReportProvider();
-		if (!method_exists($provider, 'getReportToSend'))
-		{
-			return false;
-		}
-
-		return $provider
-			->getReportToSend($this->context->userId, true, true)
-			->isReadyForSubmit === true
-		;
+		return $this->getSettingsProvider()->hasReportReadyForSubmit();
 	}
 
 	private function getShiftsTab(): array
 	{
-		if (!StaffTrackFeature::isGeoFeaturesAvailableByRegion())
+		if (!$this->isGeoFeaturesAvailableByRegion())
 		{
 			return [];
 		}
@@ -290,6 +294,48 @@ class CheckInTab implements Tabable
 				],
 			],
 		];
+	}
+
+	private function getOfficesTab(): array
+	{
+		if (
+			!$this->isOfficesTabFlagEnabled()
+			|| !$this->isNewCheckInGeneration()
+			|| !$this->isGeoFeaturesAvailableByRegion()
+		)
+		{
+			return [];
+		}
+
+		return [
+			'id' => 'offices',
+			'title' => Loc::getMessage('STAFFTRACKMOBILE_TAB_NAVIGATION_TAB_OFFICES'),
+			'disableScroll' => true,
+			'widget' => [
+				'name' => 'layout',
+				'code' => 'offices',
+				'settings' => [
+					'objectName' => 'layout',
+				],
+			],
+		];
+	}
+
+	protected function isOfficesTabFlagEnabled(): bool
+	{
+		return CoreFeature::isEnabled(OfficesTabFlag::class);
+	}
+
+	protected function isNewCheckInGeneration(): bool
+	{
+		return $this->isNewCheckInGeneration ??= StaffTrackFeature::isCheckInRolloutEnabled(
+			(int)$this->context->userId
+		);
+	}
+
+	protected function isGeoFeaturesAvailableByRegion(): bool
+	{
+		return $this->isGeoFeaturesAvailableByRegion ??= StaffTrackFeature::isGeoFeaturesAvailableByRegion();
 	}
 
 	private function getWorkReportsTab(bool $hasPendingDraftReport = false): array

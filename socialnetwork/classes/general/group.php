@@ -11,6 +11,8 @@ use Bitrix\Main\Text\Emoji;
 use Bitrix\Socialnetwork\FeatureTable;
 use Bitrix\Socialnetwork\Helper\Workgroup;
 use Bitrix\Socialnetwork\Helper\Path;
+use Bitrix\Socialnetwork\V2\Internal\Cache\DeferredCacheFeature;
+use Bitrix\Socialnetwork\V2\Internal\Cache\DeferredTagCleaner;
 use Bitrix\Socialnetwork\Internals\Registry\GroupRegistry;
 use Bitrix\Socialnetwork\WorkgroupTable;
 use Bitrix\Socialnetwork\Item\Workgroup\AvatarType;
@@ -488,9 +490,18 @@ class CAllSocNetGroup
 			if(defined("BX_COMP_MANAGED_CACHE"))
 			{
 				$CACHE_MANAGER->ClearByTag("sonet_user2group_G".$ID);
-				$CACHE_MANAGER->ClearByTag("sonet_user2group");
 				$CACHE_MANAGER->ClearByTag("sonet_group_".$ID);
-				$CACHE_MANAGER->ClearByTag("sonet_group");
+
+				if (DeferredCacheFeature::isOn())
+				{
+					DeferredTagCleaner::getInstance()->clearByTag('sonet_user2group');
+					DeferredTagCleaner::getInstance()->clearByTag('sonet_group');
+				}
+				else
+				{
+					$CACHE_MANAGER->ClearByTag("sonet_user2group");
+					$CACHE_MANAGER->ClearByTag("sonet_group");
+				}
 			}
 		}
 

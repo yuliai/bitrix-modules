@@ -11,6 +11,8 @@ use Bitrix\Crm\V2\Internal\Entity\WebForm\Embedding\ViewOptions;
 use Bitrix\Crm\V2\Internal\Entity\WebForm\Embedding\ViewSettings;
 use Bitrix\Crm\WebForm\Internals\FormTable;
 use Bitrix\Crm\WebForm\Options\Dictionary;
+use Bitrix\Crm\WebForm\Telemetry\SourceContextSigner;
+use Bitrix\Crm\WebForm\Telemetry\SubmissionClassifier;
 
 /**
  * @internal
@@ -163,10 +165,15 @@ final class EmbeddingRepository
 		}
 
 		$codes = [];
+		$telemetrySign = (new SourceContextSigner())->sign($formId, SubmissionClassifier::SOURCE_SITE);
 		foreach ([EmbeddingVariant::INLINE, EmbeddingVariant::CLICK, EmbeddingVariant::AUTO] as $variant)
 		{
 			$codes[$variant] = $webpack
-				->configureFormEmbeddedScript(['action' => $variant, 'sec' => $securityCode])
+				->configureFormEmbeddedScript([
+					'action' => $variant,
+					'sec' => $securityCode,
+					'telemetrySign' => $telemetrySign,
+				])
 				->getEmbeddedScript()
 			;
 		}

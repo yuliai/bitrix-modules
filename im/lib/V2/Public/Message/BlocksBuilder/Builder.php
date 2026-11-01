@@ -131,10 +131,18 @@ class Builder
 	public function addAiAssistantSearchBlock(
 		string $title,
 		string $text,
-		?string $id = null
+		?string $id = null,
+		?int $progressValue = null,
+		?Color $progressColor = null
 	): self
 	{
-		$this->blocks[] = BlockItem::createAiAssistantSearchBlock($title, $text, $id)->blockData;
+		$this->blocks[] = BlockItem::createAiAssistantSearchBlock(
+			$title,
+			$text,
+			$id,
+			$progressValue,
+			$progressColor
+		)->blockData;
 
 		return $this;
 	}
@@ -162,6 +170,26 @@ class Builder
 		return $this;
 	}
 
+	public function addFileBlock(
+		array $fileIds,
+		?string $id = null
+	): self
+	{
+		$this->blocks[] = BlockItem::createFileBlock($fileIds, $id)->blockData;
+
+		return $this;
+	}
+
+	public function addAudioBlock(
+		int $fileId,
+		?string $id = null
+	): self
+	{
+		$this->blocks[] = BlockItem::createAudioBlock($fileId, $id)->blockData;
+
+		return $this;
+	}
+
 	public function addFormBlock(
 		FormFields $fields,
 		Buttons $buttons,
@@ -169,6 +197,16 @@ class Builder
 	): self
 	{
 		$this->blocks[] = BlockItem::createFormBlock($fields, $buttons, $id)->blockData;
+
+		return $this;
+	}
+
+	/**
+	 * Adds a block item prepared elsewhere, e.g. a service one: BlockItem::createTextBlock(...)->asService().
+	 */
+	public function addBlock(BlockItem $blockItem): self
+	{
+		$this->blocks[] = $blockItem->blockData;
 
 		return $this;
 	}
